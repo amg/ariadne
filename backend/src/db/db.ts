@@ -7,7 +7,7 @@ import type { Database } from './types';
 
 // Connection singleton
 export const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || '127.0.0.1',
   database: process.env.DB_NAME || 'chatbot',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgrespassword',
