@@ -1,8 +1,8 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageSquare, PlusCircle, Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
-import { ScrollArea } from './components/ui/scroll-area';
 
 type Thread = { id: string; title: string; created_at: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; created_at: string };
