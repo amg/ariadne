@@ -1,6 +1,8 @@
 import { MessageSquare, PlusCircle, Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import './App.css';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { ScrollArea } from './components/ui/scroll-area';
 
 type Thread = { id: string; title: string; created_at: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; created_at: string };
@@ -67,51 +69,71 @@ function App() {
   };
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <button className="new-chat-btn" onClick={createThread} type="button">
-          <PlusCircle size={16} /> New Chat
-        </button>
-        <div className="thread-list">
-          {threads.map((thread) => (
-            <button
-              key={thread.id}
-              className={`thread-item ${thread.id === activeThreadId ? 'active' : ''}`}
-              onClick={() => setActiveThreadId(thread.id)}
-              type="button"
-            >
-              <MessageSquare size={16} />
-              {thread.title}
-            </button>
-          ))}
-        </div>
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+      <aside className="flex w-64 flex-col border-r bg-muted/20 p-4">
+        <Button onClick={createThread} className="mb-4 flex items-center gap-2">
+          <PlusCircle className="h-4 w-4" /> New Chat
+        </Button>
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col gap-2">
+            {threads.map((thread) => (
+              <Button
+                key={thread.id}
+                variant={thread.id === activeThreadId ? 'secondary' : 'ghost'}
+                className="justify-start gap-2"
+                onClick={() => setActiveThreadId(thread.id)}
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span className="truncate">{thread.title}</span>
+              </Button>
+            ))}
+          </div>
+        </ScrollArea>
       </aside>
 
-      <main className="chat-area">
+      <main className="flex flex-1 flex-col bg-background">
         {activeThreadId ? (
           <>
-            <div className="message-list">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`message-bubble ${msg.role}`}>
-                  {msg.content}
-                </div>
-              ))}
-            </div>
-            <div className="input-area">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Type your message..."
-              />
-              <button onClick={sendMessage} type="button">
-                <Send size={16} />
-              </button>
+            <ScrollArea className="flex-1 p-4">
+              <div className="flex flex-col gap-4">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`max-w-[70%] rounded-lg p-3 ${
+                      msg.role === 'user'
+                        ? 'self-end bg-primary text-primary-foreground'
+                        : 'self-start bg-muted text-foreground'
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+            <div className="border-t bg-background p-4">
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  sendMessage();
+                }}
+              >
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Type your message..."
+                  className="flex-1"
+                />
+                <Button type="submit" size="icon">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </form>
             </div>
           </>
         ) : (
-          <div className="empty-state">Select or create a chat to begin.</div>
+          <div className="flex flex-1 items-center justify-center text-muted-foreground">
+            Select or create a chat to begin.
+          </div>
         )}
       </main>
     </div>
