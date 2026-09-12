@@ -9,6 +9,10 @@ app.register(cors, { origin: true });
 // Hardcoded user ID for MVP
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
 
+app.get('/api/health', async (_request, reply) => {
+  return reply.send({ status: 'ok', message: 'Chatbot API is running' });
+});
+
 app.get('/api/threads', async (_request, reply) => {
   const threads = await db
     .selectFrom('threads')
