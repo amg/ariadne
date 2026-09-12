@@ -1,101 +1,120 @@
-import { useState } from 'react';
-import heroImg from './assets/hero.png';
-import reactLogo from './assets/react.svg';
-import viteLogo from './assets/vite.svg';
+import { MessageSquare, PlusCircle, Send } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import './App.css';
 
+type Thread = { id: string; title: string; created_at: string };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; created_at: string };
+
+const API_BASE = 'http://localhost:3001/api';
+
 function App() {
-  const [count, setCount] = useState(0);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+
+  // Fetch threads on load
+  useEffect(() => {
+    fetch(`${API_BASE}/threads`)
+      .then((res) => res.json())
+      .then((data) => {
+        setThreads(data);
+        if (data.length > 0) setActiveThreadId(data[0].id);
+      });
+  }, []);
+
+  // Fetch messages when active thread changes
+  useEffect(() => {
+    if (!activeThreadId) return;
+    fetch(`${API_BASE}/threads/${activeThreadId}/messages`)
+      .then((res) => res.json())
+      .then((data) => setMessages(data));
+  }, [activeThreadId]);
+
+  const createThread = async () => {
+    const res = await fetch(`${API_BASE}/threads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New Chat' }),
+    });
+    const newThread = await res.json();
+    setThreads([newThread, ...threads]);
+    setActiveThreadId(newThread.id);
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || !activeThreadId) return;
+    const content = input;
+    setInput('');
+
+    // Optimistic UI update
+    const tempMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, tempMessage]);
+
+    const res = await fetch(`${API_BASE}/threads/${activeThreadId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    const data = await res.json();
+    setMessages((prev) => [...prev, data.message]);
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button type="button" className="counter" onClick={() => setCount((count) => count + 1)}>
-          Count is {count}
+    <div className="layout">
+      <aside className="sidebar">
+        <button className="new-chat-btn" onClick={createThread} type="button">
+          <PlusCircle size={16} /> New Chat
         </button>
-      </section>
-
-      <div className="ticks" />
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon" />
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank" rel="noreferrer">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank" rel="noreferrer">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+        <div className="thread-list">
+          {threads.map((thread) => (
+            <button
+              key={thread.id}
+              className={`thread-item ${thread.id === activeThreadId ? 'active' : ''}`}
+              onClick={() => setActiveThreadId(thread.id)}
+              type="button"
+            >
+              <MessageSquare size={16} />
+              {thread.title}
+            </button>
+          ))}
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon" />
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank" rel="noreferrer">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#github-icon" />
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank" rel="noreferrer">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#discord-icon" />
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank" rel="noreferrer">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#x-icon" />
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank" rel="noreferrer">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#bluesky-icon" />
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      </aside>
 
-      <div className="ticks" />
-      <section id="spacer" />
-    </>
+      <main className="chat-area">
+        {activeThreadId ? (
+          <>
+            <div className="message-list">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`message-bubble ${msg.role}`}>
+                  {msg.content}
+                </div>
+              ))}
+            </div>
+            <div className="input-area">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                placeholder="Type your message..."
+              />
+              <button onClick={sendMessage} type="button">
+                <Send size={16} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">Select or create a chat to begin.</div>
+        )}
+      </main>
+    </div>
   );
 }
 

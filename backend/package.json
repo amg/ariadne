@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "migrate": "tsx src/db/db.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

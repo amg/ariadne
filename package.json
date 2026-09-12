@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4"
+  },
+  "dependencies": {
+    "lucide-react": "^1.45.0"
   }
 }
