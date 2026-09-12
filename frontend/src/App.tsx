@@ -5,7 +5,7 @@ import './App.css';
 type Thread = { id: string; title: string; created_at: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; created_at: string };
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = '/api';
 
 function App() {
   const [threads, setThreads] = useState<Thread[]>([]);
