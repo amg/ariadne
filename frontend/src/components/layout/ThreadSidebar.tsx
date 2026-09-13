@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
-import { Ellipsis, Info, Pencil, Trash2 } from 'lucide-react';
+import { Ellipsis, Info, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 type Props = {
@@ -55,9 +55,19 @@ export default function ThreadSidebar({
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-muted/30 p-3">
-      <Button onClick={onNewChat} className="w-full">
-        New Chat
-      </Button>
+      <div className="flex items-center justify-between px-1">
+        <span className="text-sm font-medium text-muted-foreground">Chats</span>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onNewChat}
+          aria-label="New chat"
+          title="New chat"
+          className="h-8 w-8 rounded-md text-muted-foreground"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
       <div className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto">
         {threads.map((thread) => {
           const isActive = thread.id === activeThreadId;
@@ -68,7 +78,7 @@ export default function ThreadSidebar({
             <div
               key={thread.id}
               className={`group flex items-center gap-1 rounded-md pr-1 ${
-                isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                isActive ? 'bg-muted' : 'hover:bg-muted/60'
               }`}
             >
               {isEditing ? (
@@ -99,11 +109,7 @@ export default function ThreadSidebar({
                     type="button"
                     aria-label={`Rename ${title}`}
                     onClick={() => startEditing(thread)}
-                    className={`shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground group-focus-within:opacity-100 ${
-                      isActive
-                        ? 'hover:text-primary-foreground'
-                        : 'opacity-0 group-hover:opacity-100'
-                    }`}
+                    className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted/80 hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -112,11 +118,7 @@ export default function ThreadSidebar({
                       <button
                         type="button"
                         aria-label={`More options for ${title}`}
-                        className={`shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground group-focus-within:opacity-100 data-[state=open]:opacity-100 ${
-                          isActive
-                            ? 'hover:text-primary-foreground'
-                            : 'opacity-0 group-hover:opacity-100'
-                        }`}
+                        className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted/80 hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
                       >
                         <Ellipsis className="h-3.5 w-3.5" />
                       </button>
