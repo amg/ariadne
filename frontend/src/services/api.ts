@@ -40,6 +40,11 @@ export async function renameThread(threadId: string, title: string): Promise<Thr
   return res.json();
 }
 
+export async function deleteThread(threadId: string): Promise<void> {
+  const res = await fetch(`/api/threads/${threadId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
+}
+
 export async function fetchMessages(threadId: string): Promise<Message[]> {
   const res = await fetch(`/api/threads/${threadId}/messages`);
   if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);

@@ -1,7 +1,13 @@
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
-import { Info, Pencil } from 'lucide-react';
+import { Ellipsis, Info, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 type Props = {
@@ -12,6 +18,8 @@ type Props = {
   onAbout: () => void;
   /** Persists a rename; blank drafts are filtered before calling this. */
   onRename: (id: string, title: string) => void;
+  /** Permanently deletes a thread (messages go with it). */
+  onDelete: (id: string) => void;
   /** In-flight rename shown optimistically while the rename fetcher settles. */
   pendingRename: { threadId: string; title: string } | null;
 };
@@ -23,6 +31,7 @@ export default function ThreadSidebar({
   onNewChat,
   onAbout,
   onRename,
+  onDelete,
   pendingRename,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -98,6 +107,27 @@ export default function ThreadSidebar({
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`More options for ${title}`}
+                        className={`shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground group-focus-within:opacity-100 data-[state=open]:opacity-100 ${
+                          isActive
+                            ? 'hover:text-primary-foreground'
+                            : 'opacity-0 group-hover:opacity-100'
+                        }`}
+                      >
+                        <Ellipsis className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-40">
+                      <DropdownMenuItem variant="destructive" onSelect={() => onDelete(thread.id)}>
+                        <Trash2 className="h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               )}
             </div>

@@ -1,4 +1,5 @@
 import type { Thread } from '@db/types';
+import { deleteThread as deleteThreadQuery } from '@queries/threads/deleteThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { updateThreadTitle } from '@queries/threads/updateThreadTitle';
@@ -34,6 +35,19 @@ export async function renameThread({
 
   const updated = await updateThreadTitle({ userId, threadId, title: normalized });
   return updated ?? null;
+}
+
+type DeleteThreadProps = {
+  userId: string;
+  threadId: string;
+};
+
+/**
+ * Removes a thread (and its messages via FK cascade). Returns whether
+ * anything was deleted; unknown or foreign threads simply yield false.
+ */
+export async function deleteThread({ userId, threadId }: DeleteThreadProps): Promise<boolean> {
+  return deleteThreadQuery({ userId, threadId });
 }
 
 type GetThreadsProps = {

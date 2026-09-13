@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { insertMessage } from '@queries/messages/insertMessage';
+import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { findUserById } from '@queries/users/findUserById';
@@ -6,6 +8,7 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
   ThreadValidationError,
   createThread,
+  deleteThread,
   getThreads,
   renameThread,
 } from '@services/threadService';
@@ -145,6 +148,44 @@ describe('threadService', () => {
 
       expect(threads.map((t) => t.title)).toEqual(['Second', 'First']);
       expect(threads.map((t) => t.id)).toEqual([second.id, first.id]);
+    });
+  });
+
+  describe('deleteThread', () => {
+    it('deletes the thread and its messages', async () => {
+      await seedDefaultUser();
+      const thread = await createThread({ userId: DEFAULT_USER_ID, title: 'Doomed' });
+      await insertMessage({ thread_id: thread.id, role: 'user', content: 'hello' });
+
+      const deleted = await deleteThread({ userId: DEFAULT_USER_ID, threadId: thread.id });
+
+      expect(deleted).toBe(true);
+      expect(
+        await findThreadByIdAndUser({ userId: DEFAULT_USER_ID, threadId: thread.id }),
+      ).toBeUndefined();
+      expect(await listMessagesByThread({ threadId: thread.id })).toHaveLength(0);
+    });
+
+    it('returns false when the thread does not exist', async () => {
+      await seedDefaultUser();
+
+      const deleted = await deleteThread({ userId: DEFAULT_USER_ID, threadId: randomUUID() });
+
+      expect(deleted).toBe(false);
+    });
+
+    it('refuses to delete another user thread', async () => {
+      await seedDefaultUser();
+      const thread = await createThread({ userId: DEFAULT_USER_ID, title: 'Kept' });
+      const stranger = randomUUID();
+      await insertUserIfNotExists({ id: stranger });
+
+      const deleted = await deleteThread({ userId: stranger, threadId: thread.id });
+
+      expect(deleted).toBe(false);
+      expect(
+        await findThreadByIdAndUser({ userId: DEFAULT_USER_ID, threadId: thread.id }),
+      ).toBeDefined();
     });
   });
 });

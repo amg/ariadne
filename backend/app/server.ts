@@ -2,6 +2,7 @@ import cors from '@fastify/cors';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPostRoute } from '@routes/messages';
 import {
+  setupThreadsDeleteRoute,
   setupThreadsGetRoute,
   setupThreadsPatchRoute,
   setupThreadsPostRoute,
@@ -18,6 +19,7 @@ setupHealthRoute(app);
 setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
 setupThreadsPatchRoute(app);
+setupThreadsDeleteRoute(app);
 setupMessagesGetRoute(app);
 setupMessagesPostRoute(app);
 
