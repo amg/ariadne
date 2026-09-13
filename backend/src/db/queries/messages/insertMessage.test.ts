@@ -5,20 +5,20 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
-async function createRandomThread(db: ReturnType<typeof useTestDb>): Promise<string> {
+async function createRandomThread(): Promise<string> {
   const userId = randomUUID();
-  await insertUserIfNotExists(db, userId);
-  const thread = await insertThread(db, { user_id: userId, title: 'Test thread' });
+  await insertUserIfNotExists(userId);
+  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
   return thread.id;
 }
 
 describe('insertMessage', () => {
-  const db = useTestDb();
+  useTestDb();
 
   it('inserts a message and returns the full row with generated fields', async () => {
-    const threadId = await createRandomThread(db);
+    const threadId = await createRandomThread();
 
-    const message = await insertMessage(db, {
+    const message = await insertMessage({
       thread_id: threadId,
       role: 'user',
       content: 'Hello, world!',
@@ -33,10 +33,10 @@ describe('insertMessage', () => {
   });
 
   it('round-trips unicode content', async () => {
-    const threadId = await createRandomThread(db);
+    const threadId = await createRandomThread();
     const content = 'Héllo 🌍 —日本語—';
 
-    const message = await insertMessage(db, {
+    const message = await insertMessage({
       thread_id: threadId,
       role: 'assistant',
       content,
@@ -48,7 +48,7 @@ describe('insertMessage', () => {
 
   it('rejects when the thread does not exist (FK violation)', async () => {
     await expect(
-      insertMessage(db, {
+      insertMessage({
         thread_id: randomUUID(),
         role: 'user',
         content: 'Orphan message',
@@ -57,7 +57,7 @@ describe('insertMessage', () => {
   });
 
   it('rejects when content is missing (NOT NULL)', async () => {
-    const threadId = await createRandomThread(db);
+    const threadId = await createRandomThread();
 
     const values = { thread_id: threadId, role: 'user' as const } as {
       thread_id: string;
@@ -65,6 +65,6 @@ describe('insertMessage', () => {
       content: string;
     };
 
-    await expect(insertMessage(db, values)).rejects.toMatchObject({ code: '23502' });
+    await expect(insertMessage(values)).rejects.toMatchObject({ code: '23502' });
   });
 });

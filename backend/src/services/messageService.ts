@@ -1,17 +1,12 @@
-import type { Database, Message } from '@db/types';
+import type { Message } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import type { Kysely } from 'kysely';
 
-export async function getMessages(
-  db: Kysely<Database>,
-  userId: string,
-  threadId: string,
-): Promise<Message[] | null> {
-  const thread = await findThreadByIdAndUser(db, userId, threadId);
+export async function getMessages(userId: string, threadId: string): Promise<Message[] | null> {
+  const thread = await findThreadByIdAndUser(userId, threadId);
   if (!thread) return null;
-  return listMessagesByThread(db, threadId);
+  return listMessagesByThread(threadId);
 }
 
 /**
@@ -28,21 +23,20 @@ export function createEchoResponse(userContent: string): string {
  * is unknown or belongs to another user (the caller answers 404).
  */
 export async function submitMessage(
-  db: Kysely<Database>,
   userId: string,
   threadId: string,
   content: string,
 ): Promise<{ userMessage: Message; assistantMessage: Message } | null> {
-  const thread = await findThreadByIdAndUser(db, userId, threadId);
+  const thread = await findThreadByIdAndUser(userId, threadId);
   if (!thread) return null;
 
-  const userMessage = await insertMessage(db, {
+  const userMessage = await insertMessage({
     thread_id: threadId,
     role: 'user',
     content,
   });
 
-  const assistantMessage = await insertMessage(db, {
+  const assistantMessage = await insertMessage({
     thread_id: threadId,
     role: 'assistant',
     content: createEchoResponse(content),

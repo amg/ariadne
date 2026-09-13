@@ -5,13 +5,13 @@ import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
 describe('findUserById', () => {
-  const db = useTestDb();
+  useTestDb();
 
   it('returns the user when it exists', async () => {
     const id = randomUUID();
-    await insertUserIfNotExists(db, id);
+    await insertUserIfNotExists(id);
 
-    const user = await findUserById(db, id);
+    const user = await findUserById(id);
 
     expect(user).toBeDefined();
     expect(user?.id).toBe(id);
@@ -19,7 +19,7 @@ describe('findUserById', () => {
   });
 
   it('returns undefined when the user does not exist', async () => {
-    const user = await findUserById(db, randomUUID());
+    const user = await findUserById(randomUUID());
 
     expect(user).toBeUndefined();
   });

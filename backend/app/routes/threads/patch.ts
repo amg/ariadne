@@ -1,4 +1,3 @@
-import { db } from '@db/db';
 import { ThreadValidationError, renameThread } from '@services/threadService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -24,7 +23,7 @@ export async function setupThreadsPatchRoute(fastify: FastifyInstance) {
     }
 
     try {
-      const thread = await renameThread(db, REQUEST_USER_ID, id, body.title);
+      const thread = await renameThread(REQUEST_USER_ID, id, body.title);
       if (!thread) {
         return reply.code(404).send({ error: 'Thread not found' });
       }

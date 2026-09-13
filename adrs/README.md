@@ -13,4 +13,4 @@ We use a lightweight markdown format for ADRs. Each ADR should include:
 ## Current Decisions Needed (Pending)
 Before proceeding with implementation, the following architectural decisions must be finalized:
 
-*(All baseline architectural decisions have been accepted. See ADRs 0001-0003).*
+*(All baseline architectural decisions have been accepted. See ADRs 0001-0004; 0004 supersedes the DI convention of 0001.)*

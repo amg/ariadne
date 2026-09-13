@@ -1,5 +1,5 @@
-import type { Database, Thread } from '@db/types';
-import type { Kysely } from 'kysely';
+import { db } from '@db/db';
+import type { Thread } from '@db/types';
 
 /**
  * Renames a thread owned by the user. Returns the updated row, or undefined
@@ -7,7 +7,6 @@ import type { Kysely } from 'kysely';
  * leakage either way).
  */
 export async function updateThreadTitle(
-  db: Kysely<Database>,
   userId: string,
   threadId: string,
   title: string,

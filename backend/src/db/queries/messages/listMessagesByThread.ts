@@ -1,10 +1,7 @@
-import type { Database, Message } from '@db/types';
-import type { Kysely } from 'kysely';
+import { db } from '@db/db';
+import type { Message } from '@db/types';
 
-export async function listMessagesByThread(
-  db: Kysely<Database>,
-  threadId: string,
-): Promise<Message[]> {
+export async function listMessagesByThread(threadId: string): Promise<Message[]> {
   return db
     .selectFrom('messages')
     .selectAll()

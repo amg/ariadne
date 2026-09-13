@@ -1,5 +1,5 @@
-import type { Database, Thread } from '@db/types';
-import type { Kysely } from 'kysely';
+import { db } from '@db/db';
+import type { Thread } from '@db/types';
 
 /**
  * Ownership check for a thread. Returns the row only when it belongs to the
@@ -7,7 +7,6 @@ import type { Kysely } from 'kysely';
  * undefined), so callers can 404 without leaking existence.
  */
 export async function findThreadByIdAndUser(
-  db: Kysely<Database>,
   userId: string,
   threadId: string,
 ): Promise<Thread | undefined> {

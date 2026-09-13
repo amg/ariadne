@@ -1,11 +1,11 @@
-import type { Database, Thread } from '@db/types';
-import type { Kysely } from 'kysely';
+import { db } from '@db/db';
+import type { Thread } from '@db/types';
 
 /**
  * Threads owned by a user, newest first. `id` desc is a deterministic
  * tie-breaker for rows sharing the same `created_at`.
  */
-export async function listThreadsByUser(db: Kysely<Database>, userId: string): Promise<Thread[]> {
+export async function listThreadsByUser(userId: string): Promise<Thread[]> {
   return db
     .selectFrom('threads')
     .selectAll()

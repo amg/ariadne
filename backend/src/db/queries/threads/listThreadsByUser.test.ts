@@ -6,10 +6,10 @@ import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
 describe('listThreadsByUser', () => {
-  const db = useTestDb();
+  useTestDb();
 
   it('returns an empty list when the user has no threads', async () => {
-    const threads = await listThreadsByUser(db, randomUUID());
+    const threads = await listThreadsByUser(randomUUID());
 
     expect(threads).toEqual([]);
   });
@@ -17,13 +17,13 @@ describe('listThreadsByUser', () => {
   it('returns only threads belonging to the given user', async () => {
     const owner = randomUUID();
     const otherUser = randomUUID();
-    await insertUserIfNotExists(db, owner);
-    await insertUserIfNotExists(db, otherUser);
+    await insertUserIfNotExists(owner);
+    await insertUserIfNotExists(otherUser);
 
-    await insertThread(db, { user_id: owner, title: 'Mine' });
-    await insertThread(db, { user_id: otherUser, title: 'Not mine' });
+    await insertThread({ user_id: owner, title: 'Mine' });
+    await insertThread({ user_id: otherUser, title: 'Not mine' });
 
-    const threads = await listThreadsByUser(db, owner);
+    const threads = await listThreadsByUser(owner);
 
     expect(threads).toHaveLength(1);
     expect(threads[0]?.title).toBe('Mine');
@@ -32,41 +32,41 @@ describe('listThreadsByUser', () => {
 
   it('orders threads newest first', async () => {
     const owner = randomUUID();
-    await insertUserIfNotExists(db, owner);
+    await insertUserIfNotExists(owner);
 
-    await insertThread(db, {
+    await insertThread({
       user_id: owner,
       title: 'Old',
       created_at: new Date('2024-01-01T00:00:00.000Z'),
     });
-    await insertThread(db, {
+    await insertThread({
       user_id: owner,
       title: 'New',
       created_at: new Date('2024-06-01T00:00:00.000Z'),
     });
 
-    const threads = await listThreadsByUser(db, owner);
+    const threads = await listThreadsByUser(owner);
 
     expect(threads.map((t) => t.title)).toEqual(['New', 'Old']);
   });
 
   it('breaks created_at ties deterministically by id desc', async () => {
     const owner = randomUUID();
-    await insertUserIfNotExists(db, owner);
+    await insertUserIfNotExists(owner);
     const sameMoment = new Date('2024-03-15T12:00:00.000Z');
 
-    const first = await insertThread(db, {
+    const first = await insertThread({
       user_id: owner,
       title: 'A',
       created_at: sameMoment,
     });
-    const second = await insertThread(db, {
+    const second = await insertThread({
       user_id: owner,
       title: 'B',
       created_at: sameMoment,
     });
 
-    const threads = await listThreadsByUser(db, owner);
+    const threads = await listThreadsByUser(owner);
     const ids = threads.map((t) => t.id);
     expect(ids).toEqual([first.id, second.id].sort((a, b) => b.localeCompare(a)));
   });

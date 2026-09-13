@@ -1,43 +1,24 @@
-import { createDbFromPool } from '@db/db';
-import type { Database } from '@db/types';
-import { type Kysely, sql } from 'kysely';
-import { Pool } from 'pg';
+import { db } from '@db/db';
+import { sql } from 'kysely';
 import { afterAll, afterEach } from 'vitest';
 
-const DB_URL_ENV = 'VITEST_TEST_DATABASE_URL';
-
-export function createTestDatabase(): Kysely<Database> {
-  const url = process.env[DB_URL_ENV];
-  if (!url) {
-    throw new Error(
-      `Missing ${DB_URL_ENV}. Did the vitest global setup (test/global-setup.ts) run?`,
-    );
-  }
-  return createDbFromPool(new Pool({ connectionString: url }));
-}
-
-export async function cleanDatabase(db: Kysely<Database>): Promise<void> {
+export async function cleanDatabase(): Promise<void> {
   await sql`truncate table messages, threads, users cascade`.execute(db);
 }
 
 /**
- * Test-lifecycle helper: one real database connection per test file, wiped
- * between tests. No mocks anywhere — every test runs against the real
- * Postgres provisioned by test/global-setup.ts.
- *
- * The pg Pool connects lazily, so it is safe to create the instance at
- * collection time: `const db = useTestDb();`
+ * Test-lifecycle hook: queries and services use the app singleton from
+ * `src/db/db.ts`, which the vitest global setup points at the provisioned
+ * test database via `VITEST_TEST_DATABASE_URL`. Call once per test file at
+ * collection time; it truncates between tests and releases the pg pool
+ * afterwards (an idle pool would keep the worker process alive).
  */
-export function useTestDb(): Kysely<Database> {
-  const instance = createTestDatabase();
+export function useTestDb(): void {
+  afterEach(async () => {
+    await cleanDatabase();
+  });
 
   afterAll(async () => {
-    await instance.destroy();
+    await db.destroy();
   });
-
-  afterEach(async () => {
-    await cleanDatabase(instance);
-  });
-
-  return instance;
 }

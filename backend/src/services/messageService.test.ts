@@ -5,15 +5,15 @@ import { createEchoResponse, getMessages, submitMessage } from '@services/messag
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
-async function createRandomThread(db: ReturnType<typeof useTestDb>) {
+async function createRandomThread() {
   const userId = randomUUID();
-  await insertUserIfNotExists(db, userId);
-  const thread = await insertThread(db, { user_id: userId, title: 'Test thread' });
+  await insertUserIfNotExists(userId);
+  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
   return { userId, threadId: thread.id };
 }
 
 describe('messageService', () => {
-  const db = useTestDb();
+  useTestDb();
 
   describe('createEchoResponse', () => {
     it('prefixes the user content with "Echo: "', () => {
@@ -27,9 +27,9 @@ describe('messageService', () => {
 
   describe('submitMessage', () => {
     it('persists the user message and the assistant echo and returns both', async () => {
-      const { userId, threadId } = await createRandomThread(db);
+      const { userId, threadId } = await createRandomThread();
 
-      const result = await submitMessage(db, userId, threadId, 'hello');
+      const result = await submitMessage(userId, threadId, 'hello');
 
       expect(result).not.toBeNull();
       if (!result) return;
@@ -43,7 +43,7 @@ describe('messageService', () => {
       expect(userMessage.id).not.toBe(assistantMessage.id);
 
       // Both rows are actually persisted, in conversation order
-      const messages = await getMessages(db, userId, threadId);
+      const messages = await getMessages(userId, threadId);
       expect(messages?.map((m) => [m.role, m.content])).toEqual([
         ['user', 'hello'],
         ['assistant', 'Echo: hello'],
@@ -51,57 +51,57 @@ describe('messageService', () => {
     });
 
     it('returns null for an unknown thread', async () => {
-      const { userId } = await createRandomThread(db);
+      const { userId } = await createRandomThread();
 
-      await expect(submitMessage(db, userId, randomUUID(), 'hello')).resolves.toBeNull();
+      await expect(submitMessage(userId, randomUUID(), 'hello')).resolves.toBeNull();
     });
 
     it('returns null and persists nothing for another user’s thread', async () => {
-      const { userId, threadId } = await createRandomThread(db);
+      const { userId, threadId } = await createRandomThread();
       const stranger = randomUUID();
-      await insertUserIfNotExists(db, stranger);
+      await insertUserIfNotExists(stranger);
 
-      await expect(submitMessage(db, stranger, threadId, 'hello')).resolves.toBeNull();
+      await expect(submitMessage(stranger, threadId, 'hello')).resolves.toBeNull();
 
-      const messages = await getMessages(db, userId, threadId);
+      const messages = await getMessages(userId, threadId);
       expect(messages).toEqual([]);
     });
   });
 
   describe('getMessages', () => {
     it('returns an empty list for a thread without messages', async () => {
-      const { userId, threadId } = await createRandomThread(db);
+      const { userId, threadId } = await createRandomThread();
 
-      const messages = await getMessages(db, userId, threadId);
+      const messages = await getMessages(userId, threadId);
 
       expect(messages).toEqual([]);
     });
 
     it('returns messages in conversation order for one thread only', async () => {
-      const { userId, threadId } = await createRandomThread(db);
-      const other = await createRandomThread(db);
+      const { userId, threadId } = await createRandomThread();
+      const other = await createRandomThread();
 
-      await submitMessage(db, userId, threadId, 'one');
-      await submitMessage(db, userId, threadId, 'two');
-      await submitMessage(db, other.userId, other.threadId, 'other thread');
+      await submitMessage(userId, threadId, 'one');
+      await submitMessage(userId, threadId, 'two');
+      await submitMessage(other.userId, other.threadId, 'other thread');
 
-      const messages = await getMessages(db, userId, threadId);
+      const messages = await getMessages(userId, threadId);
 
       expect(messages?.map((m) => m.content)).toEqual(['one', 'Echo: one', 'two', 'Echo: two']);
     });
 
     it('returns null for another user’s thread (indistinguishable from unknown)', async () => {
-      const { threadId } = await createRandomThread(db);
+      const { threadId } = await createRandomThread();
       const stranger = randomUUID();
-      await insertUserIfNotExists(db, stranger);
+      await insertUserIfNotExists(stranger);
 
-      await expect(getMessages(db, stranger, threadId)).resolves.toBeNull();
+      await expect(getMessages(stranger, threadId)).resolves.toBeNull();
     });
 
     it('returns null for an unknown thread', async () => {
-      const { userId } = await createRandomThread(db);
+      const { userId } = await createRandomThread();
 
-      await expect(getMessages(db, userId, randomUUID())).resolves.toBeNull();
+      await expect(getMessages(userId, randomUUID())).resolves.toBeNull();
     });
   });
 });

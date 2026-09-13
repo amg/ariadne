@@ -1,4 +1,3 @@
-import { db } from '@db/db';
 import { submitMessage } from '@services/messageService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -25,7 +24,7 @@ export async function setupMessagesPostRoute(fastify: FastifyInstance) {
       const { content } = request.body;
 
       // Save user message + generate & save assistant response (service layer)
-      const result = await submitMessage(db, REQUEST_USER_ID, threadId, content);
+      const result = await submitMessage(REQUEST_USER_ID, threadId, content);
       if (!result) {
         // Unknown thread and foreign thread are intentionally indistinguishable.
         return reply.code(404).send({ error: 'Thread not found' });

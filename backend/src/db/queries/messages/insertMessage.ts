@@ -1,6 +1,6 @@
-import type { Database, Message, NewMessage } from '@db/types';
-import type { Kysely } from 'kysely';
+import { db } from '@db/db';
+import type { Message, NewMessage } from '@db/types';
 
-export async function insertMessage(db: Kysely<Database>, message: NewMessage): Promise<Message> {
+export async function insertMessage(message: NewMessage): Promise<Message> {
   return db.insertInto('messages').values(message).returningAll().executeTakeFirstOrThrow();
 }

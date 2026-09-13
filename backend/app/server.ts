@@ -1,4 +1,3 @@
-import { db } from '@db/db';
 import cors from '@fastify/cors';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPostRoute } from '@routes/messages';
@@ -24,7 +23,7 @@ setupMessagesPostRoute(app);
 
 const start = async () => {
   try {
-    await seedDefaultUser(db);
+    await seedDefaultUser();
     await app.listen({ port: 3001, host: '0.0.0.0' });
     console.log('Server is running on http://127.0.0.1:3001');
   } catch (err) {

@@ -1,4 +1,3 @@
-import { db } from '@db/db';
 import { createThread } from '@services/threadService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -13,7 +12,7 @@ type CreateThreadBody = {
 export async function setupThreadsPostRoute(fastify: FastifyInstance) {
   fastify.post('/api/threads', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as CreateThreadBody;
-    const thread = await createThread(db, REQUEST_USER_ID, body.title);
+    const thread = await createThread(REQUEST_USER_ID, body.title);
     return reply.send(thread);
   });
 }
