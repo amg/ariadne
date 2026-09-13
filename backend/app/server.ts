@@ -2,7 +2,11 @@ import { db } from '@db/db';
 import cors from '@fastify/cors';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPostRoute } from '@routes/messages';
-import { setupThreadsGetRoute, setupThreadsPostRoute } from '@routes/threads';
+import {
+  setupThreadsGetRoute,
+  setupThreadsPatchRoute,
+  setupThreadsPostRoute,
+} from '@routes/threads';
 import { seedDefaultUser } from '@services/userService';
 import Fastify from 'fastify';
 
@@ -14,6 +18,7 @@ app.register(cors, { origin: true });
 setupHealthRoute(app);
 setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
+setupThreadsPatchRoute(app);
 setupMessagesGetRoute(app);
 setupMessagesPostRoute(app);
 
