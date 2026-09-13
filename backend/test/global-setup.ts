@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { promises as fs, existsSync, readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDbFromPool } from '@db/db';
 import { type Kysely, sql } from 'kysely';
+import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
@@ -123,8 +126,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   try {
     await sql`drop schema if exists public cascade`.execute(db);
     await sql`create schema public`.execute(db);
-    const migration = await import('../src/db/migrations/001_init');
-    await migration.up(db as unknown as Kysely<unknown>);
+    const migrationsFolder = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../src/db/migrations',
+    );
+    const migrator = new Migrator({
+      db,
+      provider: new FileMigrationProvider({ fs, path, migrationFolder: migrationsFolder }),
+    });
+    const { error, results } = await migrator.migrateToLatest();
+    if (error) throw error;
+    console.log(`[test-db] applied ${results?.length ?? 0} migrations`);
   } finally {
     await db.destroy();
   }

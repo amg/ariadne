@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
+import { setupChatPostRoute } from '@routes/chat';
 import { setupHealthRoute } from '@routes/health/get';
-import { setupMessagesGetRoute, setupMessagesPostRoute } from '@routes/messages';
+import { setupMessagesGetRoute } from '@routes/messages';
 import {
   setupThreadsDeleteRoute,
   setupThreadsGetRoute,
@@ -21,7 +22,7 @@ setupThreadsPostRoute(app);
 setupThreadsPatchRoute(app);
 setupThreadsDeleteRoute(app);
 setupMessagesGetRoute(app);
-setupMessagesPostRoute(app);
+setupChatPostRoute(app);
 
 const start = async () => {
   try {

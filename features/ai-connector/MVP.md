@@ -77,16 +77,21 @@ completed inference:
 |---------------------|----------------|-----------------------------------|
 | `message_id`        | `uuid` PK      | FK → `messages.id`, cascade       |
 | `model`             | `varchar`      | actual model id used              |
-| `provider_id`       | `varchar`      | top-level completion `id`       |
-| `prompt_tokens`     | `integer`      |                                   |
-| `completion_tokens` | `integer`      |                                   |
-| `cached_input_tokens` | `integer`    | `prompt_tokens_details.cached_tokens` |
-| `cache_write_tokens` | `integer`     | `prompt_tokens_details.cache_write_tokens` |
+| `provider_id`       | `varchar`      | top-level completion `id` (fallback `local-<id>`) |
+| `prompt_tokens`     | `integer`      | NOT NULL                          |
+| `completion_tokens` | `integer`      | NOT NULL                          |
+| `cached_input_tokens` | `integer`    | NULL when the provider doesn't report it (`prompt_tokens_details.cached_tokens`) |
+| `cache_write_tokens` | `integer`     | NULL when unreported (`prompt_tokens_details.cache_write_tokens`) |
+| `reasoning_tokens`  | `integer`      | NULL when unreported              |
 | `cost_usd`          | `numeric(14,10)` | computed server-side            |
-| `finish_reason`     | `varchar`      | `stop` / `length` / `content_filter` / `tool_calls` / `malformed_function_call` / `interrupted` (client stop) / `timeout` (idle guard) |
+| `finish_reason`     | `varchar`      | `stop` / `length` / `content_filter` / `tool_calls` / `interrupted` (client stop) / `timeout` (idle guard) |
 | `latency_ms`        | `integer`      | generation time: first token → last token |
+| `created_at`        | `timestamp`    | default `now()`                   |
 
-*(Final schema still confirmed by user before migration is written.)*
+*NULL policy: columns we always control (prompt/completion counts, cost,
+finish state) stay NOT NULL; provider-dependent fields are nullable. NULL
+is meaningful — “not reported”, distinct from 0. Schema confirmed in
+implementation (migration written).*
 
 **Thread cost is never persisted** — always derived by summing the per-message
 `cost_usd` values. MVP: frontend sums the usage attached to the message rows;
@@ -107,7 +112,7 @@ No Result type exists in the codebase yet; add a minimal discriminated union
 
 ```ts
 type Result<T> =
-  | { type: 'success'; value: T }
+  | { type: 'success'; data: T }
   | { type: 'error'; code: string; message?: string }; // optional message
 ```
 Applied where inference starts/finishes (stream setup, finish persistence), so
@@ -155,6 +160,9 @@ rejected, actions must end in response/redirect and lose streaming; (C) fetcher
 posting then polling — rejected, defeats streaming.
 
 ### Right sidebar metadata panel
+> Status (implementation): deferred — metadata currently renders as inline
+> `MessageMetaRow` under each assistant bubble; this panel + thread totals
+> stay the documented next step.
 * `AppShell`/`ChatView` layout gains a fixed-width right column next to the
   chat column (mirror of the left `ThreadSidebar`).
 * Content: one metadata row per message, in the same order/index as the bubble
@@ -249,7 +257,8 @@ A small local server replacing DeepInfra for dev and tests:
 * Cache telemetry confirmed in `prompt_tokens_details` — captured, not acted on.
 * Provider errors via lightweight Result union.
 * Tests use a built-in mock OpenAI-compatible server.
-* Final `message_usage` column set: user confirmation pending.
+* Final `message_usage` column set: confirmed (incl. NULL policy above and
+  the `reasoning_tokens` addition discovered during implementation).
 * Route changeover: hard cutover — non-streaming `POST /messages` deleted.
 * Stop-first: no steering; send button flip-flops to stop while streaming;
   partial text persisted as-is; edit-last-message deferred.
@@ -257,7 +266,17 @@ A small local server replacing DeepInfra for dev and tests:
   queueing/TTFB excluded).
 * Inter-token idle deadline: 5s (`AI_STREAM_IDLE_TIMEOUT_MS`), armed after
   first token; guard is ours, SDK classifies only finish/provider errors.
+* **Build verification (`ai@7.0.99` + `@ai-sdk/deepinfra@3.0.48`)**:
+  * `createDeepInfra({ baseURL })` works — mock switch via `AI_BASE_URL`
+    confirmed; the factory still demands an `apiKey`, so the mock path sends a
+    `'mock'` placeholder (server ignores auth).
+  * `onEnd` does **not** fire on abort; `onAbort` does (no usage there).
+    The service settles the abort path through `onAbort` (`interrupted` /
+    `stream_timeout`); `onEnd` keeps the natural finish path.
+  * `cached_input_tokens` survives via `inputTokenDetails.cacheReadTokens`; column + fallback reader stay wired, value lands NULL until the SDK surface exposes it.
+  * `readUIMessageStream` yields successive message states — subscribers take
+    the final state; `toUIMessageStream`'s `generateMessageId` pins the
+    streamed assistant id to our persisted row.
 
 ## Open items
-1. Installed `ai` version's exact usage shape (incl. how/whether
-   `prompt_tokens_details` cache fields are exposed) — confirm on install.
+*(none — all converted or invalidated during implementation)*

@@ -67,7 +67,8 @@ export default function AppLayout() {
         />
       }
     >
-      <Outlet />
+      {/* Keyed by thread so the chat page remounts (fresh useChat state) when switching. */}
+      <Outlet key={match?.params.threadId ?? 'empty'} />
     </AppShell>
   );
 }

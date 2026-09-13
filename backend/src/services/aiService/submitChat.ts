@@ -1,0 +1,133 @@
+import type { Message } from '@db/types';
+import { insertMessage } from '@queries/messages/insertMessage';
+import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
+import type { ModelMessage } from 'ai';
+import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
+import { type Result, err, ok } from '../../types/result';
+import {
+  SYSTEM_PROMPT,
+  createModel,
+  isInferenceConfigured,
+  resolveInferenceConfig,
+} from './config';
+import { ChatExchange, type ChatOutcome } from './exchange';
+import { createIdleGuard } from './idleGuard';
+
+/**
+ * Per-call service boundary (see features/ai-connector/MVP.md). Flow:
+ *   1. verify thread ownership,
+ *   2. insert user + assistant rows (assistant empty until streamed),
+ *   3. `streamText` over the full thread history, guarded by the idle timer,
+ *   4. `ChatExchange` persists text + usage as the stream settles.
+ */
+
+export type ChatStreamHandle = {
+  assistantMessageId: string;
+  /** UI message stream (SSE-ready, consumable by `useChat`). */
+  stream: ReadableStream<UIMessageChunk>;
+  /** Settles once the stream has ended and persistence has completed. */
+  outcome: Promise<Result<ChatOutcome>>;
+  /** Aborts the provider stream from the outside (user stop). */
+  abort: () => void;
+};
+
+type SubmitChatProps = {
+  userId: string;
+  threadId: string;
+  content: string;
+};
+
+const NOT_CONFIGURED_MESSAGE =
+  'Neither AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';
+
+const STREAM_ERROR_MESSAGE = 'The assistant hit an error while generating the reply.';
+
+/** System prompt + prior turns (user/assistant only) + the new user turn. */
+function buildModelMessages(
+  history: Awaited<ReturnType<typeof listMessagesByThread>>,
+  userMessage: Message,
+): ModelMessage[] {
+  return [
+    ...history
+      .filter((row) => row.role === 'user' || row.role === 'assistant')
+      .map((row) => ({ role: row.role, content: row.content })),
+    { role: userMessage.role, content: userMessage.content },
+  ];
+}
+
+export async function submitChat({
+  userId,
+  threadId,
+  content,
+}: SubmitChatProps): Promise<Result<ChatStreamHandle>> {
+  const thread = await findThreadByIdAndUser({ userId, threadId });
+  if (!thread) return err('thread_not_found');
+
+  const config = resolveInferenceConfig();
+  if (!isInferenceConfigured(config)) {
+    return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
+  }
+
+  const history = await listMessagesByThread({ threadId });
+  const userMessage = await insertMessage({ thread_id: threadId, role: 'user', content });
+  const assistantMessage = await insertMessage({
+    thread_id: threadId,
+    role: 'assistant',
+    content: '',
+  });
+
+  const exchange = new ChatExchange({
+    assistantMessageId: assistantMessage.id,
+    model: config.model,
+  });
+  const controller = new AbortController();
+  // Fires on the idle deadline; also reused by user stop / client disconnect.
+  const guard = createIdleGuard(config.idleTimeoutMs, () => controller.abort());
+
+  const streamResult = streamText({
+    model: createModel(config),
+    system: SYSTEM_PROMPT,
+    messages: buildModelMessages(history, userMessage),
+    abortSignal: controller.signal,
+    maxRetries: 0,
+    onChunk: ({ chunk }) => {
+      if (chunk.type === 'text-delta') {
+        exchange.recordTextDelta(chunk.text);
+        guard.arm();
+      }
+    },
+    // ai v7 fires onAbort (not onEnd) when the stream is aborted.
+    onAbort: async () => {
+      guard.clear();
+      await exchange.completeAbort(guard.fired);
+    },
+    onEnd: async (event) => {
+      guard.clear();
+      await exchange.completeNatural({
+        finishReason: event.finishReason,
+        usage: event.usage,
+        providerId: event.response?.id,
+      });
+    },
+    onError: async ({ error }) => {
+      guard.clear();
+      await exchange.completeError(error, guard.fired);
+    },
+  });
+
+  const stream = toUIMessageStream({
+    stream: streamResult.fullStream,
+    // Pin the streamed assistant message to our persisted row so revalidation
+    // maps the DB state onto the same bubble.
+    generateMessageId: () => assistantMessage.id,
+    onError: () => STREAM_ERROR_MESSAGE,
+  });
+
+  return ok({
+    assistantMessageId: assistantMessage.id,
+    stream,
+    outcome: exchange.outcome,
+    abort: () => controller.abort(),
+  });
+}

@@ -1,36 +1,27 @@
-import ChatView from '@/components/chat/ChatView';
+import { ChatController } from '@/components/chat';
 import { type Message, fetchMessages } from '@/services/api';
-import { useFetcher, useLoaderData } from 'react-router';
+import { useLoaderData, useRevalidator } from 'react-router';
+
+/** Framework glue only: loader + revalidation. The exchange lives in
+ *  components/chat/ChatController. See PK "Framework files" policy. */
 
 type LoaderProps = { params: { threadId?: string } };
 
 export async function loader({ params }: LoaderProps) {
-  return { messages: params.threadId ? await fetchMessages(params.threadId) : [] };
+  return {
+    threadId: params.threadId ?? '',
+    messages: params.threadId ? await fetchMessages(params.threadId) : [],
+  };
 }
 
-// Framework entry: reads router state, then delegates straight to the pure UI.
 export default function ChatPage() {
-  const { messages } = useLoaderData() as { messages: Message[] };
-  const fetcher = useFetcher();
-
-  const pendingContent = fetcher.formData?.get('content');
-  const displayMessages: Message[] = pendingContent
-    ? [
-        ...messages,
-        {
-          id: 'optimistic',
-          role: 'user',
-          content: String(pendingContent),
-          created_at: new Date().toISOString(),
-        },
-      ]
-    : messages;
+  const { threadId, messages: rows } = useLoaderData() as {
+    threadId: string;
+    messages: Message[];
+  };
+  const revalidator = useRevalidator();
 
   return (
-    <ChatView
-      messages={displayMessages}
-      sending={fetcher.state !== 'idle'}
-      onSend={(content) => fetcher.submit({ content }, { method: 'post' })}
-    />
+    <ChatController threadId={threadId} rows={rows} onSettle={() => revalidator.revalidate()} />
   );
 }

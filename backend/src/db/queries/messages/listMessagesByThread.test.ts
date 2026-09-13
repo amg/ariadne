@@ -64,4 +64,15 @@ describe('listMessagesByThread', () => {
 
     expect(messages.map((m) => m.content)).toEqual(['Older', 'Newer']);
   });
+
+  it('returns null usage columns when the message has no usage row', async () => {
+    const threadId = await createRandomThread();
+    await insertMessage({ thread_id: threadId, role: 'user', content: 'no usage' });
+
+    const [row] = await listMessagesByThread({ threadId });
+
+    expect(row?.usage_model).toBeNull();
+    expect(row?.usage_cost_usd).toBeNull();
+    expect(row?.usage_latency_ms).toBeNull();
+  });
 });

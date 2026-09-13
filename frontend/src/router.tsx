@@ -1,7 +1,6 @@
 import { action as deleteThreadAction } from '@/actions/threads/deleteThread';
 import { action as newThreadAction } from '@/actions/threads/newThread';
 import { action as renameThreadAction } from '@/actions/threads/renameThread';
-import { action as sendMessageAction } from '@/actions/threads/sendMessage';
 import AboutPage from '@/pages/AboutPage';
 import AppLayout, { loader as rootLoader } from '@/pages/AppLayout';
 import EmptyPage from '@/pages/EmptyPage';
@@ -33,7 +32,6 @@ export const router = createBrowserRouter([
       {
         // Loader co-located in the page module; routed here via lazy.
         path: 'threads/:threadId',
-        action: sendMessageAction,
         lazy: async () => {
           const { default: Component, loader } = await import('@/pages/ChatPage');
           return { Component, loader };

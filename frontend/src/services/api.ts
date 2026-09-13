@@ -1,4 +1,11 @@
 export type Role = 'user' | 'assistant' | 'system';
+export type MessageFinishReason =
+  | 'stop'
+  | 'length'
+  | 'content_filter'
+  | 'tool_calls'
+  | 'timeout'
+  | 'interrupted';
 
 export interface Thread {
   id: string;
@@ -7,11 +14,27 @@ export interface Thread {
   updated_at: string;
 }
 
+/** Telemetry for one assistant message (backend `message_usage`, 1:1). */
+export interface MessageUsage {
+  model: string;
+  provider_id: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  /** NULL when the provider doesn't report these. */
+  reasoning_tokens: number | null;
+  cached_input_tokens: number | null;
+  cache_write_tokens: number | null;
+  cost_usd: string;
+  finish_reason: MessageFinishReason;
+  latency_ms: number | null;
+}
+
 export interface Message {
   id: string;
   role: Role;
   content: string;
   created_at: string;
+  usage: MessageUsage | null;
 }
 
 export async function fetchThreads(): Promise<Thread[]> {
@@ -49,15 +72,4 @@ export async function fetchMessages(threadId: string): Promise<Message[]> {
   const res = await fetch(`/api/threads/${threadId}/messages`);
   if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
   return res.json();
-}
-
-export async function postMessage(threadId: string, content: string): Promise<Message> {
-  const res = await fetch(`/api/threads/${threadId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error(`Failed to post message: ${res.statusText}`);
-  const data = await res.json();
-  return data.message;
 }

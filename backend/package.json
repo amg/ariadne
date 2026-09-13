@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch app/server.ts",
+    "mock": "tsx mock/server.ts",
     "migrate": "tsx src/db/db.ts",
+    "smoke": "tsx smoke/e2e.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -15,7 +17,9 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@ai-sdk/deepinfra": "^3.0.48",
     "@fastify/cors": "^11.3.0",
+    "ai": "^7.0.99",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.4",
     "kysely": "^0.29.5",

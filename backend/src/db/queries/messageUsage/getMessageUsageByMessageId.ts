@@ -1,0 +1,16 @@
+import { db } from '@db/db';
+import type { MessageUsage } from '@db/types';
+
+type GetMessageUsageByMessageIdProps = {
+  messageId: string;
+};
+
+export async function getMessageUsageByMessageId({
+  messageId,
+}: GetMessageUsageByMessageIdProps): Promise<MessageUsage | undefined> {
+  return db
+    .selectFrom('message_usage')
+    .selectAll()
+    .where('message_id', '=', messageId)
+    .executeTakeFirst();
+}
