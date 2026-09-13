@@ -9,7 +9,7 @@ describe('listThreadsByUser', () => {
   useTestDb();
 
   it('returns an empty list when the user has no threads', async () => {
-    const threads = await listThreadsByUser(randomUUID());
+    const threads = await listThreadsByUser({ userId: randomUUID() });
 
     expect(threads).toEqual([]);
   });
@@ -17,13 +17,13 @@ describe('listThreadsByUser', () => {
   it('returns only threads belonging to the given user', async () => {
     const owner = randomUUID();
     const otherUser = randomUUID();
-    await insertUserIfNotExists(owner);
-    await insertUserIfNotExists(otherUser);
+    await insertUserIfNotExists({ id: owner });
+    await insertUserIfNotExists({ id: otherUser });
 
     await insertThread({ user_id: owner, title: 'Mine' });
     await insertThread({ user_id: otherUser, title: 'Not mine' });
 
-    const threads = await listThreadsByUser(owner);
+    const threads = await listThreadsByUser({ userId: owner });
 
     expect(threads).toHaveLength(1);
     expect(threads[0]?.title).toBe('Mine');
@@ -32,7 +32,7 @@ describe('listThreadsByUser', () => {
 
   it('orders threads newest first', async () => {
     const owner = randomUUID();
-    await insertUserIfNotExists(owner);
+    await insertUserIfNotExists({ id: owner });
 
     await insertThread({
       user_id: owner,
@@ -45,14 +45,14 @@ describe('listThreadsByUser', () => {
       created_at: new Date('2024-06-01T00:00:00.000Z'),
     });
 
-    const threads = await listThreadsByUser(owner);
+    const threads = await listThreadsByUser({ userId: owner });
 
     expect(threads.map((t) => t.title)).toEqual(['New', 'Old']);
   });
 
   it('breaks created_at ties deterministically by id desc', async () => {
     const owner = randomUUID();
-    await insertUserIfNotExists(owner);
+    await insertUserIfNotExists({ id: owner });
     const sameMoment = new Date('2024-03-15T12:00:00.000Z');
 
     const first = await insertThread({
@@ -66,7 +66,7 @@ describe('listThreadsByUser', () => {
       created_at: sameMoment,
     });
 
-    const threads = await listThreadsByUser(owner);
+    const threads = await listThreadsByUser({ userId: owner });
     const ids = threads.map((t) => t.id);
     expect(ids).toEqual([first.id, second.id].sort((a, b) => b.localeCompare(a)));
   });

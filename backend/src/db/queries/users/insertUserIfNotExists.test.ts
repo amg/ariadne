@@ -10,31 +10,33 @@ describe('insertUserIfNotExists', () => {
   it('inserts and returns a new user', async () => {
     const id = randomUUID();
 
-    const inserted = await insertUserIfNotExists(id);
+    const inserted = await insertUserIfNotExists({ id });
 
     expect(inserted?.id).toBe(id);
     expect(inserted?.created_at).toBeInstanceOf(Date);
 
-    const persisted = await findUserById(id);
+    const persisted = await findUserById({ id });
     expect(persisted?.id).toBe(id);
   });
 
   it('is a no-op when the user already exists', async () => {
     const id = randomUUID();
-    await insertUserIfNotExists(id);
+    await insertUserIfNotExists({ id });
 
-    const second = await insertUserIfNotExists(id);
+    const second = await insertUserIfNotExists({ id });
 
     expect(second).toBeUndefined();
     // Still exactly one row, no duplicate-key error raised
-    const persisted = await findUserById(id);
+    const persisted = await findUserById({ id });
     expect(persisted?.id).toBe(id);
   });
 
   it('inserts exactly one row under concurrent calls for the same id', async () => {
     const id = randomUUID();
 
-    const results = await Promise.all(Array.from({ length: 5 }, () => insertUserIfNotExists(id)));
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => insertUserIfNotExists({ id })),
+    );
 
     const inserted = results.filter((user) => user !== undefined);
     expect(inserted).toHaveLength(1);

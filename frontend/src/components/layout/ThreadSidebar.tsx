@@ -4,7 +4,7 @@ import type { Thread } from '@/services/api';
 import { Info, Pencil } from 'lucide-react';
 import { useState } from 'react';
 
-type ThreadSidebarProps = {
+type Props = {
   threads: Thread[];
   activeThreadId: string | null;
   onSelectThread: (id: string) => void;
@@ -24,7 +24,7 @@ export default function ThreadSidebar({
   onAbout,
   onRename,
   pendingRename,
-}: ThreadSidebarProps) {
+}: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 

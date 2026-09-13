@@ -11,7 +11,7 @@ describe('userService', () => {
       const seeded = await seedDefaultUser();
 
       expect(seeded).toBe(true);
-      const user = await findUserById(DEFAULT_USER_ID);
+      const user = await findUserById({ id: DEFAULT_USER_ID });
       expect(user?.id).toBe(DEFAULT_USER_ID);
     });
 
@@ -21,7 +21,7 @@ describe('userService', () => {
       const seededAgain = await seedDefaultUser();
 
       expect(seededAgain).toBe(false);
-      const user = await findUserById(DEFAULT_USER_ID);
+      const user = await findUserById({ id: DEFAULT_USER_ID });
       expect(user?.id).toBe(DEFAULT_USER_ID);
     });
 
@@ -29,7 +29,7 @@ describe('userService', () => {
       const results = await Promise.all(Array.from({ length: 5 }, () => seedDefaultUser()));
 
       expect(results.filter((seeded) => seeded)).toHaveLength(1);
-      const user = await findUserById(DEFAULT_USER_ID);
+      const user = await findUserById({ id: DEFAULT_USER_ID });
       expect(user?.id).toBe(DEFAULT_USER_ID);
     });
 

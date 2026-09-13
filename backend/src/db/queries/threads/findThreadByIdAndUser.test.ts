@@ -10,32 +10,32 @@ describe('findThreadByIdAndUser', () => {
 
   it('returns the thread when the user owns it', async () => {
     const userId = randomUUID();
-    await insertUserIfNotExists(userId);
+    await insertUserIfNotExists({ id: userId });
     const thread = await insertThread({ user_id: userId, title: 'Mine' });
 
-    const found = await findThreadByIdAndUser(userId, thread.id);
+    const found = await findThreadByIdAndUser({ userId, threadId: thread.id });
 
     expect(found?.id).toBe(thread.id);
     expect(found?.title).toBe('Mine');
   });
 
-  it('returns undefined for another user’s thread', async () => {
+  it('returns undefined for another user thread', async () => {
     const owner = randomUUID();
     const stranger = randomUUID();
-    await insertUserIfNotExists(owner);
-    await insertUserIfNotExists(stranger);
+    await insertUserIfNotExists({ id: owner });
+    await insertUserIfNotExists({ id: stranger });
     const thread = await insertThread({ user_id: owner, title: 'Not yours' });
 
-    const found = await findThreadByIdAndUser(stranger, thread.id);
+    const found = await findThreadByIdAndUser({ userId: stranger, threadId: thread.id });
 
     expect(found).toBeUndefined();
   });
 
   it('returns undefined for an unknown thread id', async () => {
     const userId = randomUUID();
-    await insertUserIfNotExists(userId);
+    await insertUserIfNotExists({ id: userId });
 
-    const found = await findThreadByIdAndUser(userId, randomUUID());
+    const found = await findThreadByIdAndUser({ userId, threadId: randomUUID() });
 
     expect(found).toBeUndefined();
   });

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 async function createRandomThread(): Promise<string> {
   const userId = randomUUID();
-  await insertUserIfNotExists(userId);
+  await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ user_id: userId, title: 'Test thread' });
   return thread.id;
 }

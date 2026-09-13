@@ -24,7 +24,7 @@ export async function setupMessagesPostRoute(fastify: FastifyInstance) {
       const { content } = request.body;
 
       // Save user message + generate & save assistant response (service layer)
-      const result = await submitMessage(REQUEST_USER_ID, threadId, content);
+      const result = await submitMessage({ userId: REQUEST_USER_ID, threadId, content });
       if (!result) {
         // Unknown thread and foreign thread are intentionally indistinguishable.
         return reply.code(404).send({ error: 'Thread not found' });

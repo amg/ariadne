@@ -12,7 +12,7 @@ type ThreadParams = {
 export async function setupMessagesGetRoute(fastify: FastifyInstance) {
   fastify.get('/api/threads/:id/messages', async (request: FastifyRequest, reply: FastifyReply) => {
     const params = request.params as ThreadParams;
-    const messages = await getMessages(REQUEST_USER_ID, params.id);
+    const messages = await getMessages({ userId: REQUEST_USER_ID, threadId: params.id });
     if (!messages) {
       // Unknown thread and foreign thread are intentionally indistinguishable.
       return reply.code(404).send({ error: 'Thread not found' });

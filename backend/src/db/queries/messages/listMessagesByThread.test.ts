@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 async function createRandomThread(): Promise<string> {
   const userId = randomUUID();
-  await insertUserIfNotExists(userId);
+  await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ user_id: userId, title: 'Test thread' });
   return thread.id;
 }
@@ -19,13 +19,13 @@ describe('listMessagesByThread', () => {
   it('returns an empty list when the thread has no messages', async () => {
     const threadId = await createRandomThread();
 
-    const messages = await listMessagesByThread(threadId);
+    const messages = await listMessagesByThread({ threadId });
 
     expect(messages).toEqual([]);
   });
 
   it('returns an empty list for an unknown thread id', async () => {
-    const messages = await listMessagesByThread(randomUUID());
+    const messages = await listMessagesByThread({ threadId: randomUUID() });
 
     expect(messages).toEqual([]);
   });
@@ -37,7 +37,7 @@ describe('listMessagesByThread', () => {
     await insertMessage({ thread_id: threadId, role: 'user', content: 'Mine' });
     await insertMessage({ thread_id: otherThreadId, role: 'user', content: 'Not mine' });
 
-    const messages = await listMessagesByThread(threadId);
+    const messages = await listMessagesByThread({ threadId });
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.content).toBe('Mine');
@@ -60,7 +60,7 @@ describe('listMessagesByThread', () => {
       created_at: new Date('2024-06-01T00:00:00.000Z'),
     });
 
-    const messages = await listMessagesByThread(threadId);
+    const messages = await listMessagesByThread({ threadId });
 
     expect(messages.map((m) => m.content)).toEqual(['Older', 'Newer']);
   });

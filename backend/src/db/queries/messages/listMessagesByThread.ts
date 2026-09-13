@@ -1,7 +1,13 @@
 import { db } from '@db/db';
 import type { Message } from '@db/types';
 
-export async function listMessagesByThread(threadId: string): Promise<Message[]> {
+type ListMessagesByThreadProps = {
+  threadId: string;
+};
+
+export async function listMessagesByThread({
+  threadId,
+}: ListMessagesByThreadProps): Promise<Message[]> {
   return db
     .selectFrom('messages')
     .selectAll()

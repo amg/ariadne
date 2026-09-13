@@ -8,7 +8,7 @@ const REQUEST_USER_ID = DEFAULT_USER_ID;
 
 export async function setupThreadsGetRoute(fastify: FastifyInstance) {
   fastify.get('/api/threads', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const threads = await getThreads(REQUEST_USER_ID);
+    const threads = await getThreads({ userId: REQUEST_USER_ID });
     return reply.send(threads);
   });
 }

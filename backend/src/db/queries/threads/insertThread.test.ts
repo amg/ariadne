@@ -9,7 +9,7 @@ describe('insertThread', () => {
 
   it('inserts a thread and returns the full row with generated fields', async () => {
     const userId = randomUUID();
-    await insertUserIfNotExists(userId);
+    await insertUserIfNotExists({ id: userId });
 
     const thread = await insertThread({ user_id: userId, title: 'First' });
 
@@ -22,7 +22,7 @@ describe('insertThread', () => {
 
   it('respects an explicitly provided created_at', async () => {
     const userId = randomUUID();
-    await insertUserIfNotExists(userId);
+    await insertUserIfNotExists({ id: userId });
     const createdAt = new Date('2024-01-02T03:04:05.000Z');
 
     const thread = await insertThread({

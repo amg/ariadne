@@ -2,7 +2,9 @@ import ChatView from '@/components/chat/ChatView';
 import { type Message, fetchMessages } from '@/services/api';
 import { useFetcher, useLoaderData } from 'react-router';
 
-export async function loader({ params }: { params: { threadId?: string } }) {
+type LoaderProps = { params: { threadId?: string } };
+
+export async function loader({ params }: LoaderProps) {
   return { messages: params.threadId ? await fetchMessages(params.threadId) : [] };
 }
 

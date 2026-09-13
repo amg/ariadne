@@ -12,7 +12,10 @@ type CreateThreadBody = {
 export async function setupThreadsPostRoute(fastify: FastifyInstance) {
   fastify.post('/api/threads', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as CreateThreadBody;
-    const thread = await createThread(REQUEST_USER_ID, body.title);
+    const thread =
+      body.title !== undefined
+        ? await createThread({ userId: REQUEST_USER_ID, title: body.title })
+        : await createThread({ userId: REQUEST_USER_ID });
     return reply.send(thread);
   });
 }

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 async function seedUserAndThread(title: string) {
   const userId = randomUUID();
-  await insertUserIfNotExists(userId);
+  await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ user_id: userId, title });
   return { userId, thread };
 }
@@ -19,7 +19,7 @@ describe('updateThreadTitle', () => {
   it('updates the title and returns the updated row', async () => {
     const { userId, thread } = await seedUserAndThread('Before');
 
-    const updated = await updateThreadTitle(userId, thread.id, 'After');
+    const updated = await updateThreadTitle({ userId, threadId: thread.id, title: 'After' });
 
     expect(updated?.id).toBe(thread.id);
     expect(updated?.title).toBe('After');
@@ -29,27 +29,33 @@ describe('updateThreadTitle', () => {
     const { userId, thread } = await seedUserAndThread('First');
     const second = await insertThread({ user_id: userId, title: 'Second' });
 
-    await updateThreadTitle(userId, thread.id, 'Renamed');
+    await updateThreadTitle({ userId, threadId: thread.id, title: 'Renamed' });
 
-    expect((await updateThreadTitle(userId, second.id, 'Still'))?.title).toBe('Still');
+    expect((await updateThreadTitle({ userId, threadId: second.id, title: 'Still' }))?.title).toBe(
+      'Still',
+    );
   });
 
-  it('refuses to rename another user’s thread', async () => {
+  it('refuses to rename another user thread', async () => {
     const { userId, thread } = await seedUserAndThread('Owned');
     const stranger = randomUUID();
-    await insertUserIfNotExists(stranger);
+    await insertUserIfNotExists({ id: stranger });
 
-    const updated = await updateThreadTitle(stranger, thread.id, 'Stolen');
+    const updated = await updateThreadTitle({
+      userId: stranger,
+      threadId: thread.id,
+      title: 'Stolen',
+    });
 
     expect(updated).toBeUndefined();
     // Original title untouched by the foreign attempt
-    expect((await findThreadByIdAndUser(userId, thread.id))?.title).toBe('Owned');
+    expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBe('Owned');
   });
 
   it('returns undefined when no thread has the given id', async () => {
     const { userId } = await seedUserAndThread('Any');
 
-    const updated = await updateThreadTitle(userId, randomUUID(), 'Nope');
+    const updated = await updateThreadTitle({ userId, threadId: randomUUID(), title: 'Nope' });
 
     expect(updated).toBeUndefined();
   });

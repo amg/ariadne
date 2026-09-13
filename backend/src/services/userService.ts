@@ -7,7 +7,7 @@ export const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000000';
  * ON CONFLICT statement). Returns `true` when the user was freshly seeded.
  */
 export async function seedDefaultUser(): Promise<boolean> {
-  const inserted = await insertUserIfNotExists(DEFAULT_USER_ID);
+  const inserted = await insertUserIfNotExists({ id: DEFAULT_USER_ID });
   if (inserted) {
     console.log('Seeded default user');
   }

@@ -3,10 +3,18 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 
-export async function getMessages(userId: string, threadId: string): Promise<Message[] | null> {
-  const thread = await findThreadByIdAndUser(userId, threadId);
+type GetMessagesProps = {
+  userId: string;
+  threadId: string;
+};
+
+export async function getMessages({
+  userId,
+  threadId,
+}: GetMessagesProps): Promise<Message[] | null> {
+  const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return null;
-  return listMessagesByThread(threadId);
+  return listMessagesByThread({ threadId });
 }
 
 /**
@@ -17,17 +25,23 @@ export function createEchoResponse(userContent: string): string {
   return `Echo: ${userContent}`;
 }
 
+type SubmitMessageProps = {
+  userId: string;
+  threadId: string;
+  content: string;
+};
+
 /**
  * Full message-exchange flow: persist the user's message, generate and
  * persist the assistant response, return both. Returns null when the thread
  * is unknown or belongs to another user (the caller answers 404).
  */
-export async function submitMessage(
-  userId: string,
-  threadId: string,
-  content: string,
-): Promise<{ userMessage: Message; assistantMessage: Message } | null> {
-  const thread = await findThreadByIdAndUser(userId, threadId);
+export async function submitMessage({
+  userId,
+  threadId,
+  content,
+}: SubmitMessageProps): Promise<{ userMessage: Message; assistantMessage: Message } | null> {
+  const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return null;
 
   const userMessage = await insertMessage({

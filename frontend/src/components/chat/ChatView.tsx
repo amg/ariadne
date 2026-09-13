@@ -5,13 +5,13 @@ import type { Message } from '@/services/api';
 import { Send } from 'lucide-react';
 import { useState } from 'react';
 
-type ChatViewProps = {
+type Props = {
   messages: Message[];
   sending: boolean;
   onSend: (content: string) => void;
 };
 
-export default function ChatView({ messages, sending, onSend }: ChatViewProps) {
+export default function ChatView({ messages, sending, onSend }: Props) {
   const [input, setInput] = useState('');
 
   const handleSubmit = (event: React.FormEvent) => {
