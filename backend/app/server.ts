@@ -1,3 +1,6 @@
+// Must be the first import: loads backend/.env before any module reads
+// process.env (db.ts resolves the connection at import time).
+import 'dotenv/config';
 import cors from '@fastify/cors';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupHealthRoute } from '@routes/health/get';
