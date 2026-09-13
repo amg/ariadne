@@ -13,6 +13,15 @@ export default function AppLayout() {
   const match = useMatch('/threads/:threadId');
   const navigate = useNavigate();
   const createFetcher = useFetcher();
+  const renameFetcher = useFetcher({ key: 'rename-thread' });
+
+  // Optimistic title while the rename fetcher is in flight.
+  const pendingRename = renameFetcher.formData
+    ? {
+        threadId: String(renameFetcher.formData.get('threadId') ?? ''),
+        title: String(renameFetcher.formData.get('title') ?? ''),
+      }
+    : null;
 
   return (
     <AppShell
@@ -22,6 +31,13 @@ export default function AppLayout() {
           activeThreadId={match?.params.threadId ?? null}
           onSelectThread={(id) => navigate(`/threads/${id}`)}
           onNewChat={() => createFetcher.submit(null, { method: 'post', action: '/threads/new' })}
+          onRename={(id, title) =>
+            renameFetcher.submit(
+              { threadId: id, title },
+              { method: 'post', action: `/threads/${id}/rename` },
+            )
+          }
+          pendingRename={pendingRename}
           onAbout={() => navigate('/about')}
         />
       }

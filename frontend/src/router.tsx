@@ -1,4 +1,5 @@
 import { action as newThreadAction } from '@/actions/threads/newThread';
+import { action as renameThreadAction } from '@/actions/threads/renameThread';
 import { action as sendMessageAction } from '@/actions/threads/sendMessage';
 import AboutPage from '@/pages/AboutPage';
 import AppLayout, { loader as rootLoader } from '@/pages/AppLayout';
@@ -25,6 +26,8 @@ export const router = createBrowserRouter([
       // Static page — no loader; a route only gets data from its own module.
       { path: 'about', Component: AboutPage },
       { path: 'threads/new', action: newThreadAction },
+      // Action-only route, same pattern as above.
+      { path: 'threads/:threadId/rename', action: renameThreadAction },
       {
         // Loader co-located in the page module; routed here via lazy.
         path: 'threads/:threadId',

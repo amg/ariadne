@@ -30,6 +30,16 @@ export async function createThread(title: string): Promise<Thread> {
   return res.json();
 }
 
+export async function renameThread(threadId: string, title: string): Promise<Thread> {
+  const res = await fetch(`/api/threads/${threadId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error(`Failed to rename thread: ${res.statusText}`);
+  return res.json();
+}
+
 export async function fetchMessages(threadId: string): Promise<Message[]> {
   const res = await fetch(`/api/threads/${threadId}/messages`);
   if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
