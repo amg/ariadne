@@ -5,7 +5,19 @@ import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import type { Database } from './types';
 
-// Connection singleton
+/**
+ * Build a Kysely instance around an existing pg pool.
+ * Queries and services receive a `Kysely<Database>` instance as an argument
+ * (dependency injection) instead of importing the singleton, so they can be
+ * exercised end-to-end against any real database (e.g. a test container).
+ */
+export function createDbFromPool(pool: Pool): Kysely<Database> {
+  return new Kysely<Database>({
+    dialect: new PostgresDialect({ pool }),
+  });
+}
+
+// Connection singleton (used by the app entry point / routes only)
 export const pool = new Pool({
   host: process.env.DB_HOST || '127.0.0.1',
   database: process.env.DB_NAME || 'chatbot',
@@ -14,9 +26,7 @@ export const pool = new Pool({
   port: Number(process.env.DB_PORT) || 5432,
 });
 
-export const db = new Kysely<Database>({
-  dialect: new PostgresDialect({ pool }),
-});
+export const db = createDbFromPool(pool);
 
 export async function migrateToLatest() {
   const migrator = new Migrator({

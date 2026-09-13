@@ -1,29 +1,40 @@
-import { db } from '@db/db';
-import type { Message, NewMessage } from '../db/types';
+import type { Database, Message } from '@db/types';
+import { insertMessage } from '@queries/messages/insertMessage';
+import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import type { Kysely } from 'kysely';
 
-export async function getMessages(threadId: string): Promise<Message[]> {
-  return db
-    .selectFrom('messages')
-    .selectAll()
-    .where('thread_id', '=', threadId)
-    .orderBy('created_at', 'asc')
-    .execute();
+export async function getMessages(db: Kysely<Database>, threadId: string): Promise<Message[]> {
+  return listMessagesByThread(db, threadId);
 }
 
-export async function createMessage(message: NewMessage): Promise<Message> {
-  return db.insertInto('messages').values(message).returningAll().executeTakeFirstOrThrow();
+/**
+ * Placeholder "AI" response generator. Pure content logic, no DB access.
+ * Will be replaced by a real provider call later.
+ */
+export function createEchoResponse(userContent: string): string {
+  return `Echo: ${userContent}`;
 }
 
-export async function createMockResponse(threadId: string, userContent: string): Promise<Message> {
-  const aiContent = `Echo: ${userContent}`;
+/**
+ * Full message-exchange flow: persist the user's message, generate and
+ * persist the assistant response, return both.
+ */
+export async function submitMessage(
+  db: Kysely<Database>,
+  threadId: string,
+  content: string,
+): Promise<{ userMessage: Message; assistantMessage: Message }> {
+  const userMessage = await insertMessage(db, {
+    thread_id: threadId,
+    role: 'user',
+    content,
+  });
 
-  return db
-    .insertInto('messages')
-    .values({
-      thread_id: threadId,
-      role: 'assistant',
-      content: aiContent,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
+  const assistantMessage = await insertMessage(db, {
+    thread_id: threadId,
+    role: 'assistant',
+    content: createEchoResponse(content),
+  });
+
+  return { userMessage, assistantMessage };
 }

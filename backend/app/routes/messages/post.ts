@@ -1,4 +1,5 @@
-import { createMessage, createMockResponse } from '@services/messageService';
+import { db } from '@db/db';
+import { submitMessage } from '@services/messageService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 type ThreadParams = {
@@ -19,18 +20,11 @@ export async function setupMessagesPostRoute(fastify: FastifyInstance) {
       const { id: threadId } = request.params;
       const { content } = request.body;
 
-      // Save User Message
-      await createMessage({
-        thread_id: threadId,
-        role: 'user',
-        content: content,
-      });
-
-      // Mock AI Response
-      const aiMessage = await createMockResponse(threadId, content);
+      // Save user message + generate & save assistant response (service layer)
+      const { assistantMessage } = await submitMessage(db, threadId, content);
 
       // Return the message json for now (will be swapped for SSE stream later)
-      return reply.send({ message: aiMessage });
+      return reply.send({ message: assistantMessage });
     },
   );
 }

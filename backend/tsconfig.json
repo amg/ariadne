@@ -5,7 +5,9 @@
     "paths": {
       "@services/*": ["./src/services/*"],
       "@routes/*": ["./app/routes/*"],
-      "@db/*": ["./src/db/*"]
+      "@db/*": ["./src/db/*"],
+      "@queries/*": ["./src/db/queries/*"],
+      "@test/*": ["./test/*"]
     },
     // "rootDir": "./src",
     // "outDir": "./dist",
