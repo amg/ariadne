@@ -48,7 +48,8 @@ export async function migrateToLatest() {
 }
 
 // If run directly
-if (require.main === module) {
+const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
   migrateToLatest().then(() => {
     console.log('Migrations complete');
     process.exit(0);
