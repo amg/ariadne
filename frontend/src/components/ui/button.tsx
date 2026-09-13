@@ -1,7 +1,7 @@
 import { Slot } from '@radix-ui/react-slot';
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
+import { cn } from '@/services/utils';
 
 export type ButtonVariant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
 export type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';

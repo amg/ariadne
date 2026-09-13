@@ -1,31 +1,10 @@
-import AppLayout from '@/components/layout/AppLayout';
-import { createThread, fetchMessages, fetchThreads, postMessage } from '@/lib/api';
+import { action as newThreadAction } from '@/actions/threads/newThread';
+import { action as sendMessageAction } from '@/actions/threads/sendMessage';
+import AboutPage from '@/pages/AboutPage';
+import AppLayout, { loader as rootLoader } from '@/pages/AppLayout';
 import EmptyPage from '@/pages/EmptyPage';
+import { fetchThreads } from '@/services/api';
 import { createBrowserRouter, redirect } from 'react-router';
-
-type RouteArgs = { params: { threadId?: string }; request: Request };
-
-async function rootLoader() {
-  return { threads: await fetchThreads() };
-}
-
-async function messagesLoader({ params }: RouteArgs) {
-  if (!params.threadId) return { messages: [] };
-  return { messages: await fetchMessages(params.threadId) };
-}
-
-async function newThreadAction() {
-  const thread = await createThread('New Chat');
-  return redirect(`/threads/${thread.id}`);
-}
-
-async function sendMessageAction({ params, request }: RouteArgs) {
-  const formData = await request.formData();
-  const content = String(formData.get('content') ?? '').trim();
-  if (!params.threadId || !content) return null;
-  await postMessage(params.threadId, content);
-  return null;
-}
 
 export const router = createBrowserRouter([
   {
@@ -34,15 +13,25 @@ export const router = createBrowserRouter([
     Component: AppLayout,
     loader: rootLoader,
     children: [
-      { index: true, Component: EmptyPage },
+      {
+        index: true,
+        Component: EmptyPage,
+        // Redirect to the newest thread; EmptyPage only renders when none exist.
+        loader: async () => {
+          const threads = await fetchThreads();
+          return threads.length > 0 ? redirect(`/threads/${threads[0].id}`) : null;
+        },
+      },
+      // Static page — no loader; a route only gets data from its own module.
+      { path: 'about', Component: AboutPage },
       { path: 'threads/new', action: newThreadAction },
       {
+        // Loader co-located in the page module; routed here via lazy.
         path: 'threads/:threadId',
-        loader: messagesLoader,
         action: sendMessageAction,
         lazy: async () => {
-          const mod = await import('@/pages/ChatPage');
-          return { Component: mod.default };
+          const { default: Component, loader } = await import('@/pages/ChatPage');
+          return { Component, loader };
         },
       },
     ],

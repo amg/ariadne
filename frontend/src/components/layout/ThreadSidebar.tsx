@@ -1,39 +1,49 @@
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Thread } from '@/lib/api';
-import { MessageSquare, PlusCircle } from 'lucide-react';
-import { Form, Link } from 'react-router';
+import type { Thread } from '@/services/api';
+import { Info } from 'lucide-react';
 
-type Props = {
+type ThreadSidebarProps = {
   threads: Thread[];
   activeThreadId: string | null;
+  onSelectThread: (id: string) => void;
+  onNewChat: () => void;
+  onAbout: () => void;
 };
 
-export default function ThreadSidebar({ threads, activeThreadId }: Props) {
+export default function ThreadSidebar({
+  threads,
+  activeThreadId,
+  onSelectThread,
+  onNewChat,
+  onAbout,
+}: ThreadSidebarProps) {
   return (
-    <aside className="flex w-64 flex-col border-r bg-muted/20 p-4">
-      <Form method="post" action="/threads/new" className="mb-4">
-        <Button type="submit" className="flex w-full items-center gap-2">
-          <PlusCircle className="h-4 w-4" /> New Chat
-        </Button>
-      </Form>
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-2">
-          {threads.map((thread) => (
-            <Button
-              key={thread.id}
-              asChild
-              variant={thread.id === activeThreadId ? 'secondary' : 'ghost'}
-              className="justify-start gap-2"
-            >
-              <Link to={`/threads/${thread.id}`}>
-                <MessageSquare className="h-4 w-4" />
-                <span className="truncate">{thread.title}</span>
-              </Link>
-            </Button>
-          ))}
-        </div>
-      </ScrollArea>
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-muted/30 p-3">
+      <Button onClick={onNewChat} className="w-full">
+        New Chat
+      </Button>
+      <div className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto">
+        {threads.map((thread) => (
+          <button
+            key={thread.id}
+            type="button"
+            onClick={() => onSelectThread(thread.id)}
+            className={`w-full truncate rounded-md px-3 py-2 text-left text-sm ${
+              thread.id === activeThreadId ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+            }`}
+          >
+            {thread.title}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onAbout}
+        className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <Info className="h-4 w-4" />
+        About
+      </button>
     </aside>
   );
 }
