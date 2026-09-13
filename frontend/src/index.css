@@ -36,3 +36,93 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Thinking indicator (three bouncing dots). */
+@keyframes thinking-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0) scale(0.85);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1);
+  }
+}
+
+.thinking-dot {
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+/* Blinking caret appended while an assistant reply is still streaming. */
+@keyframes markdown-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.markdown-cursor > :last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: hsl(var(--muted-foreground));
+  animation: markdown-cursor-blink 1s steps(2, start) infinite;
+}
+
+/* Syntax highlighting (github-dark, compact) for markdown code blocks. */
+.hljs {
+  color: #c9d1d9;
+}
+.hljs-comment,
+.hljs-quote {
+  color: #8b949e;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst {
+  color: #ff7b72;
+}
+.hljs-number,
+.hljs-literal,
+.hljs-variable,
+.hljs-constant,
+.hljs-template-variable,
+.hljs-tag .hljs-attr {
+  color: #79c0ff;
+}
+.hljs-string,
+.hljs-doctag,
+.hljs-regexp,
+.hljs-addition {
+  color: #a5d6ff;
+}
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #d2a8ff;
+}
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-built_in {
+  color: #ffa657;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-meta {
+  color: #79c0ff;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+.hljs-deletion {
+  color: #ffa198;
+}

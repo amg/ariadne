@@ -3,16 +3,19 @@ import * as React from 'react';
 
 import { cn } from '@/services/utils';
 
-type Props = React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>;
+type Props = React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
+  /** Ref to the element that actually scrolls (the Radix Viewport). */
+  viewportRef?: React.Ref<HTMLDivElement>;
+};
 
 const ScrollArea = React.forwardRef<React.ElementRef<typeof ScrollAreaPrimitive.Root>, Props>(
-  ({ className, children, ...props }, ref) => (
+  ({ className, children, viewportRef, ...props }, ref) => (
     <ScrollAreaPrimitive.Root
       ref={ref}
       className={cn('relative overflow-hidden', className)}
       {...props}
     >
-      <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+      <ScrollAreaPrimitive.Viewport ref={viewportRef} className="h-full w-full rounded-[inherit]">
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />

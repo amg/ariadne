@@ -30,7 +30,7 @@ export function formatCost(costUsd?: string | null): string | null {
 export function chatStatusText(status: 'submitted' | 'streaming' | 'ready' | 'error'): string {
   switch (status) {
     case 'submitted':
-      return 'connecting';
+      return 'thinking';
     case 'streaming':
       return 'streaming';
     case 'error':
