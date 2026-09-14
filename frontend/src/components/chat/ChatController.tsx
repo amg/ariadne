@@ -3,7 +3,7 @@ import { updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import type { UIMessage } from 'ai';
 import { DefaultChatTransport } from 'ai';
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import ChatView, { type DisplayRow } from './ChatView';
 
 /**
@@ -132,6 +132,8 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
     [threadId],
   );
 
+  const [droppedIds, setDroppedIds] = useState<Set<string>>(new Set());
+
   const chat = useChat({
     id: threadId,
     transport,
@@ -154,9 +156,15 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
     }
   }, [chat.messages]);
 
+  const visibleRows = useMemo(
+    () => rows.filter((row) => !droppedIds.has(row.id)),
+    [rows, droppedIds],
+  );
+
   const display = useMemo(
-    () => mergeDisplayRows(rows, chat.messages, chat.status !== 'ready', reasoningCache.current),
-    [rows, chat.messages, chat.status],
+    () =>
+      mergeDisplayRows(visibleRows, chat.messages, chat.status !== 'ready', reasoningCache.current),
+    [visibleRows, chat.messages, chat.status],
   );
 
   const send = (content: string) => {
@@ -179,6 +187,12 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
     const lastUserIndex = findTargetUserMessageIndex(rows, override?.messageId);
 
     if (lastUserIndex >= 0) {
+      // Optimistically hide the assistant messages that the server will delete
+      const toDrop = rows.slice(lastUserIndex + 1).map((r) => r.id);
+      if (toDrop.length > 0) {
+        setDroppedIds((prev) => new Set([...prev, ...toDrop]));
+      }
+
       // Keep only messages up to and including the last user message
       // This removes any assistant replies that will be regenerated
       const rowsToKeep = rows.slice(0, lastUserIndex + 1);
