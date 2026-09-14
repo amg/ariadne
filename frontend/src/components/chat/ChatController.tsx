@@ -156,6 +156,7 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
     }
   }, [chat.messages]);
 
+  // Filter out dropped rows before merging with chat messages
   const visibleRows = useMemo(
     () => rows.filter((row) => !droppedIds.has(row.id)),
     [rows, droppedIds],

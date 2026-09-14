@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
+import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -7,6 +8,7 @@ import {
   type ChatStreamHandle,
   DEFAULT_MODEL_ID,
   computeCostUsd,
+  retryLastExchange,
   submitChat,
 } from '@services/aiService';
 import { useTestDb } from '@test/test-db';
@@ -60,9 +62,11 @@ async function assertSuccess(
   return result.data;
 }
 
-describe('submitChat', () => {
-  useTestDb();
+// Single lifecycle hook for the whole file: useTestDb() destroys the pool in
+// its afterAll, so a per-describe call would kill the DB before later suites.
+useTestDb();
 
+describe('submitChat', () => {
   it('returns thread_not_found for unknown/foreign threads', async () => {
     const { userId } = await createRandomThread();
 
@@ -182,6 +186,74 @@ describe('submitChat', () => {
     } finally {
       restoreIdleTimeout(savedIdleTimeout);
     }
+  });
+});
+
+describe('retryLastExchange', () => {
+  it('returns thread_not_found for unknown/foreign threads and nothing_to_regenerate on empty ones', async () => {
+    const { userId, threadId } = await createRandomThread();
+
+    const unknown = await retryLastExchange({ userId, threadId: randomUUID() });
+    const empty = await retryLastExchange({ userId, threadId });
+
+    expect(unknown).toEqual({ type: 'error', code: 'thread_not_found' });
+    expect(empty).toEqual({ type: 'error', code: 'nothing_to_regenerate' });
+  });
+
+  it('replaces a stale assistant reply (row + usage cascade) with a fresh exchange', async () => {
+    const { userId, threadId } = await createRandomThread();
+
+    const first = await assertSuccess(await submitChat({ userId, threadId, content: 'retry me' }));
+    for await (const _message of readUIMessageStream({ stream: first.stream })) {
+      // Drain so persistence settles before the retry re-lists the thread.
+    }
+    await expect(first.outcome).resolves.toMatchObject({ type: 'success' });
+
+    const retry = await assertSuccess(await retryLastExchange({ userId, threadId }));
+    const messages: UIMessage[] = [];
+    for await (const message of readUIMessageStream({ stream: retry.stream })) {
+      messages.push(message);
+    }
+    await expect(retry.outcome).resolves.toMatchObject({ type: 'success' });
+
+    const streamed = messages[messages.length - 1];
+    expect(streamed?.id).toBe(retry.assistantMessageId);
+
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => row.role)).toEqual(['user', 'assistant']);
+    expect(rows[1]?.id).toBe(retry.assistantMessageId);
+    expect(rows[1]?.id).not.toBe(first.assistantMessageId);
+    const text = rows[1]?.content ?? '';
+    expect(text).toContain('retry me');
+
+    // Old usage row cascaded with the deleted message; fresh reply has its own.
+    expect(
+      await getMessageUsageByMessageId({ messageId: first.assistantMessageId }),
+    ).toBeUndefined();
+    expect(await getMessageUsageByMessageId({ messageId: retry.assistantMessageId })).toBeDefined();
+  });
+
+  it('continues a thread that ends in a user row without duplicating it', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const userMessage = await insertMessage({
+      thread_id: threadId,
+      role: 'user',
+      content: 'stuck prompt',
+    });
+
+    const handle = await assertSuccess(await retryLastExchange({ userId, threadId }));
+    const messages: UIMessage[] = [];
+    for await (const message of readUIMessageStream({ stream: handle.stream })) {
+      messages.push(message);
+    }
+    await expect(handle.outcome).resolves.toMatchObject({
+      type: 'success',
+      data: { finishReason: 'stop' },
+    });
+
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => row.id)).toEqual([userMessage.id, handle.assistantMessageId]);
+    expect(rows[1]?.content).toBe('Mock reply to: stuck prompt');
   });
 });
 

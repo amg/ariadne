@@ -6,4 +6,4 @@
  */
 export { DEFAULT_MODEL_ID } from './config';
 export { computeCostUsd } from './cost';
-export { submitChat, type ChatStreamHandle } from './submitChat';
+export { retryLastExchange, submitChat, type ChatStreamHandle } from './submitChat';

@@ -73,3 +73,18 @@ export async function fetchMessages(threadId: string): Promise<Message[]> {
   if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
   return res.json();
 }
+
+/** Edits the thread's last message. Empty content is rejected by the API. */
+export async function updateMessage(
+  threadId: string,
+  messageId: string,
+  content: string,
+): Promise<Message> {
+  const res = await fetch(`/api/threads/${threadId}/messages/${messageId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`Failed to update message: ${res.statusText}`);
+  return res.json();
+}

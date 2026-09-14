@@ -6,7 +6,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupHealthRoute } from '@routes/health/get';
-import { setupMessagesGetRoute } from '@routes/messages';
+import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
 import {
   setupThreadsDeleteRoute,
   setupThreadsGetRoute,
@@ -47,6 +47,7 @@ setupThreadsPostRoute(app);
 setupThreadsPatchRoute(app);
 setupThreadsDeleteRoute(app);
 setupMessagesGetRoute(app);
+setupMessagesPatchRoute(app);
 setupChatPostRoute(app);
 
 const PORT = Number(process.env.PORT ?? 3001);

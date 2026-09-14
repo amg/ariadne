@@ -55,6 +55,7 @@ export class ChatExchange {
   readonly outcome: Promise<Result<ChatOutcome>>;
 
   private assistantText = '';
+  private assistantReasoning = '';
   private firstTokenAt: number | null = null;
   private lastChunkAt: number | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,6 +78,15 @@ export class ChatExchange {
 
   recordTextDelta(delta: string): void {
     this.assistantText += delta;
+    this.recordActivity();
+  }
+
+  recordReasoningDelta(delta: string): void {
+    this.assistantReasoning += delta;
+    this.recordActivity();
+  }
+
+  private recordActivity(): void {
     const now = Date.now();
     if (this.firstTokenAt === null) this.firstTokenAt = now;
     this.lastChunkAt = now;
@@ -156,7 +166,15 @@ export class ChatExchange {
   }
 
   private async persistText(): Promise<void> {
+    // If we have neither text nor reasoning, nothing to update.
+    if (this.assistantText === '' && this.assistantReasoning === '') return;
+
+    // We only persist the final generated text right now.
+    // Reasoning is considered ephemeral and dropped after the stream finishes,
+    // though the frontend cache preserves it visually until page reload.
+    // (To persist reasoning, updateMessageContent/DB schema would need a reasoning column).
     if (this.assistantText === '') return;
+
     await updateMessageContent({
       messageId: this.deps.assistantMessageId,
       content: this.assistantText,

@@ -103,6 +103,9 @@ async function startExchange({
       if (chunk.type === 'text-delta') {
         // Accumulate text and (re-)arm the exchange's inter-token idle timer.
         exchange.recordTextDelta(chunk.text);
+      } else if (chunk.type === 'reasoning-delta') {
+        // @ts-expect-error property might not be correctly typed in current version
+        exchange.recordReasoningDelta(chunk.textDelta);
       }
     },
     // ai v7 fires onAbort (not onEnd) when the stream is aborted.
