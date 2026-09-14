@@ -12,13 +12,13 @@ import {
   resolveInferenceConfig,
 } from './config';
 import { ChatExchange, type ChatOutcome } from './exchange';
-import { createIdleGuard } from './idleGuard';
 
 /**
  * Per-call service boundary (see features/ai-connector/MVP.md). Flow:
  *   1. verify thread ownership,
  *   2. insert user + assistant rows (assistant empty until streamed),
- *   3. `streamText` over the full thread history, guarded by the idle timer,
+ *   3. `streamText` over the full thread history, with inter-token idle
+ *      timeout watched by the exchange,
  *   4. `ChatExchange` persists text + usage as the stream settles.
  */
 
@@ -77,13 +77,14 @@ export async function submitChat({
     content: '',
   });
 
+  const controller = new AbortController();
   const exchange = new ChatExchange({
     assistantMessageId: assistantMessage.id,
     model: config.model,
+    idleTimeoutMs: config.idleTimeoutMs,
+    // Fires on the idle deadline; user stop / client disconnect reuse the controller.
+    onIdleTimeout: () => controller.abort(),
   });
-  const controller = new AbortController();
-  // Fires on the idle deadline; also reused by user stop / client disconnect.
-  const guard = createIdleGuard(config.idleTimeoutMs, () => controller.abort());
 
   const streamResult = streamText({
     model: createModel(config),
@@ -93,17 +94,15 @@ export async function submitChat({
     maxRetries: 0,
     onChunk: ({ chunk }) => {
       if (chunk.type === 'text-delta') {
+        // Accumulate text and (re-)arm the exchange's inter-token idle timer.
         exchange.recordTextDelta(chunk.text);
-        guard.arm();
       }
     },
     // ai v7 fires onAbort (not onEnd) when the stream is aborted.
     onAbort: async () => {
-      guard.clear();
-      await exchange.completeAbort(guard.fired);
+      await exchange.completeAbort();
     },
     onEnd: async (event) => {
-      guard.clear();
       await exchange.completeNatural({
         finishReason: event.finishReason,
         usage: event.usage,
@@ -111,8 +110,7 @@ export async function submitChat({
       });
     },
     onError: async ({ error }) => {
-      guard.clear();
-      await exchange.completeError(error, guard.fired);
+      await exchange.completeError(error);
     },
   });
 

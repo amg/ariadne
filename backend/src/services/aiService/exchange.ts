@@ -8,8 +8,15 @@ import { buildUsageRow, hasUsageReport } from './usageMap';
 
 /**
  * One assistant exchange: accumulates streamed text, owns the latency
- * window, persists text + `message_usage` on completion, and settles a
- * single outcome promise exactly once.
+ * window and the inter-token idle watchdog, persists text +
+ * `message_usage` on completion, and settles a single outcome promise
+ * exactly once.
+ *
+ * Idle watchdog: arms on the first text delta (prefill is exempt) and
+ * re-arms on every subsequent delta. When the deadline elapses it sets
+ * `idleFired` and invokes `onIdleTimeout` (caller aborts the stream);
+ * the completion paths read `idleFired` to distinguish `stream_timeout`
+ * from user stop / client disconnect.
  */
 
 export type ChatOutcome = {
@@ -38,6 +45,10 @@ const SDK_FINISH_REASON_MAP: Record<FinishReason, MessageFinishReason> = {
 type ExchangeDeps = {
   assistantMessageId: string;
   model: string;
+  /** Inter-token idle deadline. `<= 0` disables the watchdog. */
+  idleTimeoutMs: number;
+  /** Fired when the idle deadline elapses; caller aborts the stream. */
+  onIdleTimeout: () => void;
 };
 
 export class ChatExchange {
@@ -46,6 +57,8 @@ export class ChatExchange {
   private assistantText = '';
   private firstTokenAt: number | null = null;
   private lastChunkAt: number | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleFired = false;
   private settled = false;
   private readonly resolveOutcome: (value: Result<ChatOutcome>) => void;
 
@@ -67,10 +80,12 @@ export class ChatExchange {
     const now = Date.now();
     if (this.firstTokenAt === null) this.firstTokenAt = now;
     this.lastChunkAt = now;
+    this.armIdleTimer();
   }
 
   /** Normal stream end (onEnd): persist everything, report the outcome. */
   async completeNatural(event: NaturalFinishEvent): Promise<void> {
+    this.clearIdleTimer();
     try {
       await this.persistText();
 
@@ -91,10 +106,11 @@ export class ChatExchange {
     }
   }
 
-  /** Aborted stream (onAbort): user stop, client disconnect or idle guard. */
-  async completeAbort(idleFired: boolean): Promise<void> {
+  /** Aborted stream (onAbort): user stop, client disconnect or idle timeout. */
+  async completeAbort(): Promise<void> {
+    this.clearIdleTimer();
     await this.persistText().catch(() => {});
-    if (idleFired) {
+    if (this.idleFired) {
       this.resolveOutcome(err('stream_timeout', 'The stream went idle between tokens.'));
       return;
     }
@@ -105,14 +121,32 @@ export class ChatExchange {
   }
 
   /** Safety net (onError) so the outcome promise always settles. */
-  async completeError(error: unknown, idleFired: boolean): Promise<void> {
+  async completeError(error: unknown): Promise<void> {
+    this.clearIdleTimer();
     await this.persistText().catch(() => {});
     this.resolveOutcome(
       err(
-        idleFired ? 'stream_timeout' : 'provider_error',
+        this.idleFired ? 'stream_timeout' : 'provider_error',
         error instanceof Error ? error.message : undefined,
       ),
     );
+  }
+
+  private armIdleTimer(): void {
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    if (this.deps.idleTimeoutMs <= 0) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleFired = true;
+      this.idleTimer = null;
+      this.deps.onIdleTimeout();
+    }, this.deps.idleTimeoutMs);
+  }
+
+  private clearIdleTimer(): void {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
   }
 
   private latencyMs(): number | null {
