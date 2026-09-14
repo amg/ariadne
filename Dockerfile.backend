@@ -1,0 +1,24 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (full set: the dev-mode CMD below needs tsx).
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build TypeScript (if needed for production)
+RUN npm run typecheck
+
+# Expose port (configurable via ENV)
+EXPOSE ${PORT:-3001}
+
+# Drop privileges: the container never needs root.
+USER node
+
+# Start the server
+CMD ["npm", "run", "dev"]

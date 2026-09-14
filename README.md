@@ -9,6 +9,7 @@ A production-ready, Dockerized chatbot application with real-time streaming, con
 - 🧠 **Factual Memory** - Long-term memory extraction for cross-session context recall
 - 📊 **Cost Observability** - Token usage tracking and cost calculation per message
 - 🐳 **Dockerized** - Easy deployment with Docker Compose
+- ☁️ **Cloud-Ready** - Environment-based configuration for any deployment
 
 ## Tech Stack
 
@@ -24,21 +25,116 @@ A production-ready, Dockerized chatbot application with real-time streaming, con
 
 ## Quick Start
 
+### Local Development
+
 ```bash
+# Copy environment template
+cp .env.example .env
+
+# Configure your environment variables
+# Edit .env with your database credentials and API keys
+
 # Start all services
 docker compose up -d
 
 # Access the application
-# Frontend: http://localhost:3000
+# Frontend: http://localhost:5173
 # Backend: http://localhost:3001
 ```
+
+### Environment Variables
+
+All configuration is externalized via environment variables. See `.env.example` for the complete list:
+
+```bash
+# Server Configuration
+PORT=3001                    # Backend server port
+HOST=0.0.0.0                 # Backend server host
+
+# Database Configuration
+DATABASE_URL=postgres://...  # Full connection string (recommended)
+# OR individual components:
+DB_USER=postgres
+DB_PASSWORD=postgrespassword
+DB_NAME=chatbot
+DB_PORT=5432
+
+# AI Provider
+DEEPINFRA_API_KEY=your-key   # DeepInfra API key (required)
+DEFAULT_MODEL=Qwen/Qwen3.5-9B
+AI_STREAM_IDLE_TIMEOUT_MS=5000
+```
+
+## Deployment
+
+### Private Server + Cloudflare Tunnel (Recommended)
+
+Deploy on a home server or VPS and expose securely via Cloudflare Tunnel:
+
+```bash
+# 1. Deploy to your server
+git clone <repo>
+docker compose up -d
+
+# 2. Set up Cloudflare Tunnel
+# See docs/ideas/CLOUDFLARE-DEPLOYMENT.md for complete guide
+
+# 3. Access via your domain
+# https://chat.yourdomain.com
+```
+
+**Benefits:**
+- ✅ No port forwarding required
+- ✅ Free SSL/TLS via Cloudflare
+- ✅ DDoS protection
+- ✅ Hidden origin IP
+- ✅ Global CDN
+
+**Cost:** ~$1-2/month (domain only, if hosting at home)
+
+**Architecture:** Combined deployment (frontend + backend + database on same server)
+- Simple one-command deployment
+- No CORS configuration needed
+- Perfect for personal/small-scale use
+- Can split later if needed
+
+### Self-Hosted (Local Network)
+
+```bash
+# Start services
+docker compose up -d
+
+# Access from local network
+# http://<server-ip>:5173
+```
+
+**Note:** Only accessible within your network. For external access, use Cloudflare Tunnel or configure port forwarding.
+
+### Cloud Deployment (AWS/GCP/Azure)
+
+For production cloud deployment:
+
+- See `docs/ideas/AWS-DEPLOYMENT.md` for AWS-specific guidance
+- All configuration via environment variables (cloud-ready)
+- Combined or split deployment both supported
 
 ## Project Structure
 
 ```
 alex-chat-bot/
 ├── frontend/          # React frontend application
+│   ├── .env.example   # Frontend environment variables
+│   └── vite.config.ts # Vite configuration
 ├── backend/           # Node.js backend API
+│   ├── .env.example   # Backend environment variables
+│   ├── app/           # Fastify routes and server
+│   ├── src/           # Services and database layer
+│   └── mock/          # Mock inference server for testing
+├── docs/
+│   └── ideas/         # Deployment guides and technical analysis
+│       ├── CLOUDFLARE-DEPLOYMENT.md
+│       ├── AWS-DEPLOYMENT.md
+│       └── SSE-VS-WEBSOCKET.md
 ├── features/          # Feature domain modules
 ├── adrs/              # Architecture Decision Records
 └── scripts/           # Utility scripts
@@ -49,30 +145,74 @@ alex-chat-bot/
 The backend separates data access from business logic:
 
 - `backend/src/db/queries/<table>/<query>.ts` — one Kysely query per file; the only place that touches Kysely/the database.
-- `backend/src/services/*` — business logic (default titles, echo response, seeding semantics); receives a `Kysely<Database>` instance and delegates all SQL to queries.
-- `backend/app/**` — Fastify routes and server wiring; the only place that hands pool connections to services.
+- `backend/src/services/*` — business logic; receives a `Kysely<Database>` instance and delegates all SQL to queries.
+- `backend/app/**` — Fastify routes and server wiring.
 
-Tests are real end-to-end tests against an actual PostgreSQL (`pgvector/pgvector:pg16`, started via testcontainers) — no mocks. Query and service tests each cover their own edge cases.
-
-The test database URL is resolved in this order:
-
-1. `TEST_DATABASE_URL` env var — explicit, always wins.
-2. A disposable testcontainers Postgres when Docker is available (`npm test` on a dev host / CI).
-3. Sandbox fallback: the dev `chat_db` Postgres reached through the agent container's network gateway, using a dedicated auto-created `chatbot_test` database (dev data is never touched).
+Tests are real end-to-end tests against an actual PostgreSQL (`pgvector/pgvector:pg16`, started via testcontainers) — no mocks.
 
 ```bash
 cd backend
-npm test                 # container or sandbox fallback automatically
-npm run test:watch
-
-# Reuse an existing database instead:
-TEST_DATABASE_URL=postgres://postgres:postgrespassword@127.0.0.1:5432/chatbot_test npm test
+npm test                 # Run tests
+npm run test:watch       # Watch mode
 ```
+
+## Technical Decisions
+
+### Deployment: Combined (Frontend + Backend Together)
+
+**Decision:** Keep frontend and backend deployed together on same server
+
+**Rationale:**
+- ✅ Simpler deployment (one `docker compose up`)
+- ✅ No CORS configuration needed
+- ✅ Simpler auth (same-origin cookies)
+- ✅ Easier debugging (single server)
+- ✅ Perfect for personal/small-scale use
+
+**Can split later if needed:**
+- Deploy frontend to Cloudflare Pages (CDN)
+- Backend stays on private server
+- Configure CORS and cross-domain auth
+
+See `docs/ideas/CLOUDFLARE-DEPLOYMENT.md` for deployment guide.
+
+### Protocol: SSE for Chat Streaming
+
+**Decision:** Use SSE (Server-Sent Events) instead of WebSocket
+
+**Rationale:**
+- ✅ Simpler implementation (HTTP-based)
+- ✅ Automatic reconnection (browser handles it)
+- ✅ Native Vercel AI SDK support
+- ✅ Perfect for request/response chat pattern
+- ✅ Works through Cloudflare Tunnel without issues
+
+**When to migrate to WebSocket:**
+- Real-time collaboration (multiple users editing same doc)
+- Server-initiated push notifications
+- Sub-100ms latency requirements
+
+See `docs/ideas/SSE-VS-WEBSOCKET.md` for complete analysis.
+
+### Configuration: Environment Variables
+
+**Decision:** Externalize all configuration to environment variables
+
+**Benefits:**
+- ✅ Deploy anywhere without code changes
+- ✅ Different configs for dev/staging/production
+- ✅ Secrets managed outside code
+- ✅ Cloud-ready (AWS, GCP, Azure, private server)
+
+See `.env.example` and `docs/ideas/CONFIGURATION-CHANGES.md` for details.
 
 ## Documentation
 
-- [Grand Plan](GRAND_PLAN.md) - High-level project requirements and architecture
+- [Grand Plan](GRAND_PLAN.md) - High-level project requirements
 - [Architecture Decisions](adrs/) - Technical decision records
+- [Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md) - Private server + tunnel guide
+- [AWS Deployment](docs/ideas/AWS-DEPLOYMENT.md) - Cloud deployment considerations
+- [SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md) - Protocol analysis
 
 ## License
 
