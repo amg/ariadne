@@ -18,8 +18,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: ../Dockerfile.backend
+      context: .
+      dockerfile: Dockerfile.backend
     container_name: chat_backend
     environment:
       - PORT=${PORT:-3001}
@@ -39,8 +39,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../Dockerfile.frontend
+      context: .
+      dockerfile: Dockerfile.frontend
     container_name: chat_frontend
     environment:
       - VITE_API_PROXY_TARGET=${VITE_API_PROXY_TARGET:-http://backend:3001}

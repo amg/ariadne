@@ -2,15 +2,15 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy root package files (workspace setup)
+# Copy all package files (workspace setup)
 COPY package*.json ./
 COPY frontend/package*.json ./frontend/
 
 # Install dependencies (workspace-aware)
 RUN npm ci
 
-# Copy frontend source code
-COPY frontend/ ./frontend/
+# Copy frontend source
+COPY frontend ./frontend
 
 # Build the frontend
 WORKDIR /app/frontend

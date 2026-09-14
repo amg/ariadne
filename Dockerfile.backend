@@ -2,17 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy root package files (workspace setup)
+# Copy all package files (workspace setup)
 COPY package*.json ./
 COPY backend/package*.json ./backend/
 
-# Install dependencies (workspace-aware, include dev for tsx)
+# Install dependencies (workspace-aware)
 RUN npm ci
 
-# Copy backend source code
-COPY backend/ ./backend/
+# Copy backend source
+COPY backend ./backend
 
-# Typecheck (optional, helps catch issues early)
+# Typecheck
 WORKDIR /app/backend
 RUN npm run typecheck || true
 
