@@ -1,6 +1,6 @@
 import { submitChat } from '@services/aiService';
-import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
+import { isValidUuid } from '@services/validation';
 import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 

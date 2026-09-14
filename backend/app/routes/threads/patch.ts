@@ -1,6 +1,6 @@
 import { ThreadValidationError, renameThread } from '@services/threadService';
-import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
+import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 // Placeholder until page-level auth resolves the user.
