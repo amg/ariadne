@@ -16,6 +16,7 @@ export type InferenceConfig = {
   baseUrl?: string;
   apiKey?: string;
   idleTimeoutMs: number;
+  enableReasoning: boolean;
 };
 
 export function resolveInferenceConfig(): InferenceConfig {
@@ -24,6 +25,7 @@ export function resolveInferenceConfig(): InferenceConfig {
   const config: InferenceConfig = {
     model: process.env.DEFAULT_MODEL ?? DEFAULT_MODEL_ID,
     idleTimeoutMs: Number(process.env.AI_STREAM_IDLE_TIMEOUT_MS ?? '5000'),
+    enableReasoning: process.env.ENABLE_REASONING !== 'false', // Default: true
   };
   if (baseUrl !== undefined) config.baseUrl = baseUrl;
   if (process.env.DEEPINFRA_API_KEY) config.apiKey = process.env.DEEPINFRA_API_KEY;

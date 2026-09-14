@@ -1,7 +1,9 @@
 import type { Message } from '@/services/api';
+import { updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
+import type { UIMessage } from 'ai';
 import { DefaultChatTransport } from 'ai';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import ChatView, { type DisplayRow } from './ChatView';
 
 /**
@@ -32,6 +34,14 @@ function joinTextParts(parts: UiMessageLike['parts']): string {
     .join('');
 }
 
+/** Extract reasoning parts from a useChat message. */
+function extractReasoning(parts: UiMessageLike['parts']): string {
+  return parts
+    .filter((part) => part.type === 'reasoning')
+    .map((part) => part.text ?? '')
+    .join('');
+}
+
 /** Counts rows per (role, content) — the dedup key against chat state. */
 function countByKey(rows: Message[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -53,13 +63,16 @@ function mergeDisplayRows(
   rows: Message[],
   chatMessages: UiMessageLike[],
   streaming: boolean,
+  reasoningCache: Map<string, string>,
 ): DisplayRow[] {
   const usageById = new Map(rows.map((row) => [row.id, row.usage ?? null]));
+
   const settled: DisplayRow[] = rows.map((row) => ({
     id: row.id,
     message: row,
     usage: row.usage ?? null,
     streaming: false,
+    reasoning: reasoningCache.get(row.id) ?? null, // Get reasoning from persistent cache
   }));
 
   const rowCountByKey = countByKey(rows);
@@ -68,12 +81,20 @@ function mergeDisplayRows(
 
   for (const message of chatMessages) {
     const content = joinTextParts(message.parts);
+    const reasoning = message.role === 'assistant' ? extractReasoning(message.parts) : null;
+
+    // Track how many times this exact role+content has been shown
     const key = `${message.role}:${content}`;
     const shown = (shownByKey.get(key) ?? 0) + 1;
     shownByKey.set(key, shown);
 
+    // Skip if matched by ID (assistant streaming) or by role+content count (user optimistic)
     const alreadySettled = usageById.has(message.id) || shown <= (rowCountByKey.get(key) ?? 0);
     if (alreadySettled) continue;
+
+    // Only add to pending if there's content OR reasoning (for thinking-only phase)
+    const hasContent = content.length > 0 || (reasoning && reasoning.length > 0);
+    if (!hasContent) continue;
 
     pending.push({
       id: message.id,
@@ -86,10 +107,21 @@ function mergeDisplayRows(
       },
       usage: null,
       streaming: message.role === 'assistant' && streaming,
+      reasoning: reasoning || null,
     });
   }
 
   return [...settled, ...pending];
+}
+
+function findTargetUserMessageIndex(rows: Message[], overrideId?: string): number {
+  if (overrideId) {
+    return rows.findIndex((row) => row.id === overrideId);
+  }
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].role === 'user') return i;
+  }
+  return -1;
 }
 
 export default function ChatController({ threadId, rows, onSettle }: ChatControllerProps) {
@@ -109,14 +141,80 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
     onError: () => onSettle(),
   });
 
+  // Preserve reasoning across renders (even after stream completes)
+  const reasoningCache = useRef<Map<string, string>>(new Map());
+
+  // Update cache with any new reasoning from chat messages
+  useMemo(() => {
+    for (const msg of chat.messages) {
+      if (msg.role === 'assistant') {
+        const reasoning = extractReasoning(msg.parts);
+        if (reasoning) reasoningCache.current.set(msg.id, reasoning);
+      }
+    }
+  }, [chat.messages]);
+
   const display = useMemo(
-    () => mergeDisplayRows(rows, chat.messages, chat.status !== 'ready'),
+    () => mergeDisplayRows(rows, chat.messages, chat.status !== 'ready', reasoningCache.current),
     [rows, chat.messages, chat.status],
   );
 
   const send = (content: string) => {
     if (!content.trim() || chat.status === 'submitted' || chat.status === 'streaming') return;
     chat.sendMessage({ role: 'user', parts: [{ type: 'text', text: content.trim() }] });
+  };
+
+  /**
+   * Retry of the last inference (useChat `regenerate`). The server decides
+   * the exchange from DB state; the client message list is only there to
+   * satisfy the SDK's last-message guard, so always (re)seed it from the
+   * settled loader rows — in-session optimistic state can diverge from the
+   * DB (e.g. right after an edit). The override applies an edit that the
+   * revalidator hasn't applied to `rows` yet.
+   */
+  const retryLast = (override?: { messageId: string; content: string }) => {
+    if (chat.status === 'submitted' || chat.status === 'streaming') return;
+    if (rows.length === 0) return;
+
+    const lastUserIndex = findTargetUserMessageIndex(rows, override?.messageId);
+
+    if (lastUserIndex >= 0) {
+      // Keep only messages up to and including the last user message
+      // This removes any assistant replies that will be regenerated
+      const rowsToKeep = rows.slice(0, lastUserIndex + 1);
+
+      const seeded: UIMessage[] = rowsToKeep.map((row) => ({
+        id: row.id,
+        role: row.role,
+        parts: [{ type: 'text', text: row.content }],
+      }));
+      chat.setMessages(seeded);
+
+      // Clear reasoning cache for regenerated messages
+      for (const row of rows.slice(lastUserIndex + 1)) {
+        reasoningCache.current.delete(row.id);
+      }
+    }
+
+    try {
+      void chat.regenerate();
+    } catch {
+      // No settled rows: nothing to retry.
+    }
+  };
+
+  /** Saves a prompt edit; the stale reply is dropped, then the exchange regenerates. */
+  const editMessage = async (messageId: string, content: string): Promise<boolean> => {
+    const trimmed = content.trim();
+    if (!trimmed || chat.status === 'submitted' || chat.status === 'streaming') return false;
+    try {
+      await updateMessage(threadId, messageId, trimmed);
+      onSettle(); // drop the deleted reply + show the edited prompt right away
+      retryLast({ messageId, content: trimmed });
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   return (
@@ -126,6 +224,8 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
       errorMessage={chat.error?.message ?? null}
       onSend={send}
       onStop={() => chat.stop()}
+      onRetryLast={() => retryLast()}
+      onEditMessage={editMessage}
     />
   );
 }
