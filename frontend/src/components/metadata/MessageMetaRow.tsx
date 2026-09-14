@@ -1,5 +1,5 @@
 import type { MessageFinishReason, MessageUsage } from '@/services/api';
-import { formatCost, formatDuration, formatTokens } from '@/services/utils';
+import { cn, formatCost, formatDuration, formatTokens } from '@/services/utils';
 
 const FINISH_REASON_LABEL: Record<MessageFinishReason, string> = {
   stop: 'normal',
@@ -20,17 +20,24 @@ export default function MessageMetaRow({
   status,
   showLatency,
   action,
+  className,
 }: {
   usage: MessageUsage | null;
   status?: string;
   showLatency?: boolean;
   action?: React.ReactNode;
+  className?: string;
 }) {
   const prompt = usage ? usage.prompt_tokens - (usage.cached_input_tokens ?? 0) : null;
   const completion = usage ? usage.completion_tokens - (usage.reasoning_tokens ?? 0) : null;
 
   return (
-    <div className="mt-1 flex max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 self-end text-xs text-neutral-400">
+    <div
+      className={cn(
+        'flex max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-neutral-400',
+        className,
+      )}
+    >
       {/* prompt */}
       <span title="Prompt tokens (excluding cached)">
         <span className="font-bold text-neutral-200">{formatTokens(prompt) ?? '—'}</span>

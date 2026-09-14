@@ -93,11 +93,13 @@ type Props = {
   content: string;
   /** True while the row is still streaming — appends a blinking caret. */
   streaming?: boolean;
+  /** Allows parents to inject layout/margin classes. */
+  className?: string;
 };
 
-function MarkdownContent({ content, streaming = false }: Props) {
+function MarkdownContent({ content, streaming = false, className }: Props) {
   return (
-    <div className={cn('min-w-0 max-w-full', streaming && 'markdown-cursor')}>
+    <div className={cn('min-w-0 max-w-full', className, streaming && 'markdown-cursor')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}

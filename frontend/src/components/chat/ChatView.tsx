@@ -95,6 +95,7 @@ function MessageRow({
       )}
       {message.role === 'assistant' ? (
         <MessageMetaRow
+          className="mt-1 self-end"
           usage={usage}
           status={streaming ? chatStatusText(status) : undefined}
           showLatency={!streaming}
@@ -172,7 +173,7 @@ function BubbleContent({
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-3">
       {hasReasoning && (
         <ReasoningBlock reasoning={reasoning} isThinking={streaming && !hasContent} />
       )}
@@ -186,7 +187,7 @@ function ReasoningBlock({ reasoning, isThinking }: { reasoning: string; isThinki
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className={`rounded-md border border-border bg-muted/30 ${isThinking ? '' : 'mb-3'}`}>
+    <div className="rounded-md border border-border bg-muted/30">
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
@@ -363,7 +364,12 @@ export default function ChatView({
                 <div className="self-start rounded-lg bg-muted p-3 text-foreground">
                   <ThinkingIndicator />
                 </div>
-                <MessageMetaRow usage={null} status={chatStatusText(status)} showLatency={false} />
+                <MessageMetaRow
+                  className="mt-1 self-end"
+                  usage={null}
+                  status={chatStatusText(status)}
+                  showLatency={false}
+                />
               </div>
             ) : null}
           </div>

@@ -36,19 +36,29 @@ type DropdownMenuItemProps = React.ComponentProps<typeof DropdownMenuPrimitive.I
 };
 
 function DropdownMenuItem({ className, variant = 'default', ...props }: DropdownMenuItemProps) {
-  return (
-    <DropdownMenuPrimitive.Item
-      className={cn(
-        'relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors',
-        'focus:bg-accent focus:text-accent-foreground',
-        'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
-        variant === 'destructive' &&
-          'text-destructive focus:bg-destructive focus:text-destructive-foreground',
-        className,
-      )}
-      {...props}
-    />
-  );
+  const baseClasses =
+    'relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50';
+
+  switch (variant) {
+    case 'destructive':
+      return (
+        <DropdownMenuPrimitive.Item
+          className={cn(
+            baseClasses,
+            className,
+            'text-destructive focus:bg-destructive focus:text-destructive-foreground',
+          )}
+          {...props}
+        />
+      );
+    default:
+      return (
+        <DropdownMenuPrimitive.Item
+          className={cn(baseClasses, className, 'focus:bg-accent focus:text-accent-foreground')}
+          {...props}
+        />
+      );
+  }
 }
 
 export { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem };

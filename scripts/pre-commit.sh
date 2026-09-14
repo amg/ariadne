@@ -32,6 +32,12 @@ fi
 # --- Frontend: typecheck + build ---------------------------------------------
 FRONTEND_STAGED=$(echo "$STAGED" | grep -E '^frontend/|^package(-lock)?\.json$' || true)
 if [ -n "$FRONTEND_STAGED" ]; then
+  echo "🔍 Custom checks (cn Prop Superiority)..."
+  if ! node scripts/enforce-cn-rule.mjs $FRONTEND_STAGED; then
+    echo "❌ Prop Superiority check failed."
+    exit 1
+  fi
+
   echo "🧪 Frontend: tsc -b + vite build..."
   if ! (cd frontend && npm run build); then
     echo "❌ Frontend gate failed (typecheck or build)."
