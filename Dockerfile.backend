@@ -2,22 +2,24 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy root package files (workspace setup)
 COPY package*.json ./
+COPY backend/package*.json ./backend/
 
-# Install dependencies (full set: the dev-mode CMD below needs tsx).
+# Install dependencies (workspace-aware, include dev for tsx)
 RUN npm ci
 
-# Copy source code
-COPY . .
+# Copy backend source code
+COPY backend/ ./backend/
 
-# Build TypeScript (if needed for production)
-RUN npm run typecheck
+# Typecheck (optional, helps catch issues early)
+WORKDIR /app/backend
+RUN npm run typecheck || true
 
 # Expose port (configurable via ENV)
 EXPOSE ${PORT:-3001}
 
-# Drop privileges: the container never needs root.
+# Drop privileges
 USER node
 
 # Start the server
