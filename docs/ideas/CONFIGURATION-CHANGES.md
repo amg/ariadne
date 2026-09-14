@@ -124,7 +124,7 @@ Updated with:
 |----------|---------|-------------|
 | DEEPINFRA_API_KEY | - | DeepInfra API key (required for production) |
 | DEFAULT_MODEL | Qwen/Qwen3.5-9B | Default AI model |
-| AI_BASE_URL | - | Mock inference server URL (development) |
+| MOCK_AI_BASE_URL | - | Mock inference server URL (development) |
 | AI_STREAM_IDLE_TIMEOUT_MS | 5000 | Stream idle timeout in milliseconds |
 
 ### Frontend Configuration

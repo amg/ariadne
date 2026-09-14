@@ -10,7 +10,7 @@ import Fastify from 'fastify';
  * plumbing is testable without a real provider) and `data: [DONE]`.
  *
  * `createDeepInfra({ baseURL })` appends `/openai` to the base, so the
- * `AI_BASE_URL` switch-in value is this server's `/v1` root.
+ * `MOCK_AI_BASE_URL` switch-in value is this server's `/v1` root.
  *
  * Deterministic: reply text is derived from the last user message, token
  * counts from message shapes. A `PAUSE:<ms>` marker in the user content
@@ -19,7 +19,7 @@ import Fastify from 'fastify';
  */
 
 export type MockInferenceServer = {
-  /** The `AI_BASE_URL` value: server root + `/v1`. */
+  /** The `MOCK_AI_BASE_URL` value: server root + `/v1`. */
   baseUrl: string;
   stop: () => Promise<void>;
 };

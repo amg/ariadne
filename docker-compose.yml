@@ -25,7 +25,7 @@ services:
       - DATABASE_URL=postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgrespassword}@db:5432/${DB_NAME:-chatbot}
       - DEEPINFRA_API_KEY=${DEEPINFRA_API_KEY:-}
       - DEFAULT_MODEL=${DEFAULT_MODEL:-Qwen/Qwen3.5-9B}
-      - AI_BASE_URL=${AI_BASE_URL:-}
+      - MOCK_AI_BASE_URL=${MOCK_AI_BASE_URL:-}
       - AI_STREAM_IDLE_TIMEOUT_MS=${AI_STREAM_IDLE_TIMEOUT_MS:-5000}
     ports:
       - "${PORT:-3001}:3001"
@@ -40,10 +40,8 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     container_name: chat_frontend
-    environment:
-      - VITE_API_PROXY_TARGET=${VITE_API_PROXY_TARGET:-http://backend:3001}
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_PORT:-5173}:8080"
     depends_on:
       - backend
     restart: unless-stopped

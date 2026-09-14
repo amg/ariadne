@@ -113,7 +113,7 @@ async function main() {
   // 1. Provision DB and configure env before importing anything that pools.
   process.env.DATABASE_URL = await ensureSmokeDatabase();
   const mock = await startMockInferenceServer();
-  process.env.AI_BASE_URL = mock.baseUrl;
+  process.env.MOCK_AI_BASE_URL = mock.baseUrl;
   process.env.DEFAULT_MODEL = 'Qwen/Qwen3.5-9B';
 
   // 2. Fresh schema + migrations (import db module after env is set — it

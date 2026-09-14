@@ -156,56 +156,6 @@ npm test                 # Run tests
 npm run test:watch       # Watch mode
 ```
 
-## Technical Decisions
-
-### Deployment: Combined (Frontend + Backend Together)
-
-**Decision:** Keep frontend and backend deployed together on same server
-
-**Rationale:**
-- ✅ Simpler deployment (one `docker compose up`)
-- ✅ No CORS configuration needed
-- ✅ Simpler auth (same-origin cookies)
-- ✅ Easier debugging (single server)
-- ✅ Perfect for personal/small-scale use
-
-**Can split later if needed:**
-- Deploy frontend to Cloudflare Pages (CDN)
-- Backend stays on private server
-- Configure CORS and cross-domain auth
-
-See `docs/ideas/CLOUDFLARE-DEPLOYMENT.md` for deployment guide.
-
-### Protocol: SSE for Chat Streaming
-
-**Decision:** Use SSE (Server-Sent Events) instead of WebSocket
-
-**Rationale:**
-- ✅ Simpler implementation (HTTP-based)
-- ✅ Automatic reconnection (browser handles it)
-- ✅ Native Vercel AI SDK support
-- ✅ Perfect for request/response chat pattern
-- ✅ Works through Cloudflare Tunnel without issues
-
-**When to migrate to WebSocket:**
-- Real-time collaboration (multiple users editing same doc)
-- Server-initiated push notifications
-- Sub-100ms latency requirements
-
-See `docs/ideas/SSE-VS-WEBSOCKET.md` for complete analysis.
-
-### Configuration: Environment Variables
-
-**Decision:** Externalize all configuration to environment variables
-
-**Benefits:**
-- ✅ Deploy anywhere without code changes
-- ✅ Different configs for dev/staging/production
-- ✅ Secrets managed outside code
-- ✅ Cloud-ready (AWS, GCP, Azure, private server)
-
-See `.env.example` and `docs/ideas/CONFIGURATION-CHANGES.md` for details.
-
 ## Documentation
 
 - [Grand Plan](GRAND_PLAN.md) - High-level project requirements

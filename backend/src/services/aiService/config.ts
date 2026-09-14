@@ -4,7 +4,7 @@ import type { LanguageModel } from 'ai';
 /**
  * Provider configuration for the AI Connector boundary
  * (see features/ai-connector/MVP.md). Env is read lazily at call time so
- * tests can point `AI_BASE_URL` at the mock inference server.
+ * tests can point `MOCK_AI_BASE_URL` at the mock inference server.
  */
 
 export const DEFAULT_MODEL_ID = 'Qwen/Qwen3.5-9B';
@@ -19,7 +19,7 @@ export type InferenceConfig = {
 };
 
 export function resolveInferenceConfig(): InferenceConfig {
-  const rawBaseUrl = process.env.AI_BASE_URL?.trim();
+  const rawBaseUrl = process.env.MOCK_AI_BASE_URL?.trim();
   const baseUrl = rawBaseUrl ? rawBaseUrl.replace(/\/+$/, '') : undefined;
   const config: InferenceConfig = {
     model: process.env.DEFAULT_MODEL ?? DEFAULT_MODEL_ID,
@@ -30,14 +30,14 @@ export function resolveInferenceConfig(): InferenceConfig {
   return config;
 }
 
-/** Mock testing via `AI_BASE_URL` counts as configured (no key needed). */
+/** Mock testing via `MOCK_AI_BASE_URL` counts as configured (no key needed). */
 export function isInferenceConfigured(config: InferenceConfig): boolean {
   return config.baseUrl !== undefined || config.apiKey !== undefined;
 }
 
 /**
  * DeepInfra's official AI SDK provider (ADR-0002 Amendment 1). The mock
- * inference server switches in via `AI_BASE_URL` (OpenAI-compatible surface).
+ * inference server switches in via `MOCK_AI_BASE_URL` (OpenAI-compatible surface).
  */
 export function createModel(config: InferenceConfig): LanguageModel {
   const options: Parameters<typeof createDeepInfra>[0] = {};

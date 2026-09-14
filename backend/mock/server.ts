@@ -3,7 +3,7 @@ import { startMockInferenceServer } from './inferenceServer';
 /**
  * Standalone mock inference server for development:
  *   npm run mock          (backend workspace)
- * Point the backend at it with AI_BASE_URL=http://127.0.0.1:4141/v1
+ * Point the backend at it with MOCK_AI_BASE_URL=http://127.0.0.1:4141/v1
  */
 const port = Number(process.env.PORT ?? 4141);
 

@@ -39,7 +39,7 @@ type SubmitChatProps = {
 };
 
 const NOT_CONFIGURED_MESSAGE =
-  'Neither AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';
+  'Neither MOCK_AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';
 
 const STREAM_ERROR_MESSAGE = 'The assistant hit an error while generating the reply.';
 

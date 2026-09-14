@@ -22,7 +22,7 @@ import {
 /**
  * e2e against the built-in mock inference server (documented deviation:
  * the AI provider is external, so mocks are allowed there only).
- * `AI_BASE_URL` points the DeepInfra provider at the mock; env is read
+ * `MOCK_AI_BASE_URL` points the DeepInfra provider at the mock; env is read
  * lazily at submitChat call time.
  */
 
@@ -37,7 +37,7 @@ function restoreIdleTimeout(saved: string | undefined) {
 
 beforeAll(async () => {
   mock = await startMockInferenceServer();
-  process.env.AI_BASE_URL = mock.baseUrl;
+  process.env.MOCK_AI_BASE_URL = mock.baseUrl;
 });
 
 afterAll(async () => {

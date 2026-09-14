@@ -37,7 +37,7 @@ running total cost for the thread.
   ```
 * Config envs:
   * `DEFAULT_MODEL` = `Qwen/Qwen3.5-9B`.
-  * `AI_BASE_URL` — for the mock switch: the provider factory accepts a
+  * `MOCK_AI_BASE_URL` — for the mock switch: the provider factory accepts a
     `baseURL` override (openai-compatible default is
     `https://api.deepinfra.com/v1/openai`); verify against the installed
     package version at build time and fall back to `createOpenAICompatible`
@@ -237,13 +237,13 @@ A small local server replacing DeepInfra for dev and tests:
   surface `POST /v1/chat/completions`: SSE-streamed chat completion chunks +
   final `usage` block (incl. a populated `cached_tokens` field so the cache
   plumbing is testable without a real provider).
-* Switched in via `AI_BASE_URL`; zero API key needed. Deterministic canned
+* Switched in via `MOCK_AI_BASE_URL`; zero API key needed. Deterministic canned
   responses for tests; slight delay/simulated latency if useful.
 
 ## Testing
 * Repo convention is real e2e (testcontainers, no mocks). The AI provider is
   external, so e2e tests run against the mock inference server pointed at via
-  `AI_BASE_URL` (documented deviation: mocks only for the provider).
+  `MOCK_AI_BASE_URL` (documented deviation: mocks only for the provider).
 * Optional real-provider smoke test gated behind `DEEPINFRA_API_KEY`, skipped
   otherwise.
 * Cost math is pure + unit-testable; usage persistence covered by the usual
@@ -267,7 +267,7 @@ A small local server replacing DeepInfra for dev and tests:
 * Inter-token idle deadline: 5s (`AI_STREAM_IDLE_TIMEOUT_MS`), armed after
   first token; guard is ours, SDK classifies only finish/provider errors.
 * **Build verification (`ai@7.0.99` + `@ai-sdk/deepinfra@3.0.48`)**:
-  * `createDeepInfra({ baseURL })` works — mock switch via `AI_BASE_URL`
+  * `createDeepInfra({ baseURL })` works — mock switch via `MOCK_AI_BASE_URL`
     confirmed; the factory still demands an `apiKey`, so the mock path sends a
     `'mock'` placeholder (server ignores auth).
   * `onEnd` does **not** fire on abort; `onAbort` does (no usage there).
