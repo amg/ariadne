@@ -19,6 +19,8 @@
   "dependencies": {
     "@ai-sdk/deepinfra": "^3.0.48",
     "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
     "ai": "^7.0.99",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.4",

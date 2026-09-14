@@ -1,4 +1,5 @@
 import { getMessages } from '@services/messageService';
+import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -12,6 +13,9 @@ type ThreadParams = {
 export async function setupMessagesGetRoute(fastify: FastifyInstance) {
   fastify.get('/api/threads/:id/messages', async (request: FastifyRequest, reply: FastifyReply) => {
     const params = request.params as ThreadParams;
+    if (!isValidUuid(params.id)) {
+      return reply.code(400).send({ error: 'Invalid thread id' });
+    }
     const messages = await getMessages({ userId: REQUEST_USER_ID, threadId: params.id });
     if (!messages) {
       // Unknown thread and foreign thread are intentionally indistinguishable.

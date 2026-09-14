@@ -1,4 +1,5 @@
 import { deleteThread } from '@services/threadService';
+import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -12,6 +13,10 @@ type ThreadParams = {
 export async function setupThreadsDeleteRoute(fastify: FastifyInstance) {
   fastify.delete('/api/threads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as ThreadParams;
+
+    if (!isValidUuid(id)) {
+      return reply.code(400).send({ error: 'Invalid thread id' });
+    }
 
     const deleted = await deleteThread({ userId: REQUEST_USER_ID, threadId: id });
     if (!deleted) {

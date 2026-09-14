@@ -1,4 +1,5 @@
 import { submitChat } from '@services/aiService';
+import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -29,11 +30,18 @@ function extractLastUserText(messages: ChatRequestBody['messages']): string {
 export async function setupChatPostRoute(fastify: FastifyInstance) {
   fastify.post(
     '/api/threads/:id/chat',
+    {
+      // Each request triggers a billable DeepInfra call — throttle hard.
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    },
     async (
       request: FastifyRequest<{ Params: ThreadParams; Body: ChatRequestBody }>,
       reply: FastifyReply,
     ) => {
       const { id: threadId } = request.params;
+      if (!isValidUuid(threadId)) {
+        return reply.code(400).send({ error: 'Invalid thread id' });
+      }
       const content = extractLastUserText(request.body?.messages);
       if (!content) {
         return reply.code(400).send({ error: 'Missing message content' });

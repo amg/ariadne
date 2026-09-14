@@ -64,6 +64,12 @@ type CreateThreadProps = {
 };
 
 export async function createThread({ userId, title }: CreateThreadProps): Promise<Thread> {
+  if (title !== undefined && typeof title !== 'string') {
+    throw new ThreadValidationError('Thread title must be a string');
+  }
   const trimmed = title?.trim();
+  if (trimmed && trimmed.length > MAX_TITLE_LENGTH) {
+    throw new ThreadValidationError(`Thread title exceeds ${MAX_TITLE_LENGTH} characters`);
+  }
   return insertThread({ user_id: userId, title: trimmed ? trimmed : DEFAULT_THREAD_TITLE });
 }

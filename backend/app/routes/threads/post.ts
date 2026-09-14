@@ -1,4 +1,4 @@
-import { createThread } from '@services/threadService';
+import { ThreadValidationError, createThread } from '@services/threadService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -12,10 +12,17 @@ type CreateThreadBody = {
 export async function setupThreadsPostRoute(fastify: FastifyInstance) {
   fastify.post('/api/threads', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body ?? {}) as CreateThreadBody;
-    const thread =
-      body.title !== undefined
-        ? await createThread({ userId: REQUEST_USER_ID, title: body.title })
-        : await createThread({ userId: REQUEST_USER_ID });
-    return reply.send(thread);
+    try {
+      const thread =
+        body.title !== undefined
+          ? await createThread({ userId: REQUEST_USER_ID, title: body.title })
+          : await createThread({ userId: REQUEST_USER_ID });
+      return reply.send(thread);
+    } catch (err) {
+      if (err instanceof ThreadValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 }

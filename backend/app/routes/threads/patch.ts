@@ -1,4 +1,5 @@
 import { ThreadValidationError, renameThread } from '@services/threadService';
+import { isValidUuid } from '@services/validation';
 import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -18,6 +19,9 @@ export async function setupThreadsPatchRoute(fastify: FastifyInstance) {
     const { id } = request.params as ThreadParams;
     const body = (request.body ?? {}) as RenameBody;
 
+    if (!isValidUuid(id)) {
+      return reply.code(400).send({ error: 'Invalid thread id' });
+    }
     if (typeof body.title !== 'string') {
       return reply.code(400).send({ error: 'title must be a string' });
     }
