@@ -158,8 +158,8 @@ npm run test:watch       # Watch mode
 
 ## Documentation
 
-- [Grand Plan](GRAND_PLAN.md) - High-level project requirements
 - [Architecture Decisions](adrs/) - Technical decision records
+- [Ideas](docs/ideas/) - Deployment and design explorations
 - [Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md) - Private server + tunnel guide
 - [AWS Deployment](docs/ideas/AWS-DEPLOYMENT.md) - Cloud deployment considerations
 - [SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md) - Protocol analysis
