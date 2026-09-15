@@ -1,5 +1,7 @@
-import { db } from '@db/db';
 import type { NewModelConfig } from '@db/types';
+import { findModelConfigByModelId } from '@queries/modelConfigs/findModelConfigByModelId';
+import { getLatestModelConfigRefresh } from '@queries/modelConfigs/getLatestModelConfigRefresh';
+import { saveModelConfig } from '@queries/modelConfigs/saveModelConfig';
 
 /** Model config from DeepInfra API (external wire format — snake_case). */
 interface DeepInfraModel {
@@ -72,27 +74,19 @@ const REFRESH_COOLDOWN_MS = 60 * 1000; // 1 minute
  * when no configs have been loaded yet).
  */
 export async function getTimeUntilNextRefresh(): Promise<number> {
-  const row = await db
-    .selectFrom('modelConfigs')
-    .select((eb) => eb.fn.max<Date>('lastUpdated').as('lastUpdated'))
-    .executeTakeFirst();
+  const latest = await getLatestModelConfigRefresh();
 
-  const last = row?.lastUpdated ? new Date(row.lastUpdated).getTime() : Number.NaN;
+  const last = latest ? latest.getTime() : Number.NaN;
   if (Number.isNaN(last)) return 0;
 
   return Math.max(0, REFRESH_COOLDOWN_MS - (Date.now() - last));
-}
-
-/** Checks (against the DB) whether a refresh is allowed right now. */
-export async function canRefreshModels(): Promise<boolean> {
-  return (await getTimeUntilNextRefresh()) === 0;
 }
 
 /**
  * Fetches model list from DeepInfra API.
  * Returns parsed models or null if fetch fails.
  */
-export async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
+async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
   try {
     const res = await fetch('https://api.deepinfra.com/models/list', {
       method: 'GET',
@@ -193,20 +187,7 @@ export async function refreshModelConfigs(): Promise<{
       lastUpdated: refreshedAt,
     };
 
-    await db
-      .insertInto('modelConfigs')
-      .values(row)
-      .onConflict((oc) =>
-        oc.column('modelId').doUpdateSet({
-          contextWindow: config.contextWindow,
-          inputPricePerMillion: config.inputPricePerMillion,
-          outputPricePerMillion: config.outputPricePerMillion,
-          cachedRateMultiplier: config.cachedRateMultiplier,
-          supportsCaching: config.supportsCaching,
-          lastUpdated: refreshedAt,
-        }),
-      )
-      .execute();
+    await saveModelConfig({ config: row });
     updated++;
   }
 
@@ -221,11 +202,7 @@ export async function refreshModelConfigs(): Promise<{
  * Falls back to hardcoded config if not in DB.
  */
 export async function getModelConfig(modelId: string): Promise<ModelConfigRow | null> {
-  const config = await db
-    .selectFrom('modelConfigs')
-    .selectAll()
-    .where('modelId', '=', modelId)
-    .executeTakeFirst();
+  const config = await findModelConfigByModelId({ modelId });
 
   if (config) {
     // Calculate cachedPricePerMillion from cachedRateMultiplier
@@ -253,80 +230,4 @@ export async function getModelConfig(modelId: string): Promise<ModelConfigRow | 
   }
 
   return null;
-}
-
-/**
- * Gets configs for multiple models.
- */
-export async function getModelConfigs(modelIds: string[]): Promise<Record<string, ModelConfigRow>> {
-  const configs = await db
-    .selectFrom('modelConfigs')
-    .selectAll()
-    .where('modelId', 'in', modelIds)
-    .execute();
-
-  const result: Record<string, ModelConfigRow> = {};
-  for (const config of configs) {
-    const cachedPrice =
-      config.inputPricePerMillion !== null && config.cachedRateMultiplier !== null
-        ? config.inputPricePerMillion * config.cachedRateMultiplier
-        : null;
-
-    result[config.modelId] = {
-      modelId: config.modelId,
-      provider: config.provider,
-      contextWindow: config.contextWindow,
-      inputPricePerMillion: config.inputPricePerMillion,
-      outputPricePerMillion: config.outputPricePerMillion,
-      cachedPricePerMillion: cachedPrice,
-      cachedRateMultiplier: config.cachedRateMultiplier,
-      supportsCaching: config.supportsCaching,
-      lastUpdated: config.lastUpdated,
-    };
-  }
-
-  // Add fallback for known model
-  if (modelIds.includes(FALLBACK_CONFIG.modelId) && !result[FALLBACK_CONFIG.modelId]) {
-    result[FALLBACK_CONFIG.modelId] = FALLBACK_CONFIG;
-  }
-
-  return result;
-}
-
-/**
- * Lists all cached model configs.
- */
-export async function listModelConfigs(): Promise<ModelConfigRow[]> {
-  const configs = await db.selectFrom('modelConfigs').selectAll().orderBy('modelId').execute();
-
-  return configs.map((config) => {
-    const cachedPrice =
-      config.inputPricePerMillion !== null && config.cachedRateMultiplier !== null
-        ? config.inputPricePerMillion * config.cachedRateMultiplier
-        : null;
-
-    return {
-      modelId: config.modelId,
-      provider: config.provider,
-      contextWindow: config.contextWindow,
-      inputPricePerMillion: config.inputPricePerMillion,
-      outputPricePerMillion: config.outputPricePerMillion,
-      cachedPricePerMillion: cachedPrice,
-      cachedRateMultiplier: config.cachedRateMultiplier,
-      supportsCaching: config.supportsCaching,
-      lastUpdated: config.lastUpdated,
-    };
-  });
-}
-
-/**
- * Deletes old/unused model configs (optional cleanup).
- */
-export async function cleanupModelConfigs(keepModelIds: string[]): Promise<number> {
-  const result = await db
-    .deleteFrom('modelConfigs')
-    .where('modelId', 'not in', keepModelIds)
-    .execute();
-
-  return result.length;
 }

@@ -1,4 +1,4 @@
-import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
+import type { Generated, Insertable, Selectable } from 'kysely';
 
 /**
  * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
@@ -62,7 +62,6 @@ export interface ModelConfigsTable {
 }
 
 export type User = Selectable<UsersTable>;
-export type NewUser = Insertable<UsersTable>;
 
 export type Thread = Selectable<ThreadsTable>;
 export type NewThread = Insertable<ThreadsTable>;
@@ -75,7 +74,6 @@ export type NewMessageUsage = Insertable<MessageUsageTable>;
 
 export type ModelConfig = Selectable<ModelConfigsTable>;
 export type NewModelConfig = Insertable<ModelConfigsTable>;
-export type UpdateModelConfig = Updateable<ModelConfigsTable>;
 
 /**
  * Synthetic + provider finish states persisted on `message_usage`

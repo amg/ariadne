@@ -44,19 +44,3 @@ export function computeCostUsd(args: {
 
   return round10(inputCost + outputCost);
 }
-
-/**
- * Cost attributed to cached tokens (discounted portion only).
- * Returns 0 if no cached tokens or pricing unavailable.
- */
-export function computeCachedCostUsd(args: {
-  pricing: UsagePricing | null;
-  cachedInputTokens?: number | null;
-}): number {
-  const { pricing } = args;
-  const cachedTokens = args.cachedInputTokens ?? 0;
-  if (!pricing || pricing.input === null || !cachedTokens) return 0;
-
-  const cachedMultiplier = pricing.cachedRateMultiplier ?? 1.0;
-  return round10((cachedTokens * pricing.input * cachedMultiplier) / 1_000_000);
-}

@@ -1,4 +1,6 @@
-import { db } from '@db/db';
+import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
+import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
+import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { getModelConfig } from './modelConfigService';
 
 /** Aggregated thread statistics computed on-the-fly from message_usage. */
@@ -31,17 +33,6 @@ export interface ThreadSummary {
   createdAt: string;
 }
 
-interface MessageWithUsage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  model: string | null;
-  costUsd: string | null;
-  promptTokens: number | null;
-  completionTokens: number | null;
-  cachedInputTokens: number | null;
-  reasoningTokens: number | null;
-}
-
 interface AggregatedStats {
   totalCost: number;
   totalCached: number;
@@ -56,7 +47,7 @@ interface AggregatedStats {
 /**
  * Aggregates statistics from message usage rows.
  */
-function aggregateStats(messages: MessageWithUsage[]): AggregatedStats {
+function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
   const stats: AggregatedStats = {
     totalCost: 0,
     totalCached: 0,
@@ -111,32 +102,12 @@ export async function getThreadSummary(args: {
   const { userId, threadId } = args;
 
   // Verify thread exists and belongs to user
-  const thread = await db
-    .selectFrom('threads')
-    .select(['id', 'createdAt'])
-    .where('id', '=', threadId)
-    .where('userId', '=', userId)
-    .executeTakeFirst();
+  const thread = await findThreadByIdAndUser({ userId, threadId });
 
   if (!thread) return null;
 
   // Get all messages with their usage
-  const messages = (await db
-    .selectFrom('messages')
-    .leftJoin('messageUsage', 'messages.id', 'messageUsage.messageId')
-    .select([
-      'messages.id as id',
-      'messages.role as role',
-      'messageUsage.model as model',
-      'messageUsage.costUsd as costUsd',
-      'messageUsage.promptTokens as promptTokens',
-      'messageUsage.completionTokens as completionTokens',
-      'messageUsage.cachedInputTokens as cachedInputTokens',
-      'messageUsage.reasoningTokens as reasoningTokens',
-    ])
-    .where('messages.threadId', '=', threadId)
-    .orderBy('messages.createdAt')
-    .execute()) as unknown as MessageWithUsage[];
+  const messages = await listMessagesWithUsageByThread({ threadId });
 
   // Handle empty thread
   if (messages.length === 0) {

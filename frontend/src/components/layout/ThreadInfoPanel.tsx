@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 type Props = {
   summary: ThreadSummary | null;
   threadTitle?: string;
-  onRefreshPricing?: () => void;
+  onRefreshPricing?: () => Promise<{ rateLimited?: boolean; retryAfter?: number }>;
 };
 
 /**
@@ -86,13 +86,13 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
   const outputPrice = primaryModelPricing?.outputPricePerMillion;
   const cachedPrice = primaryModelPricing?.cachedPricePerMillion;
   const cachedRate = primaryModelPricing?.cachedRateMultiplier;
-  const formatPrice = (price: number | null) => {
-    if (price === null) return '—';
+  const formatPrice = (price: number | null | undefined) => {
+    if (price == null) return '—';
     if (price < 0.01) return `$${price.toFixed(4)}`;
     return `$${price.toFixed(2)}`;
   };
-  const formatRate = (rate: number | null) => {
-    if (rate === null) return '—';
+  const formatRate = (rate: number | null | undefined) => {
+    if (rate == null) return '—';
     return `${(rate * 100).toFixed(0)}%`;
   };
 
