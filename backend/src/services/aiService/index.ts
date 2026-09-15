@@ -1,6 +1,7 @@
 /**
  * AI Connector service — public surface.
- * Folder layout: config.ts (provider/env), cost.ts (pricing),
+ * Folder layout: config.ts (provider/env), cost.ts (pure cost math —
+ * pricing resolved via @services/modelConfigService),
  * usageMap.ts (usage → message_usage row),
  * exchange.ts (per-exchange lifecycle/persistence + idle watchdog), submitChat.ts (flow).
  */

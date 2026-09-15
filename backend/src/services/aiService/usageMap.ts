@@ -37,9 +37,16 @@ export async function buildUsageRow(args: {
   const cachedInputTokens =
     args.usage.inputTokenDetails?.cacheReadTokens ?? readRawCacheWriteTokens(args.usage);
 
-  // Get cached rate multiplier from model config
+  // Pricing resolved via the single fallback source (DB → FALLBACK_CONFIG
+  // in modelConfigService); null → cost recorded as 0.
   const modelConfig = await getModelConfig(args.model);
-  const cachedRateMultiplier = modelConfig?.cachedRateMultiplier ?? null;
+  const pricing = modelConfig
+    ? {
+        input: modelConfig.inputPricePerMillion,
+        output: modelConfig.outputPricePerMillion,
+        cachedRateMultiplier: modelConfig.cachedRateMultiplier,
+      }
+    : null;
 
   const row: NewMessageUsage = {
     messageId: args.messageId,
@@ -48,11 +55,10 @@ export async function buildUsageRow(args: {
     promptTokens: promptTokens,
     completionTokens: completionTokens,
     costUsd: computeCostUsd({
-      model: args.model,
+      pricing,
       promptTokens,
       completionTokens,
       cachedInputTokens,
-      cachedRateMultiplier,
     }).toFixed(10),
     finishReason: args.finishReason,
   };

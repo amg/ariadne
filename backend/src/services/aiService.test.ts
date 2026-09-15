@@ -11,6 +11,7 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import { getModelConfig } from '@services/modelConfigService';
 import { useTestDb } from '@test/test-db';
 import type { UIMessage } from 'ai';
 import { readUIMessageStream } from 'ai';
@@ -109,9 +110,10 @@ describe('submitChat', () => {
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.content)).toEqual(['Hello world', 'Mock reply to: Hello world']);
 
-    // Usage row: cache telemetry passed through, cost from the local map
-    // with the cached-token discount (fallback model config supplies a 0.5
-    // cached-rate multiplier, see modelConfigService FALLBACK_CONFIG).
+    // Usage row: cache telemetry passed through, cost priced from the model
+    // config fallback (modelConfigService FALLBACK_CONFIG — the single
+    // fallback source: DB → hard-coded default model config).
+    const fallbackConfig = await getModelConfig(DEFAULT_MODEL_ID);
     const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
     expect(usage).toBeDefined();
     // 1 message in history + the new one → base 4 + 2
@@ -128,11 +130,14 @@ describe('submitChat', () => {
     expect(usage?.latencyMs).toBeGreaterThanOrEqual(0);
     expect(Number(usage?.costUsd)).toBe(
       computeCostUsd({
-        model: DEFAULT_MODEL_ID,
+        pricing: {
+          input: fallbackConfig?.inputPricePerMillion ?? null,
+          output: fallbackConfig?.outputPricePerMillion ?? null,
+          cachedRateMultiplier: fallbackConfig?.cachedRateMultiplier ?? null,
+        },
         promptTokens: usage?.promptTokens ?? 0,
         completionTokens: usage?.completionTokens ?? 0,
         cachedInputTokens: MOCK_CACHE.cachedInputTokens,
-        cachedRateMultiplier: 0.5,
       }),
     );
   });
@@ -262,21 +267,17 @@ describe('retryLastExchange', () => {
 });
 
 describe('computeCostUsd', () => {
-  it('prices the default model at $0.10/$0.15 per million tokens', () => {
-    expect(
-      computeCostUsd({ model: DEFAULT_MODEL_ID, promptTokens: 1_000_000, completionTokens: 0 }),
-    ).toBe(0.1);
-    expect(
-      computeCostUsd({ model: DEFAULT_MODEL_ID, promptTokens: 0, completionTokens: 1_000_000 }),
-    ).toBe(0.15);
-    expect(computeCostUsd({ model: DEFAULT_MODEL_ID, promptTokens: 5, completionTokens: 1 })).toBe(
-      0.00000065,
-    );
+  // Pure cost math — pricing is passed in explicitly (resolved upstream
+  // by modelConfigService); these values mirror the default model pricing.
+  const pricing = { input: 0.1, output: 0.15 };
+
+  it('prices at the given per-million rates', () => {
+    expect(computeCostUsd({ pricing, promptTokens: 1_000_000, completionTokens: 0 })).toBe(0.1);
+    expect(computeCostUsd({ pricing, promptTokens: 0, completionTokens: 1_000_000 })).toBe(0.15);
+    expect(computeCostUsd({ pricing, promptTokens: 5, completionTokens: 1 })).toBe(0.00000065);
   });
 
-  it('returns 0 for models without a pricing entry', () => {
-    expect(computeCostUsd({ model: 'unknown/model', promptTokens: 10, completionTokens: 10 })).toBe(
-      0,
-    );
+  it('returns 0 when pricing is unknown (null)', () => {
+    expect(computeCostUsd({ pricing: null, promptTokens: 10, completionTokens: 10 })).toBe(0);
   });
 });

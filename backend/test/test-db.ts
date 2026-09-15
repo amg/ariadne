@@ -3,7 +3,7 @@ import { sql } from 'kysely';
 import { afterAll, afterEach } from 'vitest';
 
 export async function cleanDatabase(): Promise<void> {
-  await sql`truncate table messages, threads, users cascade`.execute(db);
+  await sql`truncate table messages, threads, users, model_configs cascade`.execute(db);
 }
 
 /**

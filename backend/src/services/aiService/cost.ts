@@ -1,60 +1,62 @@
-import { DEFAULT_MODEL_ID } from './config';
-
 /**
- * Flat USD pricing per million tokens, keyed by model id (source of truth).
- * Folder-private: cost consumers go through `computeCostUsd`.
- *
- * Note: Cached tokens are charged at a separate rate (cachedRateMultiplier × inputPrice).
- * DeepInfra provides rate_per_input_token_cached as a multiplier (e.g., 0.5 = 50% of input price).
+ * Cost math for a usage report. Pure functions — no pricing table of its
+ * own: pricing is resolved by the caller through `getModelConfig`
+ * (`@services/modelConfigService`, DB `model_configs` → FALLBACK_CONFIG).
  */
-const PRICING_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {
-  [DEFAULT_MODEL_ID]: { input: 0.1, output: 0.15 },
-};
+
+/** Flat USD pricing per million tokens (null = unknown → no charge). */
+export interface UsagePricing {
+  input: number | null;
+  output: number | null;
+  /**
+   * Multiplier of input price charged for cached prompt tokens
+   * (e.g., 0.5 = 50% discount). Defaults to full price when unset.
+   */
+  cachedRateMultiplier?: number | null;
+}
+
+function round10(n: number): number {
+  return Number(n.toFixed(10));
+}
 
 /**
  * Server-side cost for a usage report.
- * Calculates total cost including cached tokens at their discounted rate.
+ * Non-cached prompt tokens at full input price, cached tokens at the
+ * discounted rate, completion tokens at output price.
  */
 export function computeCostUsd(args: {
-  model: string;
+  pricing: UsagePricing | null;
   promptTokens: number;
   completionTokens: number;
   cachedInputTokens?: number | null;
-  cachedRateMultiplier?: number | null;
 }): number {
-  const pricing = PRICING_PER_MILLION_TOKENS[args.model];
-  if (!pricing) return 0;
+  const { pricing } = args;
+  if (!pricing || pricing.input === null || pricing.output === null) return 0;
 
   const cachedTokens = args.cachedInputTokens ?? 0;
   const nonCachedPromptTokens = args.promptTokens - cachedTokens;
-  const cachedMultiplier = args.cachedRateMultiplier ?? 1.0; // Default to full price if not specified
+  const cachedMultiplier = pricing.cachedRateMultiplier ?? 1.0;
 
-  // Non-cached tokens at full input price + cached tokens at discounted rate
   const inputCost =
     (nonCachedPromptTokens * pricing.input + cachedTokens * pricing.input * cachedMultiplier) /
     1_000_000;
   const outputCost = (args.completionTokens * pricing.output) / 1_000_000;
 
-  const cost = inputCost + outputCost;
-  return Number(cost.toFixed(10));
+  return round10(inputCost + outputCost);
 }
 
 /**
- * Computes the portion of cost attributed to cached tokens.
+ * Cost attributed to cached tokens (discounted portion only).
  * Returns 0 if no cached tokens or pricing unavailable.
  */
 export function computeCachedCostUsd(args: {
-  model: string;
+  pricing: UsagePricing | null;
   cachedInputTokens?: number | null;
-  cachedRateMultiplier?: number | null;
 }): number {
-  const pricing = PRICING_PER_MILLION_TOKENS[args.model];
+  const { pricing } = args;
   const cachedTokens = args.cachedInputTokens ?? 0;
-  const cachedMultiplier = args.cachedRateMultiplier ?? 1.0;
+  if (!pricing || pricing.input === null || !cachedTokens) return 0;
 
-  if (!pricing || !cachedTokens) return 0;
-
-  // Cached tokens cost: cachedTokens × inputPrice × cachedRateMultiplier / 1M
-  const cost = (cachedTokens * pricing.input * cachedMultiplier) / 1_000_000;
-  return Number(cost.toFixed(10));
+  const cachedMultiplier = pricing.cachedRateMultiplier ?? 1.0;
+  return round10((cachedTokens * pricing.input * cachedMultiplier) / 1_000_000);
 }

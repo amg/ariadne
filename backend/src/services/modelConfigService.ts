@@ -52,29 +52,40 @@ const FALLBACK_CONFIG: ModelConfigRow = {
   lastUpdated: new Date(),
 };
 
-/** In-memory rate limit state. */
-let lastRefreshTimestamp: number | null = null;
+/**
+ * Refresh cooldown state lives in the DB (`model_configs.last_updated`),
+ * not in server memory: services must stay stateless so any number of
+ * servers enforces the same 1-minute floor (no per-process globals).
+ *   - `last_updated` chosen over `created_at`: only updated on refresh
+ *     upserts (rows are upserted by PK, `created` would never change).
+ *   - Every refresh bumps `last_updated` on ALL upserted rows, so
+ *     `max(last_updated)` is the shared "last refresh" marker.
+ *   - Remaining race window: two requests can pass the check
+ *     simultaneously during an in-flight refresh; upserts are idempotent,
+ *     so a duplicate concurrent refresh is harmless.
+ */
 const REFRESH_COOLDOWN_MS = 60 * 1000; // 1 minute
 
 /**
- * Checks if refresh is allowed based on rate limit.
- * Returns true if allowed, false if in cooldown.
+ * Gets time (ms) until the next refresh is allowed, shared across all
+ * servers and users. Returns 0 if a refresh is allowed now (including
+ * when no configs have been loaded yet).
  */
-export function canRefreshModels(): boolean {
-  if (lastRefreshTimestamp === null) return true;
-  const now = Date.now();
-  return now - lastRefreshTimestamp >= REFRESH_COOLDOWN_MS;
+export async function getTimeUntilNextRefresh(): Promise<number> {
+  const row = await db
+    .selectFrom('modelConfigs')
+    .select((eb) => eb.fn.max<Date>('lastUpdated').as('lastUpdated'))
+    .executeTakeFirst();
+
+  const last = row?.lastUpdated ? new Date(row.lastUpdated).getTime() : Number.NaN;
+  if (Number.isNaN(last)) return 0;
+
+  return Math.max(0, REFRESH_COOLDOWN_MS - (Date.now() - last));
 }
 
-/**
- * Gets time until next refresh is allowed.
- * Returns 0 if refresh is allowed now.
- */
-export function getTimeUntilNextRefresh(): number {
-  if (lastRefreshTimestamp === null) return 0;
-  const now = Date.now();
-  const elapsed = now - lastRefreshTimestamp;
-  return Math.max(0, REFRESH_COOLDOWN_MS - elapsed);
+/** Checks (against the DB) whether a refresh is allowed right now. */
+export async function canRefreshModels(): Promise<boolean> {
+  return (await getTimeUntilNextRefresh()) === 0;
 }
 
 /**
@@ -149,9 +160,9 @@ export async function refreshModelConfigs(): Promise<{
   error?: string;
   rateLimited?: boolean;
 }> {
-  // Check rate limit
-  if (!canRefreshModels()) {
-    const waitTime = getTimeUntilNextRefresh();
+  // Rate limit shared via DB (stateless across servers/users).
+  const waitTime = await getTimeUntilNextRefresh();
+  if (waitTime > 0) {
     return {
       success: false,
       modelsUpdated: 0,
@@ -165,6 +176,8 @@ export async function refreshModelConfigs(): Promise<{
     return { success: false, modelsUpdated: 0, error: 'Failed to fetch from DeepInfra API' };
   }
 
+  // One shared timestamp for the batch so max(last_updated) marks this refresh.
+  const refreshedAt = new Date();
   const configs = models.map(parseDeepInfraModel);
   let updated = 0;
 
@@ -177,6 +190,7 @@ export async function refreshModelConfigs(): Promise<{
       outputPricePerMillion: config.outputPricePerMillion,
       cachedRateMultiplier: config.cachedRateMultiplier,
       supportsCaching: config.supportsCaching,
+      lastUpdated: refreshedAt,
     };
 
     await db
@@ -189,15 +203,15 @@ export async function refreshModelConfigs(): Promise<{
           outputPricePerMillion: config.outputPricePerMillion,
           cachedRateMultiplier: config.cachedRateMultiplier,
           supportsCaching: config.supportsCaching,
-          lastUpdated: config.lastUpdated,
+          lastUpdated: refreshedAt,
         }),
       )
       .execute();
     updated++;
   }
 
-  // Update rate limit timestamp
-  lastRefreshTimestamp = Date.now();
+  // No in-memory rate-limit update: refreshed rows' last_updated already
+  // advance the DB cooldown marker read by getTimeUntilNextRefresh().
 
   return { success: true, modelsUpdated: updated };
 }
