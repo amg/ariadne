@@ -5,6 +5,7 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { SYSTEM_PROMPT } from '@services/aiService/config';
 import { getMessages, updateMessage } from '@services/messageService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -57,9 +58,10 @@ describe('messageService', () => {
 
       const messages = await getMessages({ userId, threadId });
 
-      expect(messages?.map((m) => m.content)).toEqual(['hello', 'world']);
+      expect(messages?.map((m) => m.content)).toEqual([SYSTEM_PROMPT, 'hello', 'world']);
       expect(messages?.[0]?.usage).toBeNull();
-      expect(messages?.[1]?.usage).toEqual({
+      expect(messages?.[1]?.usage).toBeNull();
+      expect(messages?.[2]?.usage).toEqual({
         model: 'Qwen/Qwen3.5-9B',
         providerId: 'chatcmpl-1',
         promptTokens: 5,

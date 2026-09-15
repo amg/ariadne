@@ -5,6 +5,7 @@ import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread
 import { updateMessageContent } from '@queries/messages/updateMessageContent';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
+import { SYSTEM_PROMPT } from './aiService/config';
 
 /** Usage as served on the GET payload (identity columns implied by the row). */
 export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
@@ -134,5 +135,18 @@ export async function getMessages({
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return null;
   const rows = await listMessagesByThread({ threadId });
-  return rows.map(messageRowToMessageWithUsage);
+  const messages = rows.map(messageRowToMessageWithUsage);
+
+  if (messages.length === 0 || messages[0]?.role !== 'system') {
+    messages.unshift({
+      id: `system-${threadId}`,
+      threadId,
+      role: 'system',
+      content: SYSTEM_PROMPT,
+      createdAt: thread.createdAt,
+      usage: null,
+    });
+  }
+
+  return messages;
 }

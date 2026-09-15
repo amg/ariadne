@@ -4,7 +4,15 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Message, MessageUsage } from '@/services/api';
 import { chatStatusText } from '@/services/utils';
-import { ArrowDown, Pencil, RefreshCw, Send, Square } from 'lucide-react';
+import {
+  ArrowDown,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+  RefreshCw,
+  Send,
+  Square,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import MarkdownContent from './MarkdownContent';
 import ThinkingIndicator from './ThinkingIndicator';
@@ -35,39 +43,49 @@ type Props = {
 /** How close to the bottom counts as "following" new content. */
 const FOLLOW_BOTTOM_PX = 80;
 
-/** Per-row edit + retry affordances; extracted to keep ChatView shallow. */
-function MessageRow({
+function SystemMessageRow({ row }: { row: DisplayRow }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { message } = row;
+
+  return (
+    <div className="flex min-w-0 max-w-[85%] flex-col self-end md:max-w-[75%]">
+      <div className="min-w-0 max-w-full self-end rounded-lg bg-slate-800/80 p-3 text-slate-300 border border-slate-700">
+        <button
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center gap-2 text-sm font-medium hover:text-slate-100 transition-colors"
+        >
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          System Prompt
+        </button>
+        {isExpanded && (
+          <div className="mt-2 whitespace-pre-wrap break-words border-t border-slate-700 pt-2 text-sm text-slate-300/90">
+            {message.content}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UserMessageRow({
   row,
-  isLast,
   isLastUser,
   busy,
-  status,
-  onRetryLast,
   onEditMessage,
 }: {
   row: DisplayRow;
-  isLast: boolean;
-  /** True on the thread's final user message — the only editable row. */
   isLastUser: boolean;
   busy: boolean;
-  status: Props['status'];
-  onRetryLast: () => void;
   onEditMessage: (messageId: string, content: string) => void;
 }) {
-  const { message, usage, streaming, reasoning } = row;
-  // null = not editing; only the last user row exposes the affordance anyway.
+  const { message } = row;
   const [draft, setDraft] = useState<string | null>(null);
   const isEditing = draft !== null;
-  // Settled assistant rows with no text: a failed/stuck exchange. They get an
-  // explicit retry affordance instead of a blank bubble.
-  const isStuckEmpty = message.role === 'assistant' && !streaming && message.content === '';
-  // The assistant reply itself is never edited — retry is its recovery path;
-  // prompts are edited, and saving continues the exchange from the new text.
-  const showEdit = message.role === 'user' && isLastUser && !busy && !isEditing;
-  const showRetry = message.role === 'assistant' && isLast && !busy && !isStuckEmpty;
+  const showEdit = isLastUser && !busy && !isEditing;
 
   return (
-    <div className="flex min-w-0 max-w-[70%] flex-col">
+    <div className="flex min-w-0 max-w-[85%] flex-col self-end md:max-w-[75%]">
       {isEditing ? (
         <EditBox
           draft={draft ?? ''}
@@ -78,43 +96,11 @@ function MessageRow({
             setDraft(null);
           }}
         />
-      ) : message.role === 'assistant' ? (
-        <div className="min-w-0 max-w-full self-start rounded-lg bg-muted p-3 text-foreground">
-          <BubbleContent
-            message={message}
-            streaming={streaming}
-            busy={busy}
-            onRetryLast={onRetryLast}
-            reasoning={reasoning}
-          />
-        </div>
       ) : (
         <div className="max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-primary p-3 text-primary-foreground">
           {message.content}
         </div>
       )}
-      {message.role === 'assistant' ? (
-        <MessageMetaRow
-          className="mt-1 self-end"
-          usage={usage}
-          status={streaming ? chatStatusText(status) : undefined}
-          showLatency={!streaming}
-          action={
-            showRetry ? (
-              <button
-                type="button"
-                onClick={onRetryLast}
-                title="Retry generation"
-                className="ml-1 flex items-end gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                retry
-              </button>
-            ) : null
-          }
-        />
-      ) : null}
-      {/* Edit controls, only while the exchange is idle. */}
       {showEdit ? (
         <div className="mt-1 flex items-center gap-2 self-end">
           <button
@@ -130,6 +116,74 @@ function MessageRow({
       ) : null}
     </div>
   );
+}
+
+function AssistantMessageRow({
+  row,
+  isLast,
+  busy,
+  status,
+  onRetryLast,
+}: {
+  row: DisplayRow;
+  isLast: boolean;
+  busy: boolean;
+  status: Props['status'];
+  onRetryLast: () => void;
+}) {
+  const { message, usage, streaming, reasoning } = row;
+  const isStuckEmpty = !streaming && message.content === '';
+  const showRetry = isLast && !busy && !isStuckEmpty;
+
+  return (
+    <div className="flex min-w-0 max-w-[85%] flex-col self-start md:max-w-[75%]">
+      <div className="min-w-0 max-w-full self-start rounded-lg bg-muted p-3 text-foreground">
+        <BubbleContent
+          message={message}
+          streaming={streaming}
+          busy={busy}
+          onRetryLast={onRetryLast}
+          reasoning={reasoning}
+        />
+      </div>
+      <MessageMetaRow
+        className="mt-1 self-end"
+        usage={usage}
+        status={streaming ? chatStatusText(status) : undefined}
+        showLatency={!streaming}
+        action={
+          showRetry ? (
+            <button
+              type="button"
+              onClick={onRetryLast}
+              title="Retry generation"
+              className="ml-1 flex items-end gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              retry
+            </button>
+          ) : null
+        }
+      />
+    </div>
+  );
+}
+
+/** Per-row edit + retry affordances; extracted to keep ChatView shallow. */
+function MessageRow(props: {
+  row: DisplayRow;
+  isLast: boolean;
+  isLastUser: boolean;
+  busy: boolean;
+  status: Props['status'];
+  onRetryLast: () => void;
+  onEditMessage: (messageId: string, content: string) => void;
+}) {
+  const role = props.row.message.role;
+  if (role === 'system') return <SystemMessageRow row={props.row} />;
+  if (role === 'user') return <UserMessageRow {...props} />;
+  if (role === 'assistant') return <AssistantMessageRow {...props} />;
+  return null;
 }
 
 /** Bubble body: thinking state, stuck-empty retry card, or rendered content. */
@@ -360,7 +414,7 @@ export default function ChatView({
               />
             ))}
             {needsPendingBubble ? (
-              <div className="flex min-w-0 max-w-[70%] flex-col">
+              <div className="flex min-w-0 max-w-[85%] flex-col self-start md:max-w-[75%]">
                 <div className="self-start rounded-lg bg-muted p-3 text-foreground">
                   <ThinkingIndicator />
                 </div>

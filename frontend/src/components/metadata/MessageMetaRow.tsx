@@ -41,12 +41,12 @@ export default function MessageMetaRow({
       {/* prompt */}
       <span title="Prompt tokens (excluding cached)">
         <span className="font-bold text-neutral-200">{formatTokens(prompt) ?? '—'}</span>
-        <span className="text-neutral-500"> prompt</span>
+        <span className="text-neutral-500"> input</span>
       </span>
       {/* completion */}
       <span title="Completion tokens (excluding reasoning)">
         <span className="font-bold text-neutral-200">{formatTokens(completion) ?? '—'}</span>
-        <span className="text-neutral-500"> out</span>
+        <span className="text-neutral-500"> output</span>
       </span>
       {/* cached */}
       <span title="Cached prompt tokens">
@@ -60,7 +60,7 @@ export default function MessageMetaRow({
         <span className="font-bold text-neutral-200">
           {formatTokens(usage?.reasoningTokens) ?? '—'}
         </span>
-        <span className="text-neutral-500"> reason</span>
+        <span className="text-neutral-500"> reasoning</span>
       </span>
       {/* cost */}
       <span title="Cost in USD">

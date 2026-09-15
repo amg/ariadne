@@ -52,7 +52,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
 
   if (!summary) {
     return (
-      <aside className="flex w-72 shrink-0 flex-col border-l bg-muted/30 p-4">
+      <aside className="flex h-full w-72 shrink-0 flex-col border-l bg-muted/30 p-4 pt-12 nav:pt-4">
         <div className="text-sm text-muted-foreground">Select a thread to view details</div>
       </aside>
     );
@@ -97,7 +97,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
   };
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l bg-muted/30 p-4">
+    <aside className="flex h-full w-72 shrink-0 flex-col border-l bg-muted/30 p-4 pt-12 nav:pt-4 overflow-y-auto">
       <h2 className="mb-4 text-sm font-semibold text-foreground">Thread Info</h2>
 
       {/* Thread Title */}
