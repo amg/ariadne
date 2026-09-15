@@ -1,6 +1,14 @@
 import AppShell from '@/components/layout/AppShell';
+import ThreadInfoPanel from '@/components/layout/ThreadInfoPanel';
 import ThreadSidebar from '@/components/layout/ThreadSidebar';
-import { type Thread, fetchThreads } from '@/services/api';
+import {
+  type Thread,
+  type ThreadSummary,
+  fetchThreadSummary,
+  fetchThreads,
+  refreshModelPricing,
+} from '@/services/api';
+import { useEffect, useState } from 'react';
 import {
   Outlet,
   useFetcher,
@@ -40,6 +48,51 @@ export default function AppLayout() {
     ? threads.filter((t) => t.id !== pendingDeleteId)
     : threads;
 
+  // Thread summary state
+  const [threadSummary, setThreadSummary] = useState<ThreadSummary | null>(null);
+  const [activeThreadTitle, setActiveThreadTitle] = useState<string | undefined>(undefined);
+  const currentThreadId = match?.params.threadId ?? null;
+
+  // Fetch thread summary when thread changes
+  useEffect(() => {
+    if (currentThreadId) {
+      // Fetch summary
+      fetchThreadSummary(currentThreadId)
+        .then((summary) => setThreadSummary(summary))
+        .catch((err) => {
+          console.error('Failed to fetch thread summary:', err);
+          setThreadSummary(null);
+        });
+
+      // Find thread title from threads list
+      const thread = threads.find((t) => t.id === currentThreadId);
+      setActiveThreadTitle(thread?.title);
+    } else {
+      setThreadSummary(null);
+      setActiveThreadTitle(undefined);
+    }
+  }, [currentThreadId, threads]);
+
+  // Handle model pricing refresh with rate limit handling
+  const handleRefreshPricing = async () => {
+    const result = await refreshModelPricing();
+    if (result.rateLimited) {
+      console.warn(`Rate limited. Wait ${result.retryAfter}s before refreshing again.`);
+      return result;
+    }
+    if (result.success) {
+      console.log(`Refreshed ${result.modelsUpdated} model configs`);
+      // Refetch thread summary to get updated context limit
+      if (currentThreadId) {
+        const summary = await fetchThreadSummary(currentThreadId);
+        setThreadSummary(summary);
+      }
+    } else {
+      console.error('Failed to refresh model pricing:', result.error);
+    }
+    return result;
+  };
+
   return (
     <AppShell
       sidebar={
@@ -64,6 +117,13 @@ export default function AppLayout() {
           }
           pendingRename={pendingRename}
           onAbout={() => navigate('/about')}
+        />
+      }
+      infoPanel={
+        <ThreadInfoPanel
+          summary={threadSummary}
+          threadTitle={activeThreadTitle}
+          onRefreshPricing={handleRefreshPricing}
         />
       }
     >

@@ -7,7 +7,9 @@ import rateLimit from '@fastify/rate-limit';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
+import { setupModelsRefreshRoute } from '@routes/models';
 import {
+  setupThreadSummaryRoute,
   setupThreadsDeleteRoute,
   setupThreadsGetRoute,
   setupThreadsPatchRoute,
@@ -35,7 +37,7 @@ app.register(cors, {
 app.register(helmet);
 
 // Coarse global limit (amp + abuse); the billable chat route tightens its own
-// window via route `config.rateLimit`. Local dev stays comfortably under both.
+// window via route `config.rateLimit`. Local dev stayed comfortably under both.
 // NOTE: must be awaited — @fastify/rate-limit wires routes via onRoute hooks,
 // which are skipped for routes bound before the plugin finishes registering.
 await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' });
@@ -46,8 +48,10 @@ setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
 setupThreadsPatchRoute(app);
 setupThreadsDeleteRoute(app);
+setupThreadSummaryRoute(app);
 setupMessagesGetRoute(app);
 setupMessagesPatchRoute(app);
+setupModelsRefreshRoute(app);
 setupChatPostRoute(app);
 
 const PORT = Number(process.env.PORT ?? 3001);

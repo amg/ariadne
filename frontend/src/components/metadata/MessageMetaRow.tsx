@@ -63,7 +63,7 @@ export default function MessageMetaRow({
         <span className="text-neutral-500"> reason</span>
       </span>
       {/* cost */}
-      <span title="Cost (micro-USD)">
+      <span title="Cost in USD">
         <span className="font-bold text-neutral-200">{formatCost(usage?.cost_usd) ?? '—'}</span>
       </span>
       {/* time — only on settled rows */}

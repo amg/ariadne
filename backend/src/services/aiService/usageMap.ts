@@ -1,5 +1,6 @@
 import type { MessageFinishReason, NewMessageUsage } from '@db/types';
 import type { LanguageModelUsage } from 'ai';
+import { getModelConfig } from '../modelConfigService';
 import { computeCostUsd } from './cost';
 
 /**
@@ -22,7 +23,7 @@ function readRawCacheWriteTokens(usage: LanguageModelUsage): number | null {
   return typeof cacheWrite === 'number' ? cacheWrite : null;
 }
 
-export function buildUsageRow(args: {
+export async function buildUsageRow(args: {
   messageId: string;
   model: string;
   /** Provider response id, when available. */
@@ -30,9 +31,16 @@ export function buildUsageRow(args: {
   usage: LanguageModelUsage;
   finishReason: MessageFinishReason;
   latencyMs: number | null;
-}): NewMessageUsage {
+}): Promise<NewMessageUsage> {
   const promptTokens = args.usage.inputTokens ?? 0;
   const completionTokens = args.usage.outputTokens ?? 0;
+  const cachedInputTokens =
+    args.usage.inputTokenDetails?.cacheReadTokens ?? readRawCacheWriteTokens(args.usage);
+
+  // Get cached rate multiplier from model config
+  const modelConfig = await getModelConfig(args.model);
+  const cachedRateMultiplier = modelConfig?.cached_rate_multiplier ?? null;
+
   const row: NewMessageUsage = {
     message_id: args.messageId,
     model: args.model,
@@ -43,12 +51,13 @@ export function buildUsageRow(args: {
       model: args.model,
       promptTokens,
       completionTokens,
+      cachedInputTokens,
+      cachedRateMultiplier,
     }).toFixed(10),
     finish_reason: args.finishReason,
   };
 
-  const cacheRead = args.usage.inputTokenDetails?.cacheReadTokens;
-  if (typeof cacheRead === 'number') row.cached_input_tokens = cacheRead;
+  if (typeof cachedInputTokens === 'number') row.cached_input_tokens = cachedInputTokens;
 
   const cacheWrite =
     args.usage.inputTokenDetails?.cacheWriteTokens ?? readRawCacheWriteTokens(args.usage);

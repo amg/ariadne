@@ -88,3 +88,68 @@ export async function updateMessage(
   if (!res.ok) throw new Error(`Failed to update message: ${res.statusText}`);
   return res.json();
 }
+
+/** Aggregated thread statistics from message_usage. */
+export interface ThreadSummary {
+  threadId: string;
+  totalMessages: number;
+  userMessages: number;
+  assistantMessages: number;
+  totalCostUsd: string;
+  cachedCostUsd: string;
+  totalTokens: {
+    prompt: number;
+    completion: number;
+    cached: number;
+    reasoning: number;
+    total: number;
+  };
+  primaryModel: string | null;
+  primaryModelPricing: {
+    input_price_per_million: number | null;
+    output_price_per_million: number | null;
+    cached_price_per_million: number | null;
+    cached_rate_multiplier: number | null;
+  } | null;
+  contextUsage: {
+    used: number;
+    limit: number | null;
+    percentage: number | null;
+  };
+  createdAt: string;
+}
+
+export async function fetchThreadSummary(threadId: string): Promise<ThreadSummary | null> {
+  const res = await fetch(`/api/threads/${threadId}/summary`);
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(`Failed to fetch thread summary: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/** Refresh model pricing from provider API. */
+export async function refreshModelPricing(): Promise<{
+  success: boolean;
+  modelsUpdated: number;
+  error?: string;
+  rateLimited?: boolean;
+  retryAfter?: number; // seconds
+}> {
+  const res = await fetch('/api/models/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ error: res.statusText }));
+    return {
+      success: false,
+      modelsUpdated: 0,
+      error: errorData.error ?? errorData.message ?? 'Failed to refresh',
+      rateLimited: errorData.rateLimited,
+      retryAfter: errorData.retryAfter,
+    };
+  }
+  return res.json();
+}

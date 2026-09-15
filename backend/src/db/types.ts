@@ -5,6 +5,7 @@ export interface Database {
   threads: ThreadsTable;
   messages: MessagesTable;
   message_usage: MessageUsageTable;
+  model_configs: ModelConfigsTable;
 }
 
 export interface UsersTable {
@@ -43,6 +44,17 @@ export interface MessageUsageTable {
   created_at: Generated<Date>;
 }
 
+export interface ModelConfigsTable {
+  model_id: string; // Primary key
+  provider: string;
+  context_window: number | null;
+  input_price_per_million: number | null;
+  output_price_per_million: number | null;
+  cached_rate_multiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
+  supports_caching: boolean;
+  last_updated: Generated<Date>;
+}
+
 export type User = Selectable<UsersTable>;
 export type NewUser = Insertable<UsersTable>;
 
@@ -54,6 +66,10 @@ export type NewMessage = Insertable<MessagesTable>;
 
 export type MessageUsage = Selectable<MessageUsageTable>;
 export type NewMessageUsage = Insertable<MessageUsageTable>;
+
+export type ModelConfig = Selectable<ModelConfigsTable>;
+export type NewModelConfig = Insertable<ModelConfigsTable>;
+export type UpdateModelConfig = Updateable<ModelConfigsTable>;
 
 /**
  * Synthetic + provider finish states persisted on `message_usage`

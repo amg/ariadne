@@ -18,12 +18,28 @@ export function formatTokens(n?: number | null): string | null {
   return n.toLocaleString('en-US');
 }
 
-/** Cost stored as decimal USD string; shown in micro-USD for homelab scale. */
+/** Cost stored as decimal USD string; shown in USD with appropriate precision. */
 export function formatCost(costUsd?: string | null): string | null {
   if (!costUsd) return null;
-  const micro = Number.parseFloat(costUsd) * 1_000_000;
-  if (!Number.isFinite(micro)) return null;
-  return `${micro.toFixed(2)}µ`;
+  const cost = Number.parseFloat(costUsd);
+  if (!Number.isFinite(cost)) return null;
+
+  // Format based on magnitude
+  if (cost === 0) return '$0.00';
+  if (cost < 0.001) {
+    // Very small costs: show in scientific notation or micro-dollars
+    return `$${cost.toFixed(6)}`;
+  }
+  if (cost < 0.01) {
+    // Small costs: 4 decimal places
+    return `$${cost.toFixed(4)}`;
+  }
+  if (cost < 1) {
+    // Medium costs: 3 decimal places
+    return `$${cost.toFixed(3)}`;
+  }
+  // Large costs: standard 2 decimal places
+  return `$${cost.toFixed(2)}`;
 }
 
 /** Chat live status labels (mirrors ai SDK ChatStatus). */

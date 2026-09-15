@@ -8,13 +8,17 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "test": "npm run test --workspaces --if-present",
     "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "lint:fix": "biome check --write .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "enforce-cn": "node scripts/enforce-cn-rule.mjs",
+    "validate": "npm run typecheck && npm run lint && npm run enforce-cn",
+    "pre-commit": "npm run validate"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "concurrently": "^10.0.5"
   },
   "dependencies": {
-    "lucide-react": "^1.45.0"
+    "lucide-react": "^1.4.50"
   }
 }

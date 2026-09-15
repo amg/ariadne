@@ -198,7 +198,7 @@ export class ChatExchange {
       latencyMs: this.latencyMs(),
     };
     if (event.providerId !== undefined) usageArgs.providerId = event.providerId;
-    await insertMessageUsage(buildUsageRow(usageArgs));
+    await insertMessageUsage(await buildUsageRow(usageArgs));
     return true;
   }
 }
