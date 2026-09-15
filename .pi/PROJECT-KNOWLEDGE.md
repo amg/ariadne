@@ -4,7 +4,8 @@
 *   **Frontend**: React (React Router, TypeScript).
 *   **Backend**: Node.js (TypeScript) + Fastify/Express.
 *   **Database**: PostgreSQL.
-*   **Database Tooling**: Kysely (Query Builder) + raw SQL.
+*   **Database Tooling**: Kysely (Query Builder) + raw SQL, CamelCasePlugin
+    enabled — camelCase in code, snake_case in the DB.
 *   **AI Provider**: DeepInfra (via OpenAI-compatible API).
 *   **AI Framework**: Vercel AI SDK: backend `streamText`/
     `toUIMessageStream` (route `POST /api/threads/:id/chat`), frontend
@@ -42,6 +43,11 @@
 *   `backend/src/db/db.ts` — the app-wide Kysely/pg singleton. Connection
     resolved at import time: `VITEST_TEST_DATABASE_URL` → `DATABASE_URL` →
     `DB_*` parts. Pool is lazy; `createDbFromPool` exported for global-setup.
+    `CamelCasePlugin` is enabled on every instance (app + tests): query
+    identifiers, inserts and result rows are camelCase, SQL/schema stay
+    snake_case. Migrations keep snake_case literals (no-op for the mapper)
+    and must stay idempotent — test provisioning replays them on a fresh
+    schema. Raw `sql` bypasses the plugin: use camelCase `AS` aliases there.
 *   `backend/src/db/queries/<table>/<query>.ts` — one Kysely query per file;
     the only layer touching Kysely, importing the singleton directly.
     Signatures carry domain args only (ownership filters: `user_id` rows
