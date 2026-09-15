@@ -7,20 +7,22 @@ type ListMessagesByThreadProps = {
 
 /**
  * A `messages` row flattened with its optional `message_usage` columns.
- * All `usage_*` fields are null when the message has no usage row yet
- * (user messages, in-flight or interrupted assistant messages).
+ * All `usage*` fields are null when the message has no usage row yet
+ * (user messages, in-flight or interrupted assistant messages). The
+ * CamelCasePlugin maps `usageModel` → `usage_model` etc. in SQL and maps
+ * the result row back to camelCase.
  */
 export type MessageWithUsageRow = Message & {
-  usage_model: string | null;
-  usage_provider_id: string | null;
-  usage_prompt_tokens: number | null;
-  usage_completion_tokens: number | null;
-  usage_cached_input_tokens: number | null;
-  usage_cache_write_tokens: number | null;
-  usage_reasoning_tokens: number | null;
-  usage_cost_usd: string | null;
-  usage_finish_reason: string | null;
-  usage_latency_ms: number | null;
+  usageModel: string | null;
+  usageProviderId: string | null;
+  usagePromptTokens: number | null;
+  usageCompletionTokens: number | null;
+  usageCachedInputTokens: number | null;
+  usageCacheWriteTokens: number | null;
+  usageReasoningTokens: number | null;
+  usageCostUsd: string | null;
+  usageFinishReason: string | null;
+  usageLatencyMs: number | null;
 };
 
 export async function listMessagesByThread({
@@ -28,21 +30,21 @@ export async function listMessagesByThread({
 }: ListMessagesByThreadProps): Promise<MessageWithUsageRow[]> {
   return db
     .selectFrom('messages')
-    .leftJoin('message_usage', 'message_usage.message_id', 'messages.id')
+    .leftJoin('messageUsage', 'messageUsage.messageId', 'messages.id')
     .selectAll('messages')
     .select([
-      'message_usage.model as usage_model',
-      'message_usage.provider_id as usage_provider_id',
-      'message_usage.prompt_tokens as usage_prompt_tokens',
-      'message_usage.completion_tokens as usage_completion_tokens',
-      'message_usage.cached_input_tokens as usage_cached_input_tokens',
-      'message_usage.cache_write_tokens as usage_cache_write_tokens',
-      'message_usage.reasoning_tokens as usage_reasoning_tokens',
-      'message_usage.cost_usd as usage_cost_usd',
-      'message_usage.finish_reason as usage_finish_reason',
-      'message_usage.latency_ms as usage_latency_ms',
+      'messageUsage.model as usageModel',
+      'messageUsage.providerId as usageProviderId',
+      'messageUsage.promptTokens as usagePromptTokens',
+      'messageUsage.completionTokens as usageCompletionTokens',
+      'messageUsage.cachedInputTokens as usageCachedInputTokens',
+      'messageUsage.cacheWriteTokens as usageCacheWriteTokens',
+      'messageUsage.reasoningTokens as usageReasoningTokens',
+      'messageUsage.costUsd as usageCostUsd',
+      'messageUsage.finishReason as usageFinishReason',
+      'messageUsage.latencyMs as usageLatencyMs',
     ])
-    .where('messages.thread_id', '=', threadId)
-    .orderBy('messages.created_at', 'asc')
+    .where('messages.threadId', '=', threadId)
+    .orderBy('messages.createdAt', 'asc')
     .execute();
 }

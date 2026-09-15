@@ -11,31 +11,31 @@ describe('insertThread', () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
 
-    const thread = await insertThread({ user_id: userId, title: 'First' });
+    const thread = await insertThread({ userId: userId, title: 'First' });
 
     expect(thread.id).toBeTypeOf('string');
     expect(thread.id.length).toBeGreaterThan(0);
-    expect(thread.user_id).toBe(userId);
+    expect(thread.userId).toBe(userId);
     expect(thread.title).toBe('First');
-    expect(thread.created_at).toBeInstanceOf(Date);
+    expect(thread.createdAt).toBeInstanceOf(Date);
   });
 
-  it('respects an explicitly provided created_at', async () => {
+  it('respects an explicitly provided createdAt', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
     const createdAt = new Date('2024-01-02T03:04:05.000Z');
 
     const thread = await insertThread({
-      user_id: userId,
+      userId: userId,
       title: 'Old',
-      created_at: createdAt,
+      createdAt: createdAt,
     });
 
-    expect(thread.created_at.getTime()).toBe(createdAt.getTime());
+    expect(thread.createdAt.getTime()).toBe(createdAt.getTime());
   });
 
   it('rejects when the user does not exist (FK violation)', async () => {
-    await expect(insertThread({ user_id: randomUUID(), title: 'Orphan' })).rejects.toMatchObject({
+    await expect(insertThread({ userId: randomUUID(), title: 'Orphan' })).rejects.toMatchObject({
       code: '23503',
     });
   });

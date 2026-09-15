@@ -13,7 +13,7 @@ describe('insertUserIfNotExists', () => {
     const inserted = await insertUserIfNotExists({ id });
 
     expect(inserted?.id).toBe(id);
-    expect(inserted?.created_at).toBeInstanceOf(Date);
+    expect(inserted?.createdAt).toBeInstanceOf(Date);
 
     const persisted = await findUserById({ id });
     expect(persisted?.id).toBe(id);

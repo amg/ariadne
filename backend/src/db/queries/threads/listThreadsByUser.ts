@@ -13,8 +13,8 @@ export async function listThreadsByUser({ userId }: ListThreadsByUserProps): Pro
   return db
     .selectFrom('threads')
     .selectAll()
-    .where('user_id', '=', userId)
-    .orderBy('created_at', 'desc')
+    .where('userId', '=', userId)
+    .orderBy('createdAt', 'desc')
     .orderBy('id', 'desc')
     .execute();
 }

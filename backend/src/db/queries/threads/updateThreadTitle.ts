@@ -21,7 +21,7 @@ export async function updateThreadTitle({
     .updateTable('threads')
     .set({ title })
     .where('id', '=', threadId)
-    .where('user_id', '=', userId)
+    .where('userId', '=', userId)
     .returningAll()
     .executeTakeFirst();
 }

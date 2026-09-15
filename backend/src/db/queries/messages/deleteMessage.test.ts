@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 async function createRandomThread() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
+  const thread = await insertThread({ userId: userId, title: 'Test thread' });
   return { userId, threadId: thread.id };
 }
 
@@ -21,7 +21,7 @@ describe('deleteMessage', () => {
 
   it('deletes the message and returns its id', async () => {
     const { threadId } = await createRandomThread();
-    const message = await insertMessage({ thread_id: threadId, role: 'user', content: 'bye' });
+    const message = await insertMessage({ threadId: threadId, role: 'user', content: 'bye' });
 
     const deletedId = await deleteMessage({ messageId: message.id });
 
@@ -32,22 +32,22 @@ describe('deleteMessage', () => {
   it('cascades the 1:1 message_usage row', async () => {
     const { threadId } = await createRandomThread();
     const assistant = await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'assistant',
       content: 'answer',
     });
     await insertMessageUsage({
-      message_id: assistant.id,
+      messageId: assistant.id,
       model: 'Qwen/Qwen3.5-9B',
-      provider_id: 'chatcmpl-1',
-      prompt_tokens: 5,
-      completion_tokens: 1,
-      cached_input_tokens: null,
-      cache_write_tokens: null,
-      reasoning_tokens: null,
-      cost_usd: '0.0000006500',
-      finish_reason: 'stop',
-      latency_ms: 42,
+      providerId: 'chatcmpl-1',
+      promptTokens: 5,
+      completionTokens: 1,
+      cachedInputTokens: null,
+      cacheWriteTokens: null,
+      reasoningTokens: null,
+      costUsd: '0.0000006500',
+      finishReason: 'stop',
+      latencyMs: 42,
     });
 
     await deleteMessage({ messageId: assistant.id });

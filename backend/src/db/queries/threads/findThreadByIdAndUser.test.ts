@@ -11,7 +11,7 @@ describe('findThreadByIdAndUser', () => {
   it('returns the thread when the user owns it', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
-    const thread = await insertThread({ user_id: userId, title: 'Mine' });
+    const thread = await insertThread({ userId: userId, title: 'Mine' });
 
     const found = await findThreadByIdAndUser({ userId, threadId: thread.id });
 
@@ -24,7 +24,7 @@ describe('findThreadByIdAndUser', () => {
     const stranger = randomUUID();
     await insertUserIfNotExists({ id: owner });
     await insertUserIfNotExists({ id: stranger });
-    const thread = await insertThread({ user_id: owner, title: 'Not yours' });
+    const thread = await insertThread({ userId: owner, title: 'Not yours' });
 
     const found = await findThreadByIdAndUser({ userId: stranger, threadId: thread.id });
 

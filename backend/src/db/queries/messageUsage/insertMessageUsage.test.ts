@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest';
 async function createAssistantMessage(): Promise<string> {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
-  const message = await insertMessage({ thread_id: thread.id, role: 'assistant', content: 'hi' });
+  const thread = await insertThread({ userId: userId, title: 'Test thread' });
+  const message = await insertMessage({ threadId: thread.id, role: 'assistant', content: 'hi' });
   return message.id;
 }
 
@@ -22,53 +22,53 @@ describe('insertMessageUsage', () => {
     const messageId = await createAssistantMessage();
 
     const inserted = await insertMessageUsage({
-      message_id: messageId,
+      messageId: messageId,
       model: 'Qwen/Qwen3.5-9B',
-      provider_id: 'chatcmpl-123',
-      prompt_tokens: 42,
-      completion_tokens: 7,
-      cached_input_tokens: 3,
-      cache_write_tokens: 2,
-      cost_usd: '0.0000052500',
-      finish_reason: 'stop',
-      latency_ms: 123,
+      providerId: 'chatcmpl-123',
+      promptTokens: 42,
+      completionTokens: 7,
+      cachedInputTokens: 3,
+      cacheWriteTokens: 2,
+      costUsd: '0.0000052500',
+      finishReason: 'stop',
+      latencyMs: 123,
     });
 
-    expect(inserted.message_id).toBe(messageId);
-    expect(inserted.cost_usd).toBe('0.0000052500');
-    expect(inserted.latency_ms).toBe(123);
+    expect(inserted.messageId).toBe(messageId);
+    expect(inserted.costUsd).toBe('0.0000052500');
+    expect(inserted.latencyMs).toBe(123);
 
     const fetched = await getMessageUsageByMessageId({ messageId });
-    expect(fetched?.prompt_tokens).toBe(42);
-    expect(fetched?.finish_reason).toBe('stop');
+    expect(fetched?.promptTokens).toBe(42);
+    expect(fetched?.finishReason).toBe('stop');
   });
 
   it('rejects a second row for the same message (1:1 via PK)', async () => {
     const messageId = await createAssistantMessage();
     const first = await insertMessageUsage({
-      message_id: messageId,
+      messageId: messageId,
       model: 'm',
-      provider_id: 'p',
-      prompt_tokens: 1,
-      completion_tokens: 1,
-      cached_input_tokens: 0,
-      cache_write_tokens: 0,
-      cost_usd: '0.0000000000',
-      finish_reason: 'stop',
+      providerId: 'p',
+      promptTokens: 1,
+      completionTokens: 1,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: '0.0000000000',
+      finishReason: 'stop',
     });
-    expect(first.latency_ms).toBeNull();
+    expect(first.latencyMs).toBeNull();
 
     await expect(
       insertMessageUsage({
-        message_id: messageId,
+        messageId: messageId,
         model: 'm2',
-        provider_id: 'p2',
-        prompt_tokens: 2,
-        completion_tokens: 2,
-        cached_input_tokens: 0,
-        cache_write_tokens: 0,
-        cost_usd: '0.0000000001',
-        finish_reason: 'stop',
+        providerId: 'p2',
+        promptTokens: 2,
+        completionTokens: 2,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: '0.0000000001',
+        finishReason: 'stop',
       }),
     ).rejects.toMatchObject({ code: '23505' });
   });

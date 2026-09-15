@@ -79,7 +79,7 @@ async function startExchange({
 }: StartExchangeProps): Promise<ChatStreamHandle> {
   const config = resolveInferenceConfig();
   const assistantMessage = await insertMessage({
-    thread_id: threadId,
+    threadId,
     role: 'assistant',
     content: '',
   });
@@ -156,7 +156,7 @@ export async function submitChat({
   }
 
   const precedingRows = await listMessagesByThread({ threadId });
-  const userMessage = await insertMessage({ thread_id: threadId, role: 'user', content });
+  const userMessage = await insertMessage({ threadId, role: 'user', content });
   return ok(await startExchange({ threadId, precedingRows, userMessage }));
 }
 

@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 async function seedUserAndThread(title: string) {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title });
+  const thread = await insertThread({ userId: userId, title });
   return { userId, thread };
 }
 
@@ -27,7 +27,7 @@ describe('updateThreadTitle', () => {
 
   it('does not touch other threads', async () => {
     const { userId, thread } = await seedUserAndThread('First');
-    const second = await insertThread({ user_id: userId, title: 'Second' });
+    const second = await insertThread({ userId: userId, title: 'Second' });
 
     await updateThreadTitle({ userId, threadId: thread.id, title: 'Renamed' });
 

@@ -7,7 +7,7 @@ import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
 
 /** Usage as served on the GET payload (identity columns implied by the row). */
-export type UsagePayload = Omit<MessageUsage, 'message_id' | 'created_at'>;
+export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
 
 export type MessageWithUsage = Message & {
   /** Inference telemetry for assistant messages; null until available. */
@@ -17,26 +17,26 @@ export type MessageWithUsage = Message & {
 /** Flattens the join aliases from `listMessagesByThread` into a nested row. */
 export function messageRowToMessageWithUsage(row: MessageWithUsageRow): MessageWithUsage {
   const {
-    usage_model: model,
-    usage_provider_id: provider_id,
-    usage_prompt_tokens: prompt_tokens,
-    usage_completion_tokens: completion_tokens,
-    usage_cached_input_tokens: cached_input_tokens,
-    usage_cache_write_tokens: cache_write_tokens,
-    usage_reasoning_tokens: reasoning_tokens,
-    usage_cost_usd: cost_usd,
-    usage_finish_reason: finish_reason,
-    usage_latency_ms: latency_ms,
+    usageModel: model,
+    usageProviderId: providerId,
+    usagePromptTokens: promptTokens,
+    usageCompletionTokens: completionTokens,
+    usageCachedInputTokens: cachedInputTokens,
+    usageCacheWriteTokens: cacheWriteTokens,
+    usageReasoningTokens: reasoningTokens,
+    usageCostUsd: costUsd,
+    usageFinishReason: finishReason,
+    usageLatencyMs: latencyMs,
     ...message
   } = row;
 
   if (
     model === null ||
-    provider_id === null ||
-    prompt_tokens === null ||
-    completion_tokens === null ||
-    cost_usd === null ||
-    finish_reason === null
+    providerId === null ||
+    promptTokens === null ||
+    completionTokens === null ||
+    costUsd === null ||
+    finishReason === null
   ) {
     return { ...message, usage: null };
   }
@@ -44,16 +44,16 @@ export function messageRowToMessageWithUsage(row: MessageWithUsageRow): MessageW
     ...message,
     usage: {
       model,
-      provider_id,
-      prompt_tokens,
-      completion_tokens,
+      providerId,
+      promptTokens,
+      completionTokens,
       // NULL is meaningful: the provider didn't report these fields.
-      cached_input_tokens,
-      cache_write_tokens,
-      reasoning_tokens,
-      cost_usd,
-      finish_reason: finish_reason as MessageFinishReason,
-      latency_ms,
+      cachedInputTokens,
+      cacheWriteTokens,
+      reasoningTokens,
+      costUsd,
+      finishReason: finishReason as MessageFinishReason,
+      latencyMs,
     },
   };
 }

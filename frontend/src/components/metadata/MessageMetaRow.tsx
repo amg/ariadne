@@ -28,8 +28,8 @@ export default function MessageMetaRow({
   action?: React.ReactNode;
   className?: string;
 }) {
-  const prompt = usage ? usage.prompt_tokens - (usage.cached_input_tokens ?? 0) : null;
-  const completion = usage ? usage.completion_tokens - (usage.reasoning_tokens ?? 0) : null;
+  const prompt = usage ? usage.promptTokens - (usage.cachedInputTokens ?? 0) : null;
+  const completion = usage ? usage.completionTokens - (usage.reasoningTokens ?? 0) : null;
 
   return (
     <div
@@ -51,26 +51,26 @@ export default function MessageMetaRow({
       {/* cached */}
       <span title="Cached prompt tokens">
         <span className="font-bold text-neutral-200">
-          {formatTokens(usage?.cached_input_tokens) ?? '—'}
+          {formatTokens(usage?.cachedInputTokens) ?? '—'}
         </span>
         <span className="text-neutral-500"> cached</span>
       </span>
       {/* reasoning */}
       <span title="Reasoning tokens">
         <span className="font-bold text-neutral-200">
-          {formatTokens(usage?.reasoning_tokens) ?? '—'}
+          {formatTokens(usage?.reasoningTokens) ?? '—'}
         </span>
         <span className="text-neutral-500"> reason</span>
       </span>
       {/* cost */}
       <span title="Cost in USD">
-        <span className="font-bold text-neutral-200">{formatCost(usage?.cost_usd) ?? '—'}</span>
+        <span className="font-bold text-neutral-200">{formatCost(usage?.costUsd) ?? '—'}</span>
       </span>
       {/* time — only on settled rows */}
       {showLatency ? (
         <span title="Latency">
           <span className="font-bold text-neutral-200">
-            {formatDuration(usage?.latency_ms) ?? '—'}
+            {formatDuration(usage?.latencyMs) ?? '—'}
           </span>
         </span>
       ) : null}
@@ -79,7 +79,7 @@ export default function MessageMetaRow({
         title={usage ? 'finish reason' : 'stream state'}
         className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-300"
       >
-        {usage ? FINISH_REASON_LABEL[usage.finish_reason] : (status ?? '—')}
+        {usage ? FINISH_REASON_LABEL[usage.finishReason] : (status ?? '—')}
       </span>
       {/* action (e.g. retry) */}
       {action}

@@ -82,10 +82,10 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
   });
 
   // Format pricing per million tokens
-  const inputPrice = primaryModelPricing?.input_price_per_million;
-  const outputPrice = primaryModelPricing?.output_price_per_million;
-  const cachedPrice = primaryModelPricing?.cached_price_per_million;
-  const cachedRate = primaryModelPricing?.cached_rate_multiplier;
+  const inputPrice = primaryModelPricing?.inputPricePerMillion;
+  const outputPrice = primaryModelPricing?.outputPricePerMillion;
+  const cachedPrice = primaryModelPricing?.cachedPricePerMillion;
+  const cachedRate = primaryModelPricing?.cachedRateMultiplier;
   const formatPrice = (price: number | null) => {
     if (price === null) return '—';
     if (price < 0.01) return `$${price.toFixed(4)}`;
@@ -212,7 +212,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
                     {formatPrice(outputPrice)}/1M
                   </span>
                 </div>
-                {primaryModelPricing.cached_price_per_million !== null && (
+                {primaryModelPricing.cachedPricePerMillion !== null && (
                   <div className="flex items-center gap-3">
                     <span title="Cached token price per million tokens">
                       <span className="font-medium text-foreground">Cached:</span>{' '}

@@ -1,7 +1,7 @@
 import { db } from '@db/db';
 import type { NewModelConfig } from '@db/types';
 
-/** Model config from DeepInfra API. */
+/** Model config from DeepInfra API (external wire format — snake_case). */
 interface DeepInfraModel {
   _id: string;
   name: string;
@@ -28,28 +28,28 @@ interface DeepInfraModel {
 
 /** Our model config row. */
 export interface ModelConfigRow {
-  model_id: string;
+  modelId: string;
   provider: string;
-  context_window: number | null;
-  input_price_per_million: number | null;
-  output_price_per_million: number | null;
-  cached_price_per_million: number | null; // absolute price per million (input_price × cached_rate_multiplier)
-  cached_rate_multiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
-  supports_caching: boolean;
-  last_updated: Date;
+  contextWindow: number | null;
+  inputPricePerMillion: number | null;
+  outputPricePerMillion: number | null;
+  cachedPricePerMillion: number | null; // absolute price per million (inputPrice × cachedRateMultiplier)
+  cachedRateMultiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
+  supportsCaching: boolean;
+  lastUpdated: Date;
 }
 
 /** Fallback config for when API is unavailable. */
 const FALLBACK_CONFIG: ModelConfigRow = {
-  model_id: 'Qwen/Qwen3.5-9B',
+  modelId: 'Qwen/Qwen3.5-9B',
   provider: 'deepinfra',
-  context_window: 32768,
-  input_price_per_million: 0.1,
-  output_price_per_million: 0.15,
-  cached_price_per_million: 0.05, // 50% of input price
-  cached_rate_multiplier: 0.5, // 50% discount for cached tokens
-  supports_caching: true,
-  last_updated: new Date(),
+  contextWindow: 32768,
+  inputPricePerMillion: 0.1,
+  outputPricePerMillion: 0.15,
+  cachedPricePerMillion: 0.05, // 50% of input price
+  cachedRateMultiplier: 0.5, // 50% discount for cached tokens
+  supportsCaching: true,
+  lastUpdated: new Date(),
 };
 
 /** In-memory rate limit state. */
@@ -126,15 +126,15 @@ function parseDeepInfraModel(model: DeepInfraModel): ModelConfigRow {
     inputPrice !== null && cachedRateMultiplier !== null ? inputPrice * cachedRateMultiplier : null;
 
   return {
-    model_id: model.name,
+    modelId: model.name,
     provider: 'deepinfra',
-    context_window: model.context_length ?? null,
-    input_price_per_million: inputPrice,
-    output_price_per_million: outputPrice,
-    cached_price_per_million: cachedPrice,
-    cached_rate_multiplier: cachedRateMultiplier,
-    supports_caching: model.capabilities?.caching ?? false,
-    last_updated: new Date(),
+    contextWindow: model.context_length ?? null,
+    inputPricePerMillion: inputPrice,
+    outputPricePerMillion: outputPrice,
+    cachedPricePerMillion: cachedPrice,
+    cachedRateMultiplier: cachedRateMultiplier,
+    supportsCaching: model.capabilities?.caching ?? false,
+    lastUpdated: new Date(),
   };
 }
 
@@ -170,26 +170,26 @@ export async function refreshModelConfigs(): Promise<{
 
   for (const config of configs) {
     const row: NewModelConfig = {
-      model_id: config.model_id,
+      modelId: config.modelId,
       provider: config.provider,
-      context_window: config.context_window,
-      input_price_per_million: config.input_price_per_million,
-      output_price_per_million: config.output_price_per_million,
-      cached_rate_multiplier: config.cached_rate_multiplier,
-      supports_caching: config.supports_caching,
+      contextWindow: config.contextWindow,
+      inputPricePerMillion: config.inputPricePerMillion,
+      outputPricePerMillion: config.outputPricePerMillion,
+      cachedRateMultiplier: config.cachedRateMultiplier,
+      supportsCaching: config.supportsCaching,
     };
 
     await db
-      .insertInto('model_configs')
+      .insertInto('modelConfigs')
       .values(row)
       .onConflict((oc) =>
-        oc.column('model_id').doUpdateSet({
-          context_window: config.context_window,
-          input_price_per_million: config.input_price_per_million,
-          output_price_per_million: config.output_price_per_million,
-          cached_rate_multiplier: config.cached_rate_multiplier,
-          supports_caching: config.supports_caching,
-          last_updated: config.last_updated,
+        oc.column('modelId').doUpdateSet({
+          contextWindow: config.contextWindow,
+          inputPricePerMillion: config.inputPricePerMillion,
+          outputPricePerMillion: config.outputPricePerMillion,
+          cachedRateMultiplier: config.cachedRateMultiplier,
+          supportsCaching: config.supportsCaching,
+          lastUpdated: config.lastUpdated,
         }),
       )
       .execute();
@@ -208,33 +208,33 @@ export async function refreshModelConfigs(): Promise<{
  */
 export async function getModelConfig(modelId: string): Promise<ModelConfigRow | null> {
   const config = await db
-    .selectFrom('model_configs')
+    .selectFrom('modelConfigs')
     .selectAll()
-    .where('model_id', '=', modelId)
+    .where('modelId', '=', modelId)
     .executeTakeFirst();
 
   if (config) {
-    // Calculate cached_price_per_million from cached_rate_multiplier
+    // Calculate cachedPricePerMillion from cachedRateMultiplier
     const cachedPrice =
-      config.input_price_per_million !== null && config.cached_rate_multiplier !== null
-        ? config.input_price_per_million * config.cached_rate_multiplier
+      config.inputPricePerMillion !== null && config.cachedRateMultiplier !== null
+        ? config.inputPricePerMillion * config.cachedRateMultiplier
         : null;
 
     return {
-      model_id: config.model_id,
+      modelId: config.modelId,
       provider: config.provider,
-      context_window: config.context_window,
-      input_price_per_million: config.input_price_per_million,
-      output_price_per_million: config.output_price_per_million,
-      cached_price_per_million: cachedPrice,
-      cached_rate_multiplier: config.cached_rate_multiplier,
-      supports_caching: config.supports_caching,
-      last_updated: config.last_updated,
+      contextWindow: config.contextWindow,
+      inputPricePerMillion: config.inputPricePerMillion,
+      outputPricePerMillion: config.outputPricePerMillion,
+      cachedPricePerMillion: cachedPrice,
+      cachedRateMultiplier: config.cachedRateMultiplier,
+      supportsCaching: config.supportsCaching,
+      lastUpdated: config.lastUpdated,
     };
   }
 
   // Fallback to hardcoded config
-  if (modelId === FALLBACK_CONFIG.model_id) {
+  if (modelId === FALLBACK_CONFIG.modelId) {
     return FALLBACK_CONFIG;
   }
 
@@ -246,34 +246,34 @@ export async function getModelConfig(modelId: string): Promise<ModelConfigRow | 
  */
 export async function getModelConfigs(modelIds: string[]): Promise<Record<string, ModelConfigRow>> {
   const configs = await db
-    .selectFrom('model_configs')
+    .selectFrom('modelConfigs')
     .selectAll()
-    .where('model_id', 'in', modelIds)
+    .where('modelId', 'in', modelIds)
     .execute();
 
   const result: Record<string, ModelConfigRow> = {};
   for (const config of configs) {
     const cachedPrice =
-      config.input_price_per_million !== null && config.cached_rate_multiplier !== null
-        ? config.input_price_per_million * config.cached_rate_multiplier
+      config.inputPricePerMillion !== null && config.cachedRateMultiplier !== null
+        ? config.inputPricePerMillion * config.cachedRateMultiplier
         : null;
 
-    result[config.model_id] = {
-      model_id: config.model_id,
+    result[config.modelId] = {
+      modelId: config.modelId,
       provider: config.provider,
-      context_window: config.context_window,
-      input_price_per_million: config.input_price_per_million,
-      output_price_per_million: config.output_price_per_million,
-      cached_price_per_million: cachedPrice,
-      cached_rate_multiplier: config.cached_rate_multiplier,
-      supports_caching: config.supports_caching,
-      last_updated: config.last_updated,
+      contextWindow: config.contextWindow,
+      inputPricePerMillion: config.inputPricePerMillion,
+      outputPricePerMillion: config.outputPricePerMillion,
+      cachedPricePerMillion: cachedPrice,
+      cachedRateMultiplier: config.cachedRateMultiplier,
+      supportsCaching: config.supportsCaching,
+      lastUpdated: config.lastUpdated,
     };
   }
 
   // Add fallback for known model
-  if (modelIds.includes(FALLBACK_CONFIG.model_id) && !result[FALLBACK_CONFIG.model_id]) {
-    result[FALLBACK_CONFIG.model_id] = FALLBACK_CONFIG;
+  if (modelIds.includes(FALLBACK_CONFIG.modelId) && !result[FALLBACK_CONFIG.modelId]) {
+    result[FALLBACK_CONFIG.modelId] = FALLBACK_CONFIG;
   }
 
   return result;
@@ -283,24 +283,24 @@ export async function getModelConfigs(modelIds: string[]): Promise<Record<string
  * Lists all cached model configs.
  */
 export async function listModelConfigs(): Promise<ModelConfigRow[]> {
-  const configs = await db.selectFrom('model_configs').selectAll().orderBy('model_id').execute();
+  const configs = await db.selectFrom('modelConfigs').selectAll().orderBy('modelId').execute();
 
   return configs.map((config) => {
     const cachedPrice =
-      config.input_price_per_million !== null && config.cached_rate_multiplier !== null
-        ? config.input_price_per_million * config.cached_rate_multiplier
+      config.inputPricePerMillion !== null && config.cachedRateMultiplier !== null
+        ? config.inputPricePerMillion * config.cachedRateMultiplier
         : null;
 
     return {
-      model_id: config.model_id,
+      modelId: config.modelId,
       provider: config.provider,
-      context_window: config.context_window,
-      input_price_per_million: config.input_price_per_million,
-      output_price_per_million: config.output_price_per_million,
-      cached_price_per_million: cachedPrice,
-      cached_rate_multiplier: config.cached_rate_multiplier,
-      supports_caching: config.supports_caching,
-      last_updated: config.last_updated,
+      contextWindow: config.contextWindow,
+      inputPricePerMillion: config.inputPricePerMillion,
+      outputPricePerMillion: config.outputPricePerMillion,
+      cachedPricePerMillion: cachedPrice,
+      cachedRateMultiplier: config.cachedRateMultiplier,
+      supportsCaching: config.supportsCaching,
+      lastUpdated: config.lastUpdated,
     };
   });
 }
@@ -310,8 +310,8 @@ export async function listModelConfigs(): Promise<ModelConfigRow[]> {
  */
 export async function cleanupModelConfigs(keepModelIds: string[]): Promise<number> {
   const result = await db
-    .deleteFrom('model_configs')
-    .where('model_id', 'not in', keepModelIds)
+    .deleteFrom('modelConfigs')
+    .where('modelId', 'not in', keepModelIds)
     .execute();
 
   return result.length;

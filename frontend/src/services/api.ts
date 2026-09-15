@@ -10,30 +10,30 @@ export type MessageFinishReason =
 export interface Thread {
   id: string;
   title: string;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Telemetry for one assistant message (backend `message_usage`, 1:1). */
 export interface MessageUsage {
   model: string;
-  provider_id: string;
-  prompt_tokens: number;
-  completion_tokens: number;
+  providerId: string;
+  promptTokens: number;
+  completionTokens: number;
   /** NULL when the provider doesn't report these. */
-  reasoning_tokens: number | null;
-  cached_input_tokens: number | null;
-  cache_write_tokens: number | null;
-  cost_usd: string;
-  finish_reason: MessageFinishReason;
-  latency_ms: number | null;
+  reasoningTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteTokens: number | null;
+  costUsd: string;
+  finishReason: MessageFinishReason;
+  latencyMs: number | null;
 }
 
 export interface Message {
   id: string;
   role: Role;
   content: string;
-  created_at: string;
+  createdAt: string;
   usage: MessageUsage | null;
 }
 
@@ -106,10 +106,10 @@ export interface ThreadSummary {
   };
   primaryModel: string | null;
   primaryModelPricing: {
-    input_price_per_million: number | null;
-    output_price_per_million: number | null;
-    cached_price_per_million: number | null;
-    cached_rate_multiplier: number | null;
+    inputPricePerMillion: number | null;
+    outputPricePerMillion: number | null;
+    cachedPricePerMillion: number | null;
+    cachedRateMultiplier: number | null;
   } | null;
   contextUsage: {
     used: number;

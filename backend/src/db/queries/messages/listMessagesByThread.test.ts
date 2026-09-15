@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 async function createRandomThread(): Promise<string> {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
+  const thread = await insertThread({ userId: userId, title: 'Test thread' });
   return thread.id;
 }
 
@@ -34,30 +34,30 @@ describe('listMessagesByThread', () => {
     const threadId = await createRandomThread();
     const otherThreadId = await createRandomThread();
 
-    await insertMessage({ thread_id: threadId, role: 'user', content: 'Mine' });
-    await insertMessage({ thread_id: otherThreadId, role: 'user', content: 'Not mine' });
+    await insertMessage({ threadId: threadId, role: 'user', content: 'Mine' });
+    await insertMessage({ threadId: otherThreadId, role: 'user', content: 'Not mine' });
 
     const messages = await listMessagesByThread({ threadId });
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.content).toBe('Mine');
-    expect(messages[0]?.thread_id).toBe(threadId);
+    expect(messages[0]?.threadId).toBe(threadId);
   });
 
   it('orders messages oldest first', async () => {
     const threadId = await createRandomThread();
 
     await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'user',
       content: 'Newer',
-      created_at: new Date('2024-06-01T00:00:01.000Z'),
+      createdAt: new Date('2024-06-01T00:00:01.000Z'),
     });
     await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'assistant',
       content: 'Older',
-      created_at: new Date('2024-06-01T00:00:00.000Z'),
+      createdAt: new Date('2024-06-01T00:00:00.000Z'),
     });
 
     const messages = await listMessagesByThread({ threadId });
@@ -67,12 +67,12 @@ describe('listMessagesByThread', () => {
 
   it('returns null usage columns when the message has no usage row', async () => {
     const threadId = await createRandomThread();
-    await insertMessage({ thread_id: threadId, role: 'user', content: 'no usage' });
+    await insertMessage({ threadId: threadId, role: 'user', content: 'no usage' });
 
     const [row] = await listMessagesByThread({ threadId });
 
-    expect(row?.usage_model).toBeNull();
-    expect(row?.usage_cost_usd).toBeNull();
-    expect(row?.usage_latency_ms).toBeNull();
+    expect(row?.usageModel).toBeNull();
+    expect(row?.usageCostUsd).toBeNull();
+    expect(row?.usageLatencyMs).toBeNull();
   });
 });

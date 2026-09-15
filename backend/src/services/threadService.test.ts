@@ -26,8 +26,8 @@ describe('threadService', () => {
       const thread = await createThread({ userId: DEFAULT_USER_ID, title: 'My Topic' });
 
       expect(thread.title).toBe('My Topic');
-      expect(thread.user_id).toBe(DEFAULT_USER_ID);
-      expect(await findUserById({ id: thread.user_id })).toBeDefined();
+      expect(thread.userId).toBe(DEFAULT_USER_ID);
+      expect(await findUserById({ id: thread.userId })).toBeDefined();
     });
 
     it('falls back to "New Chat" when no title is given', async () => {
@@ -142,7 +142,7 @@ describe('threadService', () => {
       // Another user thread must not leak into the list
       const stranger = randomUUID();
       await insertUserIfNotExists({ id: stranger });
-      await insertThread({ user_id: stranger, title: 'Someone else' });
+      await insertThread({ userId: stranger, title: 'Someone else' });
 
       const threads = await getThreads({ userId: DEFAULT_USER_ID });
 
@@ -155,7 +155,7 @@ describe('threadService', () => {
     it('deletes the thread and its messages', async () => {
       await seedDefaultUser();
       const thread = await createThread({ userId: DEFAULT_USER_ID, title: 'Doomed' });
-      await insertMessage({ thread_id: thread.id, role: 'user', content: 'hello' });
+      await insertMessage({ threadId: thread.id, role: 'user', content: 'hello' });
 
       const deleted = await deleteThread({ userId: DEFAULT_USER_ID, threadId: thread.id });
 

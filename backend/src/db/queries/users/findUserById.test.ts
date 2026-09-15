@@ -15,7 +15,7 @@ describe('findUserById', () => {
 
     expect(user).toBeDefined();
     expect(user?.id).toBe(id);
-    expect(user?.created_at).toBeInstanceOf(Date);
+    expect(user?.createdAt).toBeInstanceOf(Date);
   });
 
   it('returns undefined when the user does not exist', async () => {

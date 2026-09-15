@@ -50,7 +50,7 @@ afterAll(async () => {
 async function createRandomThread() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'AI thread' });
+  const thread = await insertThread({ userId: userId, title: 'AI thread' });
   return { userId, threadId: thread.id };
 }
 
@@ -109,26 +109,30 @@ describe('submitChat', () => {
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.content)).toEqual(['Hello world', 'Mock reply to: Hello world']);
 
-    // Usage row: cache telemetry passed through, cost from the local map.
+    // Usage row: cache telemetry passed through, cost from the local map
+    // with the cached-token discount (fallback model config supplies a 0.5
+    // cached-rate multiplier, see modelConfigService FALLBACK_CONFIG).
     const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
     expect(usage).toBeDefined();
     // 1 message in history + the new one → base 4 + 2
-    expect(usage?.prompt_tokens).toBe(MOCK_CACHE.basePromptTokens + 2);
-    expect(usage?.completion_tokens).toBe('Mock reply to: Hello world'.split(/(?<=\s)/).length);
-    expect(usage?.cached_input_tokens).toBe(MOCK_CACHE.cachedInputTokens);
+    expect(usage?.promptTokens).toBe(MOCK_CACHE.basePromptTokens + 2);
+    expect(usage?.completionTokens).toBe('Mock reply to: Hello world'.split(/(?<=\s)/).length);
+    expect(usage?.cachedInputTokens).toBe(MOCK_CACHE.cachedInputTokens);
     // ai@7 deduplicates usage and does not expose raw/provider extra fields —
-    // cache_write_tokens stays NULL (omitted) until the SDK spreads it
+    // cacheWriteTokens stays NULL (omitted) until the SDK spreads it
     // (the fallback path in usageMap.ts is already wired to usage.raw).
-    expect(usage?.cache_write_tokens).toBeNull();
+    expect(usage?.cacheWriteTokens).toBeNull();
     expect(usage?.model).toBe(DEFAULT_MODEL_ID);
-    expect(usage?.finish_reason).toBe('stop');
-    expect(usage?.provider_id).toMatch(/^chatcmpl-mock-/);
-    expect(usage?.latency_ms).toBeGreaterThanOrEqual(0);
-    expect(Number(usage?.cost_usd)).toBe(
+    expect(usage?.finishReason).toBe('stop');
+    expect(usage?.providerId).toMatch(/^chatcmpl-mock-/);
+    expect(usage?.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(Number(usage?.costUsd)).toBe(
       computeCostUsd({
         model: DEFAULT_MODEL_ID,
-        promptTokens: usage?.prompt_tokens ?? 0,
-        completionTokens: usage?.completion_tokens ?? 0,
+        promptTokens: usage?.promptTokens ?? 0,
+        completionTokens: usage?.completionTokens ?? 0,
+        cachedInputTokens: MOCK_CACHE.cachedInputTokens,
+        cachedRateMultiplier: 0.5,
       }),
     );
   });
@@ -236,7 +240,7 @@ describe('retryLastExchange', () => {
   it('continues a thread that ends in a user row without duplicating it', async () => {
     const { userId, threadId } = await createRandomThread();
     const userMessage = await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'user',
       content: 'stuck prompt',
     });

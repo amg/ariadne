@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 async function seedUserAndThread(title: string) {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title });
+  const thread = await insertThread({ userId: userId, title });
   return { userId, thread };
 }
 
@@ -29,8 +29,8 @@ describe('deleteThread', () => {
 
   it('cascades to the thread messages', async () => {
     const { userId, thread } = await seedUserAndThread('With messages');
-    await insertMessage({ thread_id: thread.id, role: 'user', content: 'hello' });
-    await insertMessage({ thread_id: thread.id, role: 'assistant', content: 'hi' });
+    await insertMessage({ threadId: thread.id, role: 'user', content: 'hello' });
+    await insertMessage({ threadId: thread.id, role: 'assistant', content: 'hi' });
 
     await deleteThread({ userId, threadId: thread.id });
 
@@ -39,7 +39,7 @@ describe('deleteThread', () => {
 
   it('does not touch other threads of the same user', async () => {
     const { userId, thread } = await seedUserAndThread('First');
-    const second = await insertThread({ user_id: userId, title: 'Second' });
+    const second = await insertThread({ userId: userId, title: 'Second' });
 
     await deleteThread({ userId, threadId: thread.id });
 

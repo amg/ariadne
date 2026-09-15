@@ -19,6 +19,6 @@ export async function findThreadByIdAndUser({
     .selectFrom('threads')
     .selectAll()
     .where('id', '=', threadId)
-    .where('user_id', '=', userId)
+    .where('userId', '=', userId)
     .executeTakeFirst();
 }

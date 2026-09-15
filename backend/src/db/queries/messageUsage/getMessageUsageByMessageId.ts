@@ -9,8 +9,8 @@ export async function getMessageUsageByMessageId({
   messageId,
 }: GetMessageUsageByMessageIdProps): Promise<MessageUsage | undefined> {
   return db
-    .selectFrom('message_usage')
+    .selectFrom('messageUsage')
     .selectAll()
-    .where('message_id', '=', messageId)
+    .where('messageId', '=', messageId)
     .executeTakeFirst();
 }

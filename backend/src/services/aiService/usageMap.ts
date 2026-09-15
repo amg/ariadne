@@ -39,33 +39,33 @@ export async function buildUsageRow(args: {
 
   // Get cached rate multiplier from model config
   const modelConfig = await getModelConfig(args.model);
-  const cachedRateMultiplier = modelConfig?.cached_rate_multiplier ?? null;
+  const cachedRateMultiplier = modelConfig?.cachedRateMultiplier ?? null;
 
   const row: NewMessageUsage = {
-    message_id: args.messageId,
+    messageId: args.messageId,
     model: args.model,
-    provider_id: args.providerId ?? `local-${args.messageId}`,
-    prompt_tokens: promptTokens,
-    completion_tokens: completionTokens,
-    cost_usd: computeCostUsd({
+    providerId: args.providerId ?? `local-${args.messageId}`,
+    promptTokens: promptTokens,
+    completionTokens: completionTokens,
+    costUsd: computeCostUsd({
       model: args.model,
       promptTokens,
       completionTokens,
       cachedInputTokens,
       cachedRateMultiplier,
     }).toFixed(10),
-    finish_reason: args.finishReason,
+    finishReason: args.finishReason,
   };
 
-  if (typeof cachedInputTokens === 'number') row.cached_input_tokens = cachedInputTokens;
+  if (typeof cachedInputTokens === 'number') row.cachedInputTokens = cachedInputTokens;
 
   const cacheWrite =
     args.usage.inputTokenDetails?.cacheWriteTokens ?? readRawCacheWriteTokens(args.usage);
-  if (typeof cacheWrite === 'number') row.cache_write_tokens = cacheWrite;
+  if (typeof cacheWrite === 'number') row.cacheWriteTokens = cacheWrite;
 
   const reasoning = args.usage.outputTokenDetails?.reasoningTokens;
-  if (typeof reasoning === 'number') row.reasoning_tokens = reasoning;
+  if (typeof reasoning === 'number') row.reasoningTokens = reasoning;
 
-  if (args.latencyMs !== null) row.latency_ms = args.latencyMs;
+  if (args.latencyMs !== null) row.latencyMs = args.latencyMs;
   return row;
 }

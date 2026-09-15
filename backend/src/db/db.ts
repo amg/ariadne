@@ -1,17 +1,25 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Kysely, PostgresDialect } from 'kysely';
+import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import type { Database } from './types';
 
 /**
  * Build a Kysely instance around an existing pg pool.
+ *
+ * `CamelCasePlugin` maps code-side camelCase identifiers onto the
+ * snake_case schema (query args, column refs, inserts) and maps result
+ * rows back to camelCase. Migrations stay snake_case literals — the
+ * mapper is a no-op for already-snake strings. Raw `sql` templates
+ * bypass the plugin entirely: their SQL and result rows stay exactly
+ * as written.
  */
 export function createDbFromPool(pool: Pool): Kysely<Database> {
   return new Kysely<Database>({
     dialect: new PostgresDialect({ pool }),
+    plugins: [new CamelCasePlugin()],
   });
 }
 

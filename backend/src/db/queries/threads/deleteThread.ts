@@ -14,7 +14,7 @@ export async function deleteThread({ userId, threadId }: DeleteThreadProps): Pro
   const result = await db
     .deleteFrom('threads')
     .where('id', '=', threadId)
-    .where('user_id', '=', userId)
+    .where('userId', '=', userId)
     .executeTakeFirst();
 
   return Number(result.numDeletedRows) > 0;

@@ -18,10 +18,10 @@ export interface ThreadSummary {
   };
   primaryModel: string | null;
   primaryModelPricing: {
-    input_price_per_million: number | null;
-    output_price_per_million: number | null;
-    cached_price_per_million: number | null;
-    cached_rate_multiplier: number | null;
+    inputPricePerMillion: number | null;
+    outputPricePerMillion: number | null;
+    cachedPricePerMillion: number | null;
+    cachedRateMultiplier: number | null;
   } | null;
   contextUsage: {
     used: number;
@@ -35,11 +35,11 @@ interface MessageWithUsage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   model: string | null;
-  cost_usd: string | null;
-  prompt_tokens: number | null;
-  completion_tokens: number | null;
-  cached_input_tokens: number | null;
-  reasoning_tokens: number | null;
+  costUsd: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cachedInputTokens: number | null;
+  reasoningTokens: number | null;
 }
 
 interface AggregatedStats {
@@ -72,14 +72,14 @@ function aggregateStats(messages: MessageWithUsage[]): AggregatedStats {
     if (msg.role === 'user') stats.userCount++;
     else if (msg.role === 'assistant') stats.assistantCount++;
 
-    if (!msg.model || !msg.cost_usd) continue;
+    if (!msg.model || !msg.costUsd) continue;
 
     stats.modelCounts[msg.model] = (stats.modelCounts[msg.model] ?? 0) + 1;
-    stats.totalCost += Number.parseFloat(msg.cost_usd);
-    stats.totalPrompt += msg.prompt_tokens ?? 0;
-    stats.totalCompletion += msg.completion_tokens ?? 0;
-    stats.totalCached += msg.cached_input_tokens ?? 0;
-    stats.totalReasoning += msg.reasoning_tokens ?? 0;
+    stats.totalCost += Number.parseFloat(msg.costUsd);
+    stats.totalPrompt += msg.promptTokens ?? 0;
+    stats.totalCompletion += msg.completionTokens ?? 0;
+    stats.totalCached += msg.cachedInputTokens ?? 0;
+    stats.totalReasoning += msg.reasoningTokens ?? 0;
   }
 
   return stats;
@@ -113,9 +113,9 @@ export async function getThreadSummary(args: {
   // Verify thread exists and belongs to user
   const thread = await db
     .selectFrom('threads')
-    .select(['id', 'created_at'])
+    .select(['id', 'createdAt'])
     .where('id', '=', threadId)
-    .where('user_id', '=', userId)
+    .where('userId', '=', userId)
     .executeTakeFirst();
 
   if (!thread) return null;
@@ -123,19 +123,19 @@ export async function getThreadSummary(args: {
   // Get all messages with their usage
   const messages = (await db
     .selectFrom('messages')
-    .leftJoin('message_usage', 'messages.id', 'message_usage.message_id')
+    .leftJoin('messageUsage', 'messages.id', 'messageUsage.messageId')
     .select([
       'messages.id as id',
       'messages.role as role',
-      'message_usage.model as model',
-      'message_usage.cost_usd as cost_usd',
-      'message_usage.prompt_tokens as prompt_tokens',
-      'message_usage.completion_tokens as completion_tokens',
-      'message_usage.cached_input_tokens as cached_input_tokens',
-      'message_usage.reasoning_tokens as reasoning_tokens',
+      'messageUsage.model as model',
+      'messageUsage.costUsd as costUsd',
+      'messageUsage.promptTokens as promptTokens',
+      'messageUsage.completionTokens as completionTokens',
+      'messageUsage.cachedInputTokens as cachedInputTokens',
+      'messageUsage.reasoningTokens as reasoningTokens',
     ])
-    .where('messages.thread_id', '=', threadId)
-    .orderBy('messages.created_at')
+    .where('messages.threadId', '=', threadId)
+    .orderBy('messages.createdAt')
     .execute()) as unknown as MessageWithUsage[];
 
   // Handle empty thread
@@ -151,7 +151,7 @@ export async function getThreadSummary(args: {
       primaryModel: null,
       primaryModelPricing: null,
       contextUsage: { used: 0, limit: null, percentage: null },
-      createdAt: thread.created_at.toISOString(),
+      createdAt: thread.createdAt.toISOString(),
     };
   }
 
@@ -162,27 +162,27 @@ export async function getThreadSummary(args: {
   // Get context window, pricing, and cached rate from DB cache (or fallback)
   let contextLimit: number | null = null;
   let primaryModelPricing: {
-    input_price_per_million: number | null;
-    output_price_per_million: number | null;
-    cached_price_per_million: number | null;
-    cached_rate_multiplier: number | null;
+    inputPricePerMillion: number | null;
+    outputPricePerMillion: number | null;
+    cachedPricePerMillion: number | null;
+    cachedRateMultiplier: number | null;
   } | null = null;
   let cachedCost = 0;
 
   if (primaryModel) {
     const config = await getModelConfig(primaryModel);
     if (config) {
-      contextLimit = config.context_window;
+      contextLimit = config.contextWindow;
       primaryModelPricing = {
-        input_price_per_million: config.input_price_per_million,
-        output_price_per_million: config.output_price_per_million,
-        cached_price_per_million: config.cached_price_per_million,
-        cached_rate_multiplier: config.cached_rate_multiplier,
+        inputPricePerMillion: config.inputPricePerMillion,
+        outputPricePerMillion: config.outputPricePerMillion,
+        cachedPricePerMillion: config.cachedPricePerMillion,
+        cachedRateMultiplier: config.cachedRateMultiplier,
       };
 
-      // Calculate cached cost: cachedTokens × cached_price_per_million / 1M
-      if (stats.totalCached > 0 && config.cached_price_per_million) {
-        cachedCost = (stats.totalCached * config.cached_price_per_million) / 1_000_000;
+      // Calculate cached cost: cachedTokens × cachedPricePerMillion / 1M
+      if (stats.totalCached > 0 && config.cachedPricePerMillion) {
+        cachedCost = (stats.totalCached * config.cachedPricePerMillion) / 1_000_000;
       }
     }
   }
@@ -212,6 +212,6 @@ export async function getThreadSummary(args: {
       limit: contextLimit,
       percentage: contextPercentage,
     },
-    createdAt: thread.created_at.toISOString(),
+    createdAt: thread.createdAt.toISOString(),
   };
 }

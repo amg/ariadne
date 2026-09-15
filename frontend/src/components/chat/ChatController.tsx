@@ -102,7 +102,7 @@ function mergeDisplayRows(
         id: message.id,
         role: message.role,
         content,
-        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
         usage: null,
       },
       usage: null,

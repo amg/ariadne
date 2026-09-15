@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 async function createRandomThread(): Promise<string> {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
+  const thread = await insertThread({ userId: userId, title: 'Test thread' });
   return thread.id;
 }
 
@@ -19,17 +19,17 @@ describe('insertMessage', () => {
     const threadId = await createRandomThread();
 
     const message = await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'user',
       content: 'Hello, world!',
     });
 
     expect(message.id).toBeTypeOf('string');
     expect(message.id.length).toBeGreaterThan(0);
-    expect(message.thread_id).toBe(threadId);
+    expect(message.threadId).toBe(threadId);
     expect(message.role).toBe('user');
     expect(message.content).toBe('Hello, world!');
-    expect(message.created_at).toBeInstanceOf(Date);
+    expect(message.createdAt).toBeInstanceOf(Date);
   });
 
   it('round-trips unicode content', async () => {
@@ -37,7 +37,7 @@ describe('insertMessage', () => {
     const content = 'Héllo 🌍 —日本語—';
 
     const message = await insertMessage({
-      thread_id: threadId,
+      threadId: threadId,
       role: 'assistant',
       content,
     });
@@ -49,7 +49,7 @@ describe('insertMessage', () => {
   it('rejects when the thread does not exist (FK violation)', async () => {
     await expect(
       insertMessage({
-        thread_id: randomUUID(),
+        threadId: randomUUID(),
         role: 'user',
         content: 'Orphan message',
       }),
@@ -59,8 +59,8 @@ describe('insertMessage', () => {
   it('rejects when content is missing (NOT NULL)', async () => {
     const threadId = await createRandomThread();
 
-    const values = { thread_id: threadId, role: 'user' as const } as {
-      thread_id: string;
+    const values = { threadId: threadId, role: 'user' as const } as {
+      threadId: string;
       role: 'user';
       content: string;
     };

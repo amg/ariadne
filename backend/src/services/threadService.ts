@@ -71,5 +71,5 @@ export async function createThread({ userId, title }: CreateThreadProps): Promis
   if (trimmed && trimmed.length > MAX_TITLE_LENGTH) {
     throw new ThreadValidationError(`Thread title exceeds ${MAX_TITLE_LENGTH} characters`);
   }
-  return insertThread({ user_id: userId, title: trimmed ? trimmed : DEFAULT_THREAD_TITLE });
+  return insertThread({ userId, title: trimmed ? trimmed : DEFAULT_THREAD_TITLE });
 }

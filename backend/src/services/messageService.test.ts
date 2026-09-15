@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 async function createRandomThread() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ user_id: userId, title: 'Test thread' });
+  const thread = await insertThread({ userId: userId, title: 'Test thread' });
   return { userId, threadId: thread.id };
 }
 
@@ -32,27 +32,27 @@ describe('messageService', () => {
     it('returns messages with usage nested when a usage row exists', async () => {
       const { userId, threadId } = await createRandomThread();
       const userMessage = await insertMessage({
-        thread_id: threadId,
+        threadId: threadId,
         role: 'user',
         content: 'hello',
       });
       const assistantMessage = await insertMessage({
-        thread_id: threadId,
+        threadId: threadId,
         role: 'assistant',
         content: 'world',
       });
       await insertMessageUsage({
-        message_id: assistantMessage.id,
+        messageId: assistantMessage.id,
         model: 'Qwen/Qwen3.5-9B',
-        provider_id: 'chatcmpl-1',
-        prompt_tokens: 5,
-        completion_tokens: 1,
-        cached_input_tokens: 3,
-        cache_write_tokens: 2,
-        reasoning_tokens: 1,
-        cost_usd: '0.0000006500',
-        finish_reason: 'stop',
-        latency_ms: 42,
+        providerId: 'chatcmpl-1',
+        promptTokens: 5,
+        completionTokens: 1,
+        cachedInputTokens: 3,
+        cacheWriteTokens: 2,
+        reasoningTokens: 1,
+        costUsd: '0.0000006500',
+        finishReason: 'stop',
+        latencyMs: 42,
       });
 
       const messages = await getMessages({ userId, threadId });
@@ -61,15 +61,15 @@ describe('messageService', () => {
       expect(messages?.[0]?.usage).toBeNull();
       expect(messages?.[1]?.usage).toEqual({
         model: 'Qwen/Qwen3.5-9B',
-        provider_id: 'chatcmpl-1',
-        prompt_tokens: 5,
-        completion_tokens: 1,
-        cached_input_tokens: 3,
-        cache_write_tokens: 2,
-        reasoning_tokens: 1,
-        cost_usd: '0.0000006500',
-        finish_reason: 'stop',
-        latency_ms: 42,
+        providerId: 'chatcmpl-1',
+        promptTokens: 5,
+        completionTokens: 1,
+        cachedInputTokens: 3,
+        cacheWriteTokens: 2,
+        reasoningTokens: 1,
+        costUsd: '0.0000006500',
+        finishReason: 'stop',
+        latencyMs: 42,
       });
     });
   });
@@ -77,24 +77,24 @@ describe('messageService', () => {
   describe('updateMessage', () => {
     it('edits the last user message and drops the reply generated from the old prompt', async () => {
       const { userId, threadId } = await createRandomThread();
-      const user = await insertMessage({ thread_id: threadId, role: 'user', content: 'first' });
+      const user = await insertMessage({ threadId: threadId, role: 'user', content: 'first' });
       const assistant = await insertMessage({
-        thread_id: threadId,
+        threadId: threadId,
         role: 'assistant',
         content: 'stale reply',
       });
       await insertMessageUsage({
-        message_id: assistant.id,
+        messageId: assistant.id,
         model: 'Qwen/Qwen3.5-9B',
-        provider_id: 'chatcmpl-1',
-        prompt_tokens: 5,
-        completion_tokens: 1,
-        cached_input_tokens: null,
-        cache_write_tokens: null,
-        reasoning_tokens: null,
-        cost_usd: '0.0000006500',
-        finish_reason: 'stop',
-        latency_ms: 42,
+        providerId: 'chatcmpl-1',
+        promptTokens: 5,
+        completionTokens: 1,
+        cachedInputTokens: null,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        costUsd: '0.0000006500',
+        finishReason: 'stop',
+        latencyMs: 42,
       });
 
       const result = await updateMessage({
@@ -118,7 +118,7 @@ describe('messageService', () => {
 
     it('rejects empty edits so a bubble can never be blanked out', async () => {
       const { userId, threadId } = await createRandomThread();
-      const message = await insertMessage({ thread_id: threadId, role: 'user', content: 'hi' });
+      const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
       const empty = await updateMessage({ userId, threadId, messageId: message.id, content: '' });
       const blank = await updateMessage({
@@ -145,7 +145,7 @@ describe('messageService', () => {
 
     it('rejects overlong content', async () => {
       const { userId, threadId } = await createRandomThread();
-      const message = await insertMessage({ thread_id: threadId, role: 'user', content: 'hi' });
+      const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
       const result = await updateMessage({
         userId,
@@ -161,14 +161,14 @@ describe('messageService', () => {
     it('refuses to edit assistant replies or earlier prompts', async () => {
       const { userId, threadId } = await createRandomThread();
       const earlier = await insertMessage({
-        thread_id: threadId,
+        threadId: threadId,
         role: 'user',
         content: 'early prompt',
       });
-      await insertMessage({ thread_id: threadId, role: 'assistant', content: 'answer one' });
-      await insertMessage({ thread_id: threadId, role: 'user', content: 'latest prompt' });
+      await insertMessage({ threadId: threadId, role: 'assistant', content: 'answer one' });
+      await insertMessage({ threadId: threadId, role: 'user', content: 'latest prompt' });
       const reply = await insertMessage({
-        thread_id: threadId,
+        threadId: threadId,
         role: 'assistant',
         content: 'answer two',
       });
@@ -200,10 +200,10 @@ describe('messageService', () => {
 
     it('returns thread_not_found for unknown/foreign threads, foreign or missing messages', async () => {
       const { userId, threadId } = await createRandomThread();
-      const message = await insertMessage({ thread_id: threadId, role: 'user', content: 'hi' });
+      const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
       const foreign = await createRandomThread();
       const foreignMessage = await insertMessage({
-        thread_id: foreign.threadId,
+        threadId: foreign.threadId,
         role: 'user',
         content: 'theirs',
       });

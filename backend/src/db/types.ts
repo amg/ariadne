@@ -1,58 +1,64 @@
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
+/**
+ * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
+ * maps them onto the snake_case schema at query time and maps result
+ * rows back to camelCase. Table keys follow the same convention
+ * (`messageUsage` → `message_usage`).
+ */
 export interface Database {
   users: UsersTable;
   threads: ThreadsTable;
   messages: MessagesTable;
-  message_usage: MessageUsageTable;
-  model_configs: ModelConfigsTable;
+  messageUsage: MessageUsageTable;
+  modelConfigs: ModelConfigsTable;
 }
 
 export interface UsersTable {
   id: Generated<string>; // UUID
-  created_at: Generated<Date>;
+  createdAt: Generated<Date>;
 }
 
 export interface ThreadsTable {
   id: Generated<string>; // UUID
-  user_id: string;
+  userId: string;
   title: string;
-  created_at: Generated<Date>;
+  createdAt: Generated<Date>;
 }
 
 export interface MessagesTable {
   id: Generated<string>; // UUID
-  thread_id: string;
+  threadId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  created_at: Generated<Date>;
+  createdAt: Generated<Date>;
 }
 
 export interface MessageUsageTable {
-  message_id: string; // UUID FK -> messages.id (1:1, PK)
+  messageId: string; // UUID FK -> messages.id (1:1, PK)
   model: string;
-  provider_id: string;
-  prompt_tokens: number;
-  completion_tokens: number;
+  providerId: string;
+  promptTokens: number;
+  completionTokens: number;
   /** NULL when the provider doesn't report cache telemetry. */
-  cached_input_tokens: number | null;
-  cache_write_tokens: number | null;
-  reasoning_tokens: number | null;
-  cost_usd: string; // numeric(14,10) — Kysely selects numeric as string
-  finish_reason: string;
-  latency_ms: number | null;
-  created_at: Generated<Date>;
+  cachedInputTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  costUsd: string; // numeric(14,10) — Kysely selects numeric as string
+  finishReason: string;
+  latencyMs: number | null;
+  createdAt: Generated<Date>;
 }
 
 export interface ModelConfigsTable {
-  model_id: string; // Primary key
+  modelId: string; // Primary key
   provider: string;
-  context_window: number | null;
-  input_price_per_million: number | null;
-  output_price_per_million: number | null;
-  cached_rate_multiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
-  supports_caching: boolean;
-  last_updated: Generated<Date>;
+  contextWindow: number | null;
+  inputPricePerMillion: number | null;
+  outputPricePerMillion: number | null;
+  cachedRateMultiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
+  supportsCaching: boolean;
+  lastUpdated: Generated<Date>;
 }
 
 export type User = Selectable<UsersTable>;

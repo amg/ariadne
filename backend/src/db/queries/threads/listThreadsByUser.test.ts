@@ -20,14 +20,14 @@ describe('listThreadsByUser', () => {
     await insertUserIfNotExists({ id: owner });
     await insertUserIfNotExists({ id: otherUser });
 
-    await insertThread({ user_id: owner, title: 'Mine' });
-    await insertThread({ user_id: otherUser, title: 'Not mine' });
+    await insertThread({ userId: owner, title: 'Mine' });
+    await insertThread({ userId: otherUser, title: 'Not mine' });
 
     const threads = await listThreadsByUser({ userId: owner });
 
     expect(threads).toHaveLength(1);
     expect(threads[0]?.title).toBe('Mine');
-    expect(threads[0]?.user_id).toBe(owner);
+    expect(threads[0]?.userId).toBe(owner);
   });
 
   it('orders threads newest first', async () => {
@@ -35,14 +35,14 @@ describe('listThreadsByUser', () => {
     await insertUserIfNotExists({ id: owner });
 
     await insertThread({
-      user_id: owner,
+      userId: owner,
       title: 'Old',
-      created_at: new Date('2024-01-01T00:00:00.000Z'),
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
     });
     await insertThread({
-      user_id: owner,
+      userId: owner,
       title: 'New',
-      created_at: new Date('2024-06-01T00:00:00.000Z'),
+      createdAt: new Date('2024-06-01T00:00:00.000Z'),
     });
 
     const threads = await listThreadsByUser({ userId: owner });
@@ -50,20 +50,20 @@ describe('listThreadsByUser', () => {
     expect(threads.map((t) => t.title)).toEqual(['New', 'Old']);
   });
 
-  it('breaks created_at ties deterministically by id desc', async () => {
+  it('breaks createdAt ties deterministically by id desc', async () => {
     const owner = randomUUID();
     await insertUserIfNotExists({ id: owner });
     const sameMoment = new Date('2024-03-15T12:00:00.000Z');
 
     const first = await insertThread({
-      user_id: owner,
+      userId: owner,
       title: 'A',
-      created_at: sameMoment,
+      createdAt: sameMoment,
     });
     const second = await insertThread({
-      user_id: owner,
+      userId: owner,
       title: 'B',
-      created_at: sameMoment,
+      createdAt: sameMoment,
     });
 
     const threads = await listThreadsByUser({ userId: owner });
