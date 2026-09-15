@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": ["hadolint"],
+  "workspaces": {
+    "backend": {
+      "ignore": ["src/db/migrations/**"]
+    }
+  }
+}

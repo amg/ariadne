@@ -50,8 +50,10 @@
     schema. Raw `sql` bypasses the plugin: use camelCase `AS` aliases there.
 *   `backend/src/db/queries/<table>/<query>.ts` — one Kysely query per file;
     the only layer touching Kysely, importing the singleton directly.
-    Signatures carry domain args only (ownership filters: `user_id` rows
-    always).
+    Folders: `threads`, `messages`, `messageUsage`, `users`, `modelConfigs`;
+    cross-table joins live under their primary table
+    (`messages/listMessagesWithUsageByThread`). Signatures carry domain
+    args only (ownership filters: `user_id` rows always).
 *   `backend/src/services/*` — business logic only, no Kysely; signatures are
     `(userId, …args)` — `userId` is the only context threaded down
     (`services/aiService` owns the streaming user+assistant exchange).
@@ -97,8 +99,9 @@
     `pages/ChatPage.tsx`, `actions/threads/*`. `ChatPage` is framework glue
     only (loader + revalidation); the live exchange lives in
     `components/chat/ChatController.tsx` — the sole sanctioned
-    `@ai-sdk/react` component. Purity check:
-    `grep -rln react-router frontend/src` must list exactly the glue files.
+    `@ai-sdk/react` component. Purity is enforced mechanically: the
+    depcruise `frontend-purity-*` rules in the validation gate replace
+    the old manual grep.
 *   **Data flow**: no `useEffect` fetching. Threads via root loader
     (`useRouteLoaderData('root')`), messages via `useLoaderData` in `ChatPage`.
     New chat = `/threads/new` action + `redirect()` (a navigation). Send
@@ -150,6 +153,17 @@
     by backend tests + build-time manual verification.
 
 ## Conventions
+*   **Validation gate**: `npm run gate` is the single definition of clean —
+    typecheck → biome → cn-rule → knip (dead code + unlisted deps) →
+    depcruise boundaries → env-sync (code ↔ `.env.example` ↔ compose
+    passthrough whitelist) → hadolint (skips with a warning when absent) →
+    backend tests → frontend build. lefthook runs it pre-commit (wired via
+    root `prepare`; a fresh clone just needs `npm install`). Gotchas baked
+    in: frontend `typecheck` is `tsc -b` (the solution-style tsconfig makes
+    plain `tsc --noEmit` check **zero files**); dependency-cruiser v18
+    wants rule lists under `forbidden` and **no `options:` object** (it
+    prunes external edges and can crash) — see the comments in
+    `.dependency-cruiser.mjs`. New pitfall → add a check before fixing.
 *   **Class Merging (The "Prop Superiority" Rule)**: To ensure a parent's injected `className` (used for layout) cannot accidentally override internal styles dictated by explicit component props, always structure `cn()` calls in three layers: `cn(baseDefaults, className, propDrivenClasses)`. Because `tailwind-merge` respects the last conflicting class, placing prop-driven logic *after* `className` mechanically guarantees that explicit React props always win over parent CSS injections. This applies universally across the project, including primitive components (`Button` variants/sizes must not be overridable by `className`).
 *   **Module interface**: private by default; anything used outside a folder
     is re-exported through that folder's `index.ts` (the public surface).

@@ -1,0 +1,8 @@
+# Pre-commit gate: runs the full validation suite on every commit.
+# Installed by `lefthook install` (wired via the root "prepare" script).
+# The gate itself lives in package.json ("npm run gate") so there is exactly
+# one source of truth for what "clean" means.
+pre-commit:
+  commands:
+    gate:
+      run: npm run gate

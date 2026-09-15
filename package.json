@@ -6,17 +6,26 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "npm run typecheck --workspaces --if-present",
     "enforce-cn": "node scripts/enforce-cn-rule.mjs",
-    "validate": "npm run typecheck && npm run lint && npm run enforce-cn",
-    "pre-commit": "npm run validate"
+    "test": "npm run test --workspaces --if-present",
+    "build:frontend": "npm run build --workspace=frontend",
+    "audit:deps": "knip",
+    "audit:boundaries": "depcruise frontend/src backend/src",
+    "audit:env": "node scripts/checks/env-sync.mjs",
+    "audit:docker": "node scripts/checks/docker-lint.mjs",
+    "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",
+    "gate": "npm run checks && npm run test && npm run build:frontend",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "concurrently": "^10.0.5"
+    "concurrently": "^10.0.5",
+    "dependency-cruiser": "^18.3.1",
+    "knip": "^6.35.1",
+    "lefthook": "^2.1.14"
   },
   "dependencies": {
     "lucide-react": "^1.4.50"
