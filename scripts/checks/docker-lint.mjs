@@ -2,7 +2,7 @@
 /**
  * docker-lint — runs hadolint over the repo Dockerfiles when available,
  * otherwise falls back to the official docker image, otherwise warns and
- * skips (never blocks local work over a missing optional tool).
+ * skips (only a missing tool ever skips — lint findings DO fail the gate).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -14,11 +14,13 @@ const FILES = ['Dockerfile.backend', 'Dockerfile.frontend'].filter((f) =>
   existsSync(join(ROOT, f)),
 );
 
-function tryBinary() {
+// Info-level findings (e.g. DL3066: `USER node`/`USER nginx` — both users
+// exist in their base images) stay visible but do not fail the gate.
+const HADOLINT_ARGS = ['--failure-threshold', 'warning'];
+
+function hasBinary() {
   const probe = spawnSync('hadolint', ['--version'], { stdio: 'ignore' });
-  if (probe.status !== 0) return false;
-  const r = spawnSync('hadolint', FILES, { stdio: 'inherit' });
-  return r.status === 0;
+  return probe.status === 0;
 }
 
 function tryDockerImage() {
@@ -36,6 +38,7 @@ function tryDockerImage() {
         `${ROOT}:/work`,
         'ghcr.io/hadolint/hadolint',
         'hadolint',
+        ...HADOLINT_ARGS,
         `/work/${f}`,
       ],
       { stdio: 'inherit' },
@@ -47,7 +50,11 @@ function tryDockerImage() {
 
 if (FILES.length === 0) process.exit(0);
 
-if (tryBinary()) process.exit(0);
+// Binary present: its verdict is the gate's verdict (do not fall through).
+if (hasBinary()) {
+  const r = spawnSync('hadolint', [...HADOLINT_ARGS, ...FILES], { stdio: 'inherit' });
+  process.exit(r.status ?? 1);
+}
 const dockerResult = tryDockerImage();
 if (dockerResult === true) process.exit(0);
 if (dockerResult === false) process.exit(1);

@@ -12,12 +12,13 @@ RUN npm ci
 # Copy backend source
 COPY backend ./backend
 
-# Typecheck
+# Typecheck must pass for the image to build (defense in depth: the
+# pre-commit gate runs it too, but builds can bypass hooks)
 WORKDIR /app/backend
-RUN npm run typecheck || true
+RUN npm run typecheck
 
-# Expose port (configurable via ENV)
-EXPOSE ${PORT:-3001}
+# Expose the default backend port (runtime port comes from the PORT env var)
+EXPOSE 3001
 
 # Drop privileges
 USER node
