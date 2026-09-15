@@ -120,4 +120,5 @@ public
 *.sw?
 
 # Agent configuration/state
-.pi/
+.pi/*
+!.pi/agent/
