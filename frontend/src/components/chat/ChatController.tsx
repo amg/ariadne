@@ -18,6 +18,8 @@ type ChatControllerProps = {
   rows: Message[];
   /** Called once per finished or failed stream so the page revalidates. */
   onSettle: () => void;
+  isNewChat?: boolean;
+  onGenerateTitle?: () => void;
 };
 
 type UiMessageLike = {
@@ -124,7 +126,13 @@ function findTargetUserMessageIndex(rows: Message[], overrideId?: string): numbe
   return -1;
 }
 
-export default function ChatController({ threadId, rows, onSettle }: ChatControllerProps) {
+export default function ChatController({
+  threadId,
+  rows,
+  onSettle,
+  isNewChat,
+  onGenerateTitle,
+}: ChatControllerProps) {
   // One transport per thread; the Outlet is keyed by threadId (AppLayout),
   // so useChat state is rebuilt on navigation and never leaks across threads.
   const transport = useMemo(
@@ -134,13 +142,31 @@ export default function ChatController({ threadId, rows, onSettle }: ChatControl
 
   const [droppedIds, setDroppedIds] = useState<Set<string>>(new Set());
 
+  // Keep track of the latest isNewChat value without re-triggering useChat options
+  const isNewChatRef = useRef(isNewChat);
+  useMemo(() => {
+    isNewChatRef.current = isNewChat;
+  }, [isNewChat]);
+
   const chat = useChat({
     id: threadId,
     transport,
     // After every stream (including user stop) refetch rows so usage
     // metadata and persisted ids replace the optimistic/streaming state.
-    onFinish: () => onSettle(),
-    onError: () => onSettle(),
+    // A settling first exchange also kicks off auto-titling; on failure the
+    // backend settles the sentinel title to "New Chat".
+    onFinish: () => {
+      onSettle();
+      if (isNewChatRef.current && onGenerateTitle) {
+        onGenerateTitle();
+      }
+    },
+    onError: () => {
+      onSettle();
+      if (isNewChatRef.current && onGenerateTitle) {
+        onGenerateTitle();
+      }
+    },
   });
 
   // Preserve reasoning across renders (even after stream completes)

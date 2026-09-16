@@ -7,7 +7,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
-import { Ellipsis, Info, Pencil, Plus, Trash2 } from 'lucide-react';
+import { TITLE_GENERATING_SENTINEL } from '@/services/api';
+import { Ellipsis, Info, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   onRename: (id: string, title: string) => void;
   /** Permanently deletes a thread (messages go with it). */
   onDelete: (id: string) => void;
+  /** Retriggers auto-titling for the thread. */
+  onRegenerateTitle: (id: string) => void;
   /** In-flight rename shown optimistically while the rename fetcher settles. */
   pendingRename: { threadId: string; title: string } | null;
 };
@@ -32,6 +35,7 @@ export default function ThreadSidebar({
   onAbout,
   onRename,
   onDelete,
+  onRegenerateTitle,
   pendingRename,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,7 +107,11 @@ export default function ThreadSidebar({
                     onDoubleClick={() => startEditing(thread)}
                     className="min-w-0 flex-1 truncate rounded-md py-2 pl-3 text-left text-sm"
                   >
-                    {title}
+                    {title === TITLE_GENERATING_SENTINEL ? (
+                      <span className="inline-block h-4 w-24 animate-pulse rounded bg-foreground/10" />
+                    ) : (
+                      title
+                    )}
                   </button>
                   <button
                     type="button"
@@ -124,6 +132,10 @@ export default function ThreadSidebar({
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="min-w-40">
+                      <DropdownMenuItem onSelect={() => onRegenerateTitle(thread.id)}>
+                        <RefreshCw className="h-4 w-4" />
+                        Regenerate Title
+                      </DropdownMenuItem>
                       <DropdownMenuItem variant="destructive" onSelect={() => onDelete(thread.id)}>
                         <Trash2 className="h-4 w-4" />
                         Delete

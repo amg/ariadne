@@ -4,7 +4,11 @@ import { insertThread } from '@queries/threads/insertThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { updateThreadTitle } from '@queries/threads/updateThreadTitle';
 
-export const DEFAULT_THREAD_TITLE = 'New Chat';
+/** Sentinel shown while the UI waits for auto-titling; doubles as the
+ *  "never auto-rename over this" gate for the titling service. */
+export const DEFAULT_THREAD_TITLE = 'New Chat...';
+/** Static title when auto-titling fails or has nothing to learn from. */
+export const FALLBACK_THREAD_TITLE = 'New Chat';
 const MAX_TITLE_LENGTH = 255;
 
 export class ThreadValidationError extends Error {}
@@ -16,9 +20,9 @@ type RenameThreadProps = {
 };
 
 /**
- * The single writer for thread titles. Used today by the manual rename UI;
- * a future auto-titling service (cheap model, see FUTURE-IMPROVEMENTS) should
- * reuse this instead of updating the table directly.
+ * The single writer for thread titles. Used by the manual rename UI and by
+ * the auto-titling service (`titlingService`); nothing else may update the
+ * table directly.
  */
 export async function renameThread({
   userId,

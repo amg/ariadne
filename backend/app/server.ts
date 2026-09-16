@@ -11,14 +11,42 @@ import { setupModelsRefreshRoute } from '@routes/models';
 import {
   setupThreadSummaryRoute,
   setupThreadsDeleteRoute,
+  setupThreadsGenerateTitleRoute,
   setupThreadsGetRoute,
   setupThreadsPatchRoute,
   setupThreadsPostRoute,
 } from '@routes/threads';
 import { seedDefaultUser } from '@services/userService';
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
+import type { FastifyBaseLogger } from 'fastify';
+import { logger } from '../src/logger';
 
-const app = Fastify({ logger: true });
+// ── Dev console — the logger singleton (`src/logger.ts`) renders one
+// scannable line per request via the onResponse hook below:
+//   POST /api/threads/…/generate-title → 502 5666ms
+// Docker/CI/captured logs (no TTY) keep plain JSON. With DEBUG=true the
+// titling exchange (prompt sent ▸ title returned) is logged too. ───────────
+const app = Fastify({
+  // The singleton is a pino instance; fastify's route generics default to
+  // FastifyBaseLogger, so project it once here (it structurally satisfies
+  // the picked interface).
+  loggerInstance: logger as FastifyBaseLogger,
+  // Fastify's default per-request "incoming request"/"request completed" pair
+  // is replaced by the single-line hook below (non-deprecated controller API).
+  logController: new LogController({ disableRequestLogging: true }),
+});
+
+app.addHook('onResponse', (request, reply, done) => {
+  reply.log.info(
+    {
+      req: { method: request.method, url: request.url },
+      res: { statusCode: reply.statusCode },
+      responseTime: reply.elapsedTime,
+    },
+    'request completed',
+  );
+  done();
+});
 
 // CORS: locked to this app's frontend origins. `origin: true` used to reflect
 // ANY origin, letting arbitrary sites drive-by the API. Requests without an
@@ -46,6 +74,7 @@ await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' }
 setupHealthRoute(app);
 setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
+setupThreadsGenerateTitleRoute(app);
 setupThreadsPatchRoute(app);
 setupThreadsDeleteRoute(app);
 setupThreadSummaryRoute(app);
@@ -61,7 +90,7 @@ const start = async () => {
   try {
     await seedDefaultUser();
     await app.listen({ port: PORT, host: HOST });
-    console.log(`Server is running on http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`);
+    logger.info(`Server is running on http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

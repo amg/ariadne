@@ -7,7 +7,7 @@ import type { LanguageModel } from 'ai';
  * tests can point `MOCK_AI_BASE_URL` at the mock inference server.
  */
 
-export const DEFAULT_MODEL_ID = 'Qwen/Qwen3.5-9B';
+export const DEFAULT_MODEL_ID = 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo';
 
 export const SYSTEM_PROMPT = 'You are a helpful assistant.';
 

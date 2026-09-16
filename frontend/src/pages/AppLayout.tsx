@@ -1,14 +1,17 @@
+import type { GenerateTitleActionResult } from '@/actions/threads/generateTitle';
 import AppShell from '@/components/layout/AppShell';
 import ThreadInfoPanel from '@/components/layout/ThreadInfoPanel';
 import ThreadSidebar from '@/components/layout/ThreadSidebar';
 import {
+  TITLE_GENERATING_SENTINEL,
   type Thread,
   type ThreadSummary,
   fetchThreadSummary,
   fetchThreads,
   refreshModelPricing,
 } from '@/services/api';
-import { useEffect, useState } from 'react';
+import { friendlyErrorMessage } from '@/services/errorCodes';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Outlet,
   useFetcher,
@@ -17,6 +20,7 @@ import {
   useNavigate,
   useRouteLoaderData,
 } from 'react-router';
+import { toast } from 'sonner';
 
 export async function loader() {
   return { threads: await fetchThreads() };
@@ -31,6 +35,27 @@ export default function AppLayout() {
   const createFetcher = useFetcher();
   const renameFetcher = useFetcher({ key: 'rename-thread' });
   const deleteFetcher = useFetcher({ key: 'delete-thread' });
+  const generateTitleFetcher = useFetcher();
+
+  const generatingTitleThreadId = generateTitleFetcher.formData
+    ? String(generateTitleFetcher.formData.get('threadId') ?? '')
+    : null;
+
+  // Titling failures were previously invisible: the action swallowed them so
+  // the pulse would still stop. Now the action settles a curated errorCode
+  // (backend contract → friendly copy; raw provider text stays server-side)
+  // and this effect toasts it — once per settled submission.
+  const lastToastedTitleResultRef = useRef<GenerateTitleActionResult | null>(null);
+  useEffect(() => {
+    const { state, data } = generateTitleFetcher;
+    if (state !== 'idle' || !data) return;
+    const result = data as GenerateTitleActionResult;
+    if (result.ok !== false || lastToastedTitleResultRef.current === result) return;
+    lastToastedTitleResultRef.current = result;
+    toast.error(result.forced ? 'Title regeneration failed' : 'Auto-titling failed', {
+      description: friendlyErrorMessage(result.errorCode),
+    });
+  }, [generateTitleFetcher]);
 
   // Optimistic title while the rename fetcher is in flight.
   const pendingRename = renameFetcher.formData
@@ -44,34 +69,50 @@ export default function AppLayout() {
   const pendingDeleteId = deleteFetcher.formData
     ? String(deleteFetcher.formData.get('threadId') ?? '')
     : null;
-  const visibleThreads = pendingDeleteId
-    ? threads.filter((t) => t.id !== pendingDeleteId)
-    : threads;
+  const visibleThreads = useMemo(() => {
+    return threads
+      .filter((t) => t.id !== pendingDeleteId)
+      .map((t) =>
+        t.id === generatingTitleThreadId ? { ...t, title: TITLE_GENERATING_SENTINEL } : t,
+      );
+  }, [threads, pendingDeleteId, generatingTitleThreadId]);
 
   // Thread summary state
   const [threadSummary, setThreadSummary] = useState<ThreadSummary | null>(null);
   const [activeThreadTitle, setActiveThreadTitle] = useState<string | undefined>(undefined);
   const currentThreadId = match?.params.threadId ?? null;
 
-  // Fetch thread summary when thread changes
+  // Fetch the summary once per active thread. NOT keyed on `visibleThreads`:
+  // that identity churns with every loader revalidation and fetcher submit,
+  // and used to re-fetch (and 3x) the summary on a page reload.
   useEffect(() => {
-    if (currentThreadId) {
-      // Fetch summary
-      fetchThreadSummary(currentThreadId)
-        .then((summary) => setThreadSummary(summary))
-        .catch((err) => {
-          console.error('Failed to fetch thread summary:', err);
-          setThreadSummary(null);
-        });
-
-      // Find thread title from threads list
-      const thread = threads.find((t) => t.id === currentThreadId);
-      setActiveThreadTitle(thread?.title);
-    } else {
+    if (!currentThreadId) {
       setThreadSummary(null);
-      setActiveThreadTitle(undefined);
+      return;
     }
-  }, [currentThreadId, threads]);
+    let stale = false;
+    fetchThreadSummary(currentThreadId)
+      .then((summary) => {
+        if (!stale) setThreadSummary(summary);
+      })
+      .catch((err) => {
+        if (stale) return;
+        console.error('Failed to fetch thread summary:', err);
+        setThreadSummary(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [currentThreadId]);
+
+  // Keep the info-panel/chat title in sync with sidebar state (sentinel pulse
+  // during in-flight titling, optimistic delete) without any I/O.
+  useEffect(() => {
+    const thread = currentThreadId
+      ? visibleThreads.find((t) => t.id === currentThreadId)
+      : undefined;
+    setActiveThreadTitle(thread?.title);
+  }, [currentThreadId, visibleThreads]);
 
   // Handle model pricing refresh with rate limit handling
   const handleRefreshPricing = async () => {
@@ -107,6 +148,17 @@ export default function AppLayout() {
               { method: 'post', action: `/threads/${id}/rename` },
             )
           }
+          onRegenerateTitle={(id) =>
+            // formData (not null) so `generatingTitleThreadId` above flips the
+            // sidebar/info panel to the loading pulse immediately. `force`
+            // marks this as an explicit user action: the backend may
+            // overwrite any existing title (auto-generation stays gated on
+            // the sentinel in the ChatPage/ChatController flow).
+            generateTitleFetcher.submit(
+              { threadId: id, force: 'true' },
+              { method: 'post', action: `/threads/${id}/generate-title` },
+            )
+          }
           onDelete={(id) =>
             deleteFetcher.submit(
               // `from` tells the action where we are so it can redirect home
@@ -128,7 +180,17 @@ export default function AppLayout() {
       }
     >
       {/* Keyed by thread so the chat page remounts (fresh useChat state) when switching. */}
-      <Outlet key={match?.params.threadId ?? 'empty'} />
+      <Outlet
+        key={match?.params.threadId ?? 'empty'}
+        context={{
+          generateTitle: (id: string) => {
+            generateTitleFetcher.submit(
+              { threadId: id },
+              { method: 'post', action: `/threads/${id}/generate-title` },
+            );
+          },
+        }}
+      />
     </AppShell>
   );
 }

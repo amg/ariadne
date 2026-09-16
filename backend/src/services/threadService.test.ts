@@ -35,7 +35,7 @@ describe('threadService', () => {
 
       const thread = await createThread({ userId: DEFAULT_USER_ID });
 
-      expect(thread.title).toBe('New Chat');
+      expect(thread.title).toBe('New Chat...');
     });
 
     it('treats an empty title as missing', async () => {
@@ -43,7 +43,7 @@ describe('threadService', () => {
 
       const thread = await createThread({ userId: DEFAULT_USER_ID, title: '' });
 
-      expect(thread.title).toBe('New Chat');
+      expect(thread.title).toBe('New Chat...');
     });
 
     it('rejects when user does not exist (FK violation)', async () => {

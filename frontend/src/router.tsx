@@ -1,4 +1,5 @@
 import { action as deleteThreadAction } from '@/actions/threads/deleteThread';
+import { action as generateTitleAction } from '@/actions/threads/generateTitle';
 import { action as newThreadAction } from '@/actions/threads/newThread';
 import { action as renameThreadAction } from '@/actions/threads/renameThread';
 import AboutPage from '@/pages/AboutPage';
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       // Action-only route, same pattern as above.
       { path: 'threads/:threadId/rename', action: renameThreadAction },
       { path: 'threads/:threadId/delete', action: deleteThreadAction },
+      { path: 'threads/:threadId/generate-title', action: generateTitleAction },
       {
         // Loader co-located in the page module; routed here via lazy.
         path: 'threads/:threadId',

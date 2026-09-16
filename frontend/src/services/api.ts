@@ -14,6 +14,10 @@ export interface Thread {
   updatedAt: string;
 }
 
+/** Title placeholder while auto-titling runs (mirrors the backend
+ *  `DEFAULT_THREAD_TITLE` sentinel); UI shows a loading pulse for it. */
+export const TITLE_GENERATING_SENTINEL = 'New Chat...';
+
 /** Telemetry for one assistant message (backend `message_usage`, 1:1). */
 export interface MessageUsage {
   model: string;
@@ -37,10 +41,29 @@ export interface Message {
   usage: MessageUsage | null;
 }
 
-export async function fetchThreads(): Promise<Thread[]> {
-  const res = await fetch('/api/threads');
-  if (!res.ok) throw new Error(`Failed to fetch threads: ${res.statusText}`);
-  return res.json();
+/**
+ * Request de-dupe (singleflight), NOT a cache: an entry lives only while its
+ * request is in flight and is deleted the moment it settles. Concurrent
+ * duplicates (dev StrictMode double-mount, loader-revalidation pile-ups)
+ * share that single request; any later sequential call always re-fetches
+ * fresh data.
+ */
+const inflightGets = new Map<string, Promise<unknown>>();
+
+function coalesceGet<T>(url: string, run: () => Promise<T>): Promise<T> {
+  const inflight = inflightGets.get(url);
+  if (inflight) return inflight as Promise<T>;
+  const promise = run().finally(() => inflightGets.delete(url));
+  inflightGets.set(url, promise);
+  return promise;
+}
+
+export function fetchThreads(): Promise<Thread[]> {
+  return coalesceGet('/api/threads', async () => {
+    const res = await fetch('/api/threads');
+    if (!res.ok) throw new Error(`Failed to fetch threads: ${res.statusText}`);
+    return res.json();
+  });
 }
 
 export async function createThread(title: string): Promise<Thread> {
@@ -68,10 +91,13 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
 }
 
-export async function fetchMessages(threadId: string): Promise<Message[]> {
-  const res = await fetch(`/api/threads/${threadId}/messages`);
-  if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
-  return res.json();
+export function fetchMessages(threadId: string): Promise<Message[]> {
+  const url = `/api/threads/${threadId}/messages`;
+  return coalesceGet(url, async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch messages: ${res.statusText}`);
+    return res.json();
+  });
 }
 
 /** Edits the thread's last message. Empty content is rejected by the API. */
@@ -119,13 +145,16 @@ export interface ThreadSummary {
   createdAt: string;
 }
 
-export async function fetchThreadSummary(threadId: string): Promise<ThreadSummary | null> {
-  const res = await fetch(`/api/threads/${threadId}/summary`);
-  if (!res.ok) {
-    if (res.status === 404) return null;
-    throw new Error(`Failed to fetch thread summary: ${res.statusText}`);
-  }
-  return res.json();
+export function fetchThreadSummary(threadId: string): Promise<ThreadSummary | null> {
+  const url = `/api/threads/${threadId}/summary`;
+  return coalesceGet(url, async () => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`Failed to fetch thread summary: ${res.statusText}`);
+    }
+    return res.json();
+  });
 }
 
 /** Refresh model pricing from provider API. */

@@ -64,6 +64,7 @@ function buildModelMessages(
 }
 
 type StartExchangeProps = {
+  userId: string;
   threadId: string;
   /** Turns preceding the user turn (already persisted). */
   precedingRows: Awaited<ReturnType<typeof listMessagesByThread>>;
@@ -73,6 +74,7 @@ type StartExchangeProps = {
 
 /** Shared tail of both entry points: assistant row + provider stream. */
 async function startExchange({
+  userId,
   threadId,
   precedingRows,
   userMessage,
@@ -157,7 +159,7 @@ export async function submitChat({
 
   const precedingRows = await listMessagesByThread({ threadId });
   const userMessage = await insertMessage({ threadId, role: 'user', content });
-  return ok(await startExchange({ threadId, precedingRows, userMessage }));
+  return ok(await startExchange({ userId, threadId, precedingRows, userMessage }));
 }
 
 /**
@@ -202,6 +204,7 @@ export async function retryLastExchange({
 
   return ok(
     await startExchange({
+      userId,
       threadId,
       precedingRows: rows.slice(0, userIndex),
       userMessage,

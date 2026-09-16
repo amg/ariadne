@@ -1,4 +1,4 @@
-import type { ThreadSummary } from '@/services/api';
+import { TITLE_GENERATING_SENTINEL, type ThreadSummary } from '@/services/api';
 import { formatCost, formatTokens } from '@/services/utils';
 import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -100,10 +100,14 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
     <aside className="flex h-full w-72 shrink-0 flex-col border-l bg-muted/30 p-4 pt-12 nav:pt-4 overflow-y-auto">
       <h2 className="mb-4 text-sm font-semibold text-foreground">Thread Info</h2>
 
-      {/* Thread Title */}
+      {/* Thread Title (pulse while auto-titling is in flight) */}
       {threadTitle && (
         <div className="mb-4 rounded-md border bg-background p-3">
-          <p className="truncate text-sm font-medium text-foreground">{threadTitle}</p>
+          {threadTitle === TITLE_GENERATING_SENTINEL ? (
+            <span className="inline-block h-4 w-32 animate-pulse rounded bg-foreground/10" />
+          ) : (
+            <p className="truncate text-sm font-medium text-foreground">{threadTitle}</p>
+          )}
         </div>
       )}
 

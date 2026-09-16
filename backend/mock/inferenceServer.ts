@@ -4,10 +4,12 @@ import Fastify from 'fastify';
 /**
  * Mock inference server (real MVP deliverable — see MVP.md).
  *
- * Emulates DeepInfra's OpenAI-compatible streaming surface:
- * `POST /v1/openai/chat/completions` — SSE `chat.completion.chunk` events,
- * ending with a `usage` block (populated `prompt_tokens_details` so cache
- * plumbing is testable without a real provider) and `data: [DONE]`.
+ * Emulates DeepInfra's OpenAI-compatible surface:
+ * `POST /v1/openai/chat/completions` — with `stream: true`, SSE
+ * `chat.completion.chunk` events, ending with a `usage` block (populated
+ * `prompt_tokens_details` so cache plumbing is testable without a real
+ * provider) and `data: [DONE]`. Non-streaming requests (e.g. `generateText`,
+ * used by auto-titling) receive a single JSON `chat.completion` object.
  *
  * `createDeepInfra({ baseURL })` appends `/openai` to the base, so the
  * `MOCK_AI_BASE_URL` switch-in value is this server's `/v1` root.
@@ -42,6 +44,22 @@ export const MOCK_CACHE = {
 } as const;
 
 let counter = 0;
+
+function buildUsage(args: { promptTokens: number; completionTokens: number }) {
+  const { promptTokens, completionTokens } = args;
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    estimated_cost: Number(
+      ((promptTokens * 0.1 + completionTokens * 0.15) / 1_000_000).toFixed(10),
+    ),
+    prompt_tokens_details: {
+      cached_tokens: MOCK_CACHE.cachedInputTokens,
+      cache_write_tokens: MOCK_CACHE.cacheWriteTokens,
+    },
+  };
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,23 +127,42 @@ async function streamReply(args: {
     created,
     model,
     choices: [],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: totalTokens,
-      estimated_cost: Number(
-        ((promptTokens * 0.1 + completionTokens * 0.15) / 1_000_000).toFixed(10),
-      ),
-      prompt_tokens_details: {
-        cached_tokens: MOCK_CACHE.cachedInputTokens,
-        cache_write_tokens: MOCK_CACHE.cacheWriteTokens,
-      },
-    },
+    usage: buildUsage({ promptTokens, completionTokens }),
   });
 
   write('data: [DONE]\n\n');
   finish();
   end();
+}
+
+/** Single JSON `chat.completion` for non-streaming callers (`generateText`).
+ *  The reply is capped like a real short-form completion (auto-titling),
+ *  so deterministic callers never hit the 255-char title guard. */
+function jsonReply(body: ChatCompletionsBody) {
+  const messages = body.messages ?? [];
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+
+  const replyText = buildReply(lastUser).slice(0, 80);
+  const tokens = replyText.split(/(?<=\s)/);
+
+  counter += 1;
+  return {
+    id: `chatcmpl-mock-${counter}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model ?? 'mock-model',
+    choices: [
+      {
+        index: 0,
+        message: { role: 'assistant', content: replyText },
+        finish_reason: 'stop',
+      },
+    ],
+    usage: buildUsage({
+      promptTokens: MOCK_CACHE.basePromptTokens + messages.length,
+      completionTokens: tokens.length,
+    }),
+  };
 }
 
 export async function startMockInferenceServer(options?: {
@@ -134,6 +171,13 @@ export async function startMockInferenceServer(options?: {
   const app = Fastify({ logger: false });
 
   app.post('/v1/openai/chat/completions', async (request, reply) => {
+    const body = (request.body ?? {}) as ChatCompletionsBody;
+
+    // OpenAI default is non-streaming; only explicit `stream: true` gets SSE.
+    if (body.stream !== true) {
+      return reply.code(200).send(jsonReply(body));
+    }
+
     reply.hijack();
     reply.raw.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -144,7 +188,7 @@ export async function startMockInferenceServer(options?: {
       write: (chunk) => reply.raw.write(chunk),
       end: () => reply.raw.end(),
       finish: () => {},
-      body: (request.body ?? {}) as ChatCompletionsBody,
+      body,
     });
   });
 

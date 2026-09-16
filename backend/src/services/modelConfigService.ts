@@ -2,6 +2,7 @@ import type { NewModelConfig } from '@db/types';
 import { findModelConfigByModelId } from '@queries/modelConfigs/findModelConfigByModelId';
 import { getLatestModelConfigRefresh } from '@queries/modelConfigs/getLatestModelConfigRefresh';
 import { saveModelConfig } from '@queries/modelConfigs/saveModelConfig';
+import { DEFAULT_MODEL_ID } from '@services/aiService/config';
 
 /** Model config from DeepInfra API (external wire format — snake_case). */
 interface DeepInfraModel {
@@ -41,9 +42,11 @@ export interface ModelConfigRow {
   lastUpdated: Date;
 }
 
-/** Fallback config for when API is unavailable. */
+/** Fallback config for when API is unavailable. Keyed to the default model so
+ *  it stays the natural answer for `getModelConfig(DEFAULT_MODEL_ID)` no
+ *  matter which model that points at. */
 const FALLBACK_CONFIG: ModelConfigRow = {
-  modelId: 'Qwen/Qwen3.5-9B',
+  modelId: DEFAULT_MODEL_ID,
   provider: 'deepinfra',
   contextWindow: 32768,
   inputPricePerMillion: 0.1,
