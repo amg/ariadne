@@ -1,16 +1,7 @@
 # Pre-commit gate: runs the full validation suite on every commit.
-# Installed by `lefthook install` (wired via the root "prepare" script).
-# The gate itself lives in package.json ("npm run gate") so there is exactly
-# one source of truth for what "clean" means.
+# Installed by `npm run prepare` (lefthook install).
+# The gate lives in package.json scripts so there is one source of truth.
 pre-commit:
   commands:
-    # Backend-specific validations (fast checks before full gate)
-    backend-validate:
-      root: "backend/"
-      run: npm run validate:env
-      skip:
-        - merge
-        - rebase
-    # Full gate: typecheck, lint, test, build
     gate:
       run: npm run gate

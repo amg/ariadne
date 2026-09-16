@@ -17,5 +17,9 @@ This skill acts as the agent's internal operating system for writing code, enfor
 *   **Permitted Mocks**: Mocks are ONLY allowed at the absolute system boundaries for external network calls (e.g., the DeepInfra AI API endpoint).
 
 ## 3. Workflow Discipline
-*   **Check Before Committing**: The agent must run the linter (Biome) and the test suite (Vitest) to gather evidence that the code works BEFORE asking the user to commit.
-*   **Architectural Conflicts**: If you face a conflicted choice where instructions require keeping the architecture a certain way (e.g., limits on complexity or avoiding hasty abstractions) but CI/linter checks fail as a result, DO NOT bypass the checks with ignore directives (like `// biome-ignore`). You must pause and reach out to the human for a decision.
+*   **Check Before Committing**: The agent must run `npm run gate` to gather evidence that the code works BEFORE asking the user to commit. The gate will report what's wrong.
+*   **Architectural Conflicts**: If you face a conflicted choice where instructions require keeping the architecture a certain way (e.g., limits on complexity or avoiding hasty abstractions) but the gate fails as a result, DO NOT bypass the checks with ignore directives (like `// biome-ignore`). You must pause and reach out to the human for a decision.
+
+## 4. Pre-Commit Gate
+*   **Single Source of Truth**: The `npm run gate` command in `package.json` is the only definition of what "clean" means. The pre-commit hook (lefthook.yml) simply invokes this gate.
+*   **Fail Fast**: If the gate fails, the commit is blocked. The agent must fix the underlying issues, not bypass the gate.
