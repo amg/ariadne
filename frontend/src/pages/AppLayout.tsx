@@ -118,7 +118,7 @@ export default function AppLayout() {
   const handleRefreshPricing = async () => {
     const result = await refreshModelPricing();
     if (result.rateLimited) {
-      console.warn(`Rate limited. Wait ${result.retryAfter}s before refreshing again.`);
+      console.log('Model pricing refresh ignored (too soon).');
       return result;
     }
     if (result.success) {

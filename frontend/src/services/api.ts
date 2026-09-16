@@ -167,7 +167,6 @@ export async function refreshModelPricing(): Promise<{
 }> {
   const res = await fetch('/api/models/refresh', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
   });
 
   if (!res.ok) {
@@ -180,5 +179,14 @@ export async function refreshModelPricing(): Promise<{
       retryAfter: errorData.retryAfter,
     };
   }
-  return res.json();
+  const data = await res.json();
+  if (data.rateLimited) {
+    return {
+      success: true,
+      modelsUpdated: 0,
+      rateLimited: true,
+      retryAfter: 0,
+    };
+  }
+  return data;
 }

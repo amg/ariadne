@@ -56,8 +56,7 @@ describe('modelConfigService', () => {
 
       const result = await refreshModelConfigs();
 
-      expect(result).toMatchObject({ success: false, modelsUpdated: 0, rateLimited: true });
-      expect(result.error).toMatch(/Rate limited/);
+      expect(result).toMatchObject({ success: true, modelsUpdated: 0, rateLimited: true });
     });
   });
 

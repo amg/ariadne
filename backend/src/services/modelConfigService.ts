@@ -7,8 +7,9 @@ import { saveModelConfig } from '@queries/modelConfigs/saveModelConfig';
 /** Model config from DeepInfra API (external wire format — snake_case). */
 interface DeepInfraModel {
   _id: string;
-  name: string;
-  organization: string;
+  name?: string;
+  model_name?: string;
+  organization?: string;
   description?: string;
   context_length?: number;
   pricing?: {
@@ -118,7 +119,12 @@ async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
  * - cents_per_output_token: price per token in cents
  * - rate_per_input_token_cached: multiplier (e.g., 0.5 = 50% of input price)
  */
-function parseDeepInfraModel(model: DeepInfraModel): ModelConfigRow {
+function parseDeepInfraModel(model: DeepInfraModel): ModelConfigRow | null {
+  // DeepInfra's /models/list returns some objects that lack model_name or id,
+  // or use `model_name` instead of `name`. We need to handle this robustly.
+  const modelId = model.name ?? model.model_name ?? model._id;
+  if (!modelId) return null;
+
   // Convert cents per token to USD per million tokens
   const inputPrice = model.pricing?.cents_per_input_token
     ? model.pricing.cents_per_input_token * 10_000 // cents/token * 10000 = USD/million
@@ -134,7 +140,7 @@ function parseDeepInfraModel(model: DeepInfraModel): ModelConfigRow {
     inputPrice !== null && cachedRateMultiplier !== null ? inputPrice * cachedRateMultiplier : null;
 
   return {
-    modelId: model.name,
+    modelId,
     provider: 'deepinfra',
     contextWindow: model.context_length ?? null,
     inputPricePerMillion: inputPrice,
@@ -161,9 +167,8 @@ export async function refreshModelConfigs(): Promise<{
   const waitTime = await getTimeUntilNextRefresh();
   if (waitTime > 0) {
     return {
-      success: false,
+      success: true, // We treat this as a successful no-op on the backend
       modelsUpdated: 0,
-      error: `Rate limited. Please wait ${Math.ceil(waitTime / 1000)} seconds.`,
       rateLimited: true,
     };
   }
@@ -175,7 +180,9 @@ export async function refreshModelConfigs(): Promise<{
 
   // One shared timestamp for the batch so max(last_updated) marks this refresh.
   const refreshedAt = new Date();
-  const configs = models.map(parseDeepInfraModel);
+  const configs = models
+    .map(parseDeepInfraModel)
+    .filter((config): config is ModelConfigRow => config !== null);
   let updated = 0;
 
   for (const config of configs) {

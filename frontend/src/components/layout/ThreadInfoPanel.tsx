@@ -5,7 +5,7 @@ import {
 } from '@/services/api';
 import { formatCost, formatTokens } from '@/services/utils';
 import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 type Props = {
   summary: ThreadSummary | null;
@@ -13,50 +13,20 @@ type Props = {
   onRefreshPricing?: () => Promise<{ rateLimited?: boolean; retryAfter?: number }>;
 };
 
-function useRateLimitTimer(rateLimited: boolean, retryAfter: number) {
-  const [currentRetryAfter, setCurrentRetryAfter] = useState(retryAfter);
-
-  useEffect(() => {
-    setCurrentRetryAfter(retryAfter);
-  }, [retryAfter]);
-
-  useEffect(() => {
-    if (!rateLimited || currentRetryAfter <= 0) return;
-    const timer = setInterval(() => setCurrentRetryAfter((prev) => prev - 1), 1000);
-    return () => clearInterval(timer);
-  }, [rateLimited, currentRetryAfter]);
-
-  return currentRetryAfter;
-}
-
 function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [rateLimited, setRateLimited] = useState(false);
-  const [initialRetryAfter, setInitialRetryAfter] = useState(0);
-  const retryAfter = useRateLimitTimer(rateLimited, initialRetryAfter);
-
-  // Reset rate limit state when retryAfter reaches 0
-  useEffect(() => {
-    if (rateLimited && retryAfter <= 0) {
-      setRateLimited(false);
-    }
-  }, [rateLimited, retryAfter]);
 
   const handleRefresh = async () => {
-    if (!onRefreshPricing || isRefreshing || rateLimited) return;
+    if (!onRefreshPricing || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const result = await onRefreshPricing();
-      if (result.rateLimited) {
-        setRateLimited(true);
-        setInitialRetryAfter(result.retryAfter ?? 60);
-      }
+      await onRefreshPricing();
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
   };
 
-  return { isRefreshing, rateLimited, retryAfter, handleRefresh };
+  return { isRefreshing, handleRefresh };
 }
 
 /**
@@ -103,8 +73,7 @@ function ModelPricing({
  * Always visible in 3-column layout: threads | chat | info
  */
 export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing }: Props) {
-  const { isRefreshing, rateLimited, retryAfter, handleRefresh } =
-    useRefreshPricing(onRefreshPricing);
+  const { isRefreshing, handleRefresh } = useRefreshPricing(onRefreshPricing);
 
   if (!summary) {
     return (
@@ -231,12 +200,8 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
           <button
             type="button"
             onClick={handleRefresh}
-            disabled={isRefreshing || rateLimited || !primaryModel}
-            title={
-              rateLimited
-                ? `Wait ${retryAfter}s before refreshing`
-                : 'Refresh model pricing from provider'
-            }
+            disabled={isRefreshing || !primaryModel}
+            title="Refresh model pricing from provider"
             className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -251,9 +216,6 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
           </>
         ) : (
           <p className="text-xs text-muted-foreground">No model data</p>
-        )}
-        {rateLimited && (
-          <p className="mt-2 text-xs text-amber-500">Wait {retryAfter}s before refreshing</p>
         )}
       </div>
     </aside>

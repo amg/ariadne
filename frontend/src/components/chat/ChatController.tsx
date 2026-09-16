@@ -61,21 +61,45 @@ function countByKey(rows: Message[]): Map<string, number> {
  * - chat messages not covered by a DB row render as pending (optimistic user
  *   bubble, in-flight assistant stream), appended in chat order.
  */
+function buildSettledRow(
+  row: Message,
+  sdkMsg: UiMessageLike | undefined,
+  streaming: boolean,
+  reasoningCache: Map<string, string>,
+): DisplayRow {
+  const needsOverlay = sdkMsg && sdkMsg.role === 'assistant' && (streaming || row.content === '');
+  if (needsOverlay) {
+    const content = joinTextParts(sdkMsg.parts);
+    const reasoning = extractReasoning(sdkMsg.parts);
+    return {
+      id: row.id,
+      message: { ...row, content },
+      usage: row.usage ?? null,
+      streaming: streaming, // True while actually streaming, false during the revalidation gap
+      reasoning: reasoning || null,
+    };
+  }
+  return {
+    id: row.id,
+    message: row,
+    usage: row.usage ?? null,
+    streaming: false,
+    reasoning: reasoningCache.get(row.id) ?? null,
+  };
+}
+
 function mergeDisplayRows(
   rows: Message[],
   chatMessages: UiMessageLike[],
   streaming: boolean,
   reasoningCache: Map<string, string>,
 ): DisplayRow[] {
+  const sdkMessages = new Map(chatMessages.map((m) => [m.id, m]));
   const usageById = new Map(rows.map((row) => [row.id, row.usage ?? null]));
 
-  const settled: DisplayRow[] = rows.map((row) => ({
-    id: row.id,
-    message: row,
-    usage: row.usage ?? null,
-    streaming: false,
-    reasoning: reasoningCache.get(row.id) ?? null, // Get reasoning from persistent cache
-  }));
+  const settled = rows.map((row) =>
+    buildSettledRow(row, sdkMessages.get(row.id), streaming, reasoningCache),
+  );
 
   const rowCountByKey = countByKey(rows);
   const shownByKey = new Map<string, number>();
@@ -90,7 +114,7 @@ function mergeDisplayRows(
     const shown = (shownByKey.get(key) ?? 0) + 1;
     shownByKey.set(key, shown);
 
-    // Skip if matched by ID (assistant streaming) or by role+content count (user optimistic)
+    // Skip if matched by ID (already overlaid in settled) or by role+content count (user optimistic)
     const alreadySettled = usageById.has(message.id) || shown <= (rowCountByKey.get(key) ?? 0);
     if (alreadySettled) continue;
 
