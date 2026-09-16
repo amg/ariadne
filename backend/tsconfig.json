@@ -3,6 +3,7 @@
   "compilerOptions": {
     // File Layout
     "paths": {
+      "@config/*": ["./src/config/*"],
       "@services/*": ["./src/services/*"],
       "@routes/*": ["./app/routes/*"],
       "@db/*": ["./src/db/*"],

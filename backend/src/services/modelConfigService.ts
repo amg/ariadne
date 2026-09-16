@@ -1,8 +1,8 @@
+import { env } from '@config/env';
 import type { NewModelConfig } from '@db/types';
 import { findModelConfigByModelId } from '@queries/modelConfigs/findModelConfigByModelId';
 import { getLatestModelConfigRefresh } from '@queries/modelConfigs/getLatestModelConfigRefresh';
 import { saveModelConfig } from '@queries/modelConfigs/saveModelConfig';
-import { DEFAULT_MODEL_ID } from '@services/aiService/config';
 
 /** Model config from DeepInfra API (external wire format — snake_case). */
 interface DeepInfraModel {
@@ -43,10 +43,10 @@ export interface ModelConfigRow {
 }
 
 /** Fallback config for when API is unavailable. Keyed to the default model so
- *  it stays the natural answer for `getModelConfig(DEFAULT_MODEL_ID)` no
+ *  it stays the natural answer for `getModelConfig(env.DEFAULT_MODEL)` no
  *  matter which model that points at. */
 const FALLBACK_CONFIG: ModelConfigRow = {
-  modelId: DEFAULT_MODEL_ID,
+  modelId: env.DEFAULT_MODEL,
   provider: 'deepinfra',
   contextWindow: 32768,
   inputPricePerMillion: 0.1,

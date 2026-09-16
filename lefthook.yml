@@ -4,5 +4,13 @@
 # one source of truth for what "clean" means.
 pre-commit:
   commands:
+    # Backend-specific validations (fast checks before full gate)
+    backend-validate:
+      root: "backend/"
+      run: npm run validate:env
+      skip:
+        - merge
+        - rebase
+    # Full gate: typecheck, lint, test, build
     gate:
       run: npm run gate

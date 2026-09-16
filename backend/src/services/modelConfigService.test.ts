@@ -1,6 +1,6 @@
+import { env } from '@config/env';
 import { db } from '@db/db';
 import type { NewModelConfig } from '@db/types';
-import { DEFAULT_MODEL_ID } from '@services/aiService';
 import {
   getModelConfig,
   getTimeUntilNextRefresh,
@@ -63,10 +63,10 @@ describe('modelConfigService', () => {
 
   describe('single fallback source', () => {
     it('falls back to the hard-coded default model config when the DB has no row', async () => {
-      const config = await getModelConfig(DEFAULT_MODEL_ID);
+      const config = await getModelConfig(env.DEFAULT_MODEL);
 
       expect(config).toMatchObject({
-        modelId: DEFAULT_MODEL_ID,
+        modelId: env.DEFAULT_MODEL,
         inputPricePerMillion: 0.1,
         outputPricePerMillion: 0.15,
         cachedRateMultiplier: 0.5,

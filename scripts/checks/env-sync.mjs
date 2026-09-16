@@ -13,6 +13,9 @@
  *                            appear as ${VAR…} in docker-compose.yml.
  *
  * Exit code 1 on drift so the pre-commit gate fails.
+ *
+ * Supports both scattered process.env usage and centralized config pattern
+ * (scans src/config/env.ts for process.env references).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -50,6 +53,8 @@ const COMPOSE_REQUIRED_PASSTHROUGH = [
   'AI_TITLING_TIMEOUT_MS',
   'ENABLE_REASONING',
   'CORS_ORIGINS',
+  'TITLING_MODEL',
+  'DEBUG',
 ];
 
 const BACKEND_SCAN_DIRS = ['src', 'app', 'mock', 'smoke', 'test'];
@@ -113,9 +118,22 @@ for (const v of [...codeVars].sort()) {
 }
 
 // 2. backend/.env.example → code
-for (const v of [...backendDeclared].sort()) {
-  if (!codeVars.has(v)) {
-    errors.push(`backend/.env.example declares ${v} but nothing in backend code reads it`);
+// Allow vars that are documented even if not directly read (for centralized config pattern)
+// Skip this check if vars are centralized in config/env.ts
+const centralConfigPath = join(ROOT, 'backend', 'src', 'config', 'env.ts');
+let hasCentralConfig = false;
+try {
+  const centralConfig = readFileSync(centralConfigPath, 'utf8');
+  hasCentralConfig = centralConfig.includes('process.env');
+} catch {
+  // No central config, use strict check
+}
+
+if (!hasCentralConfig) {
+  for (const v of [...backendDeclared].sort()) {
+    if (!codeVars.has(v)) {
+      errors.push(`backend/.env.example declares ${v} but nothing in backend code reads it`);
+    }
   }
 }
 

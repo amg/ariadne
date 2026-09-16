@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { env } from '@config/env';
 import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
@@ -34,16 +35,16 @@ export function createDbFromPool(pool: Pool): Kysely<Database> {
  * connection.
  */
 function createPool(): Pool {
-  const url = process.env.VITEST_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+  const url = env.DATABASE_URL;
   if (url) {
     return new Pool({ connectionString: url });
   }
   return new Pool({
-    host: process.env.DB_HOST || '127.0.0.1',
-    database: process.env.DB_NAME || 'chatbot',
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgrespassword',
-    port: Number(process.env.DB_PORT) || 5432,
+    host: env.DB_HOST,
+    database: env.DB_NAME,
+    user: env.DB_USER,
+    password: env.DB_PASSWORD,
+    port: env.DB_PORT,
   });
 }
 

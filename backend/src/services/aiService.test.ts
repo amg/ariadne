@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { env } from '@config/env';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
@@ -6,7 +7,6 @@ import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
   type ChatStreamHandle,
-  DEFAULT_MODEL_ID,
   computeCostUsd,
   retryLastExchange,
   submitChat,
@@ -113,7 +113,7 @@ describe('submitChat', () => {
     // Usage row: cache telemetry passed through, cost priced from the model
     // config fallback (modelConfigService FALLBACK_CONFIG — the single
     // fallback source: DB → hard-coded default model config).
-    const fallbackConfig = await getModelConfig(DEFAULT_MODEL_ID);
+    const fallbackConfig = await getModelConfig(env.DEFAULT_MODEL);
     const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
     expect(usage).toBeDefined();
     // 1 message in history + the new one → base 4 + 2
@@ -124,7 +124,7 @@ describe('submitChat', () => {
     // cacheWriteTokens stays NULL (omitted) until the SDK spreads it
     // (the fallback path in usageMap.ts is already wired to usage.raw).
     expect(usage?.cacheWriteTokens).toBeNull();
-    expect(usage?.model).toBe(DEFAULT_MODEL_ID);
+    expect(usage?.model).toBe(env.DEFAULT_MODEL);
     expect(usage?.finishReason).toBe('stop');
     expect(usage?.providerId).toMatch(/^chatcmpl-mock-/);
     expect(usage?.latencyMs).toBeGreaterThanOrEqual(0);

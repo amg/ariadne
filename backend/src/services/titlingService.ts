@@ -1,3 +1,4 @@
+import { env } from '@config/env';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { generateText } from 'ai';
@@ -15,14 +16,12 @@ import { DEFAULT_THREAD_TITLE, FALLBACK_THREAD_TITLE, renameThread } from './thr
 
 /**
  * Titling must never hang the UI: it owns its own time budget, independent
- * of the chat stream's idle timeout. Read lazily at call time (same idiom as
- * aiService/config) so tests can tighten the budget per case. 5s gives the
- * uncapped final shape room for long thinking (~4s) plus the ~1s spent on
- * the cheap first attempt (see backend/specs/deepinfra.md).
+ * of the chat stream's idle timeout. Read from centralized env config.
+ * 5s gives the uncapped final shape room for long thinking (~4s) plus the
+ * ~1s spent on the cheap first attempt (see backend/specs/deepinfra.md).
  */
 function resolveTitlingTimeoutMs(): number {
-  const ms = Number(process.env.AI_TITLING_TIMEOUT_MS);
-  return Number.isFinite(ms) && ms > 0 ? ms : 5000;
+  return env.AI_TITLING_TIMEOUT_MS ?? 5000;
 }
 
 /** How much of each message the prompt learns from — keeps prefill cheap. */
@@ -207,7 +206,7 @@ User: ${clipped(messages[0]?.content)}
 Assistant: ${clipped(messages[1]?.content)}`;
 
   try {
-    const modelStr = process.env.TITLING_MODEL || config.model;
+    const modelStr = env.TITLING_MODEL || config.model;
     const model = createModel({ ...config, model: modelStr });
 
     const generation = await generateTitleText(model, prompt);

@@ -7,6 +7,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      '@config': path.resolve(rootDir, 'src/config'),
       '@db': path.resolve(rootDir, 'src/db'),
       '@queries': path.resolve(rootDir, 'src/db/queries'),
       '@services': path.resolve(rootDir, 'src/services'),

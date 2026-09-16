@@ -1,13 +1,11 @@
 import { createDeepInfra } from '@ai-sdk/deepinfra';
+import { env } from '@config/env';
 import type { LanguageModel } from 'ai';
 
 /**
  * Provider configuration for the AI Connector boundary
- * (see features/ai-connector/MVP.md). Env is read lazily at call time so
- * tests can point `MOCK_AI_BASE_URL` at the mock inference server.
+ * (see features/ai-connector/MVP.md). Uses centralized env config.
  */
-
-export const DEFAULT_MODEL_ID = 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo';
 
 export const SYSTEM_PROMPT = 'You are a helpful assistant.';
 
@@ -20,15 +18,14 @@ export type InferenceConfig = {
 };
 
 export function resolveInferenceConfig(): InferenceConfig {
-  const rawBaseUrl = process.env.MOCK_AI_BASE_URL?.trim();
-  const baseUrl = rawBaseUrl ? rawBaseUrl.replace(/\/+$/, '') : undefined;
+  const baseUrl = env.MOCK_AI_BASE_URL ? env.MOCK_AI_BASE_URL.replace(/\/+$/, '') : undefined;
   const config: InferenceConfig = {
-    model: process.env.DEFAULT_MODEL ?? DEFAULT_MODEL_ID,
-    idleTimeoutMs: Number(process.env.AI_STREAM_IDLE_TIMEOUT_MS ?? '5000'),
-    enableReasoning: process.env.ENABLE_REASONING !== 'false', // Default: true
+    model: env.DEFAULT_MODEL,
+    idleTimeoutMs: env.AI_STREAM_IDLE_TIMEOUT_MS,
+    enableReasoning: env.ENABLE_REASONING,
   };
   if (baseUrl !== undefined) config.baseUrl = baseUrl;
-  if (process.env.DEEPINFRA_API_KEY) config.apiKey = process.env.DEEPINFRA_API_KEY;
+  if (env.DEEPINFRA_API_KEY) config.apiKey = env.DEEPINFRA_API_KEY;
   return config;
 }
 

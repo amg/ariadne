@@ -1,3 +1,4 @@
+import { env } from '@config/env';
 /**
  * The app-wide pino singleton — the one place the logger is built.
  *
@@ -36,10 +37,10 @@ import pino from 'pino';
 import type { PrettyOptions } from 'pino-pretty';
 import pinoPretty from 'pino-pretty';
 
-export const isProduction = process.env.NODE_ENV === 'production';
+export const isProduction = env.NODE_ENV === 'production';
 
 const TRUTHY = /^(1|true|yes|on)$/i;
-const debugRequested = TRUTHY.test(process.env.DEBUG ?? '');
+const debugRequested = TRUTHY.test(env.DEBUG ? 'true' : 'false');
 
 /** Verbose provider-payload logging: honored outside production only. */
 export const debugEnabled = !isProduction && debugRequested;
@@ -47,8 +48,8 @@ export const debugEnabled = !isProduction && debugRequested;
 // Standard color conventions (also read by colorette itself): npm's dev
 // scripts set FORCE_COLOR=1 so the pretty stream survives concurrently's
 // child-stdout pipe on Windows; NO_COLOR keeps the layout but strips ANSI.
-const forceColor = process.env.FORCE_COLOR;
-const colorDisabled = forceColor === '0' || process.env.NO_COLOR !== undefined;
+const forceColor = env.FORCE_COLOR;
+const colorDisabled = forceColor === '0' || env.NO_COLOR !== undefined;
 const prettyRequested = process.stdout.isTTY || (forceColor !== undefined && forceColor !== '0');
 
 /** Shapes consumed by `messageFormat`; suppresses the default key:value dump. */
