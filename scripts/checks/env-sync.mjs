@@ -139,7 +139,8 @@ if (!hasCentralConfig) {
 
 // 3. compose passthrough
 for (const v of COMPOSE_REQUIRED_PASSTHROUGH) {
-  if (!new RegExp(`\\$\\{${v}[:-]`).test(composeText)) {
+  // Check if var is passed through (with or without default)
+  if (!new RegExp(`\\$\\{${v}(?::-.*?)?\\}`).test(composeText)) {
     errors.push(`docker-compose.yml does not pass ${v} through (expected \${${v}…})`);
   }
 }
