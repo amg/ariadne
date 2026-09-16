@@ -1,25 +1,29 @@
+---
+name: code-quality
+description: Defines code quality standards, complexity limits, testing governance, and architectural decision framework.
+---
+
 # Code Quality and Governance
 
-## Overview
-This skill acts as the agent's internal operating system for writing code, enforcing strict hygiene, readability, and a "real-evidence" testing posture.
-
 ## 1. Code Quality
-*   **Simplicity First**: Reject cleverness. Code must be highly readable and declarative.
-*   **Cognitive Complexity**: Strictly limit branching (`if`/`else`/`switch`). Use early returns (guard clauses) to flatten nested logic.
-*   **Cyclomatic Complexity**: Functions must do one thing. If a function has too many paths, break it down. 
-*   **Strategic Duplication**: Prefer extraction for core business logic and database queries. However, **allow duplication** in UI components (where visual/behavioral divergence is likely) and test setup data (where coupling tests to shared factories often creates brittle dependencies). "AHA" (Avoid Hasty Abstractions) is better than "DRY" (Don't Repeat Yourself) when divergence is expected.
-*   **UI Variants Exception**: The strict anti-branching rule applies to business logic. For UI components, explicit `switch` cases are preferred for returning markup or distinct class clusters (variants). This ensures changes to one visual variant do not accidentally break another. Simple scaling attributes (like `size`) may use an object map, but visual styles and divergent markup should use explicit `switch` branching.
+*   **Simplicity First**: Reject cleverness. Code must be readable and declarative.
+*   **Complexity**: Limit branching and function scope.
+    - *Business logic*: Strictly limit `if`/`else`/`switch`. Use guard clauses for early returns.
+    - *UI components*: Explicit `switch` cases for visual variants and divergent markup. Object maps only for simple scaling attributes (e.g., `size`).
+*   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 
 ## 2. Testing Governance
-*   **No Database Mocks**: NEVER mock the database (Kysely/Postgres) in tests. 
-*   **Real DB Testing**: All database and repository tests must run against a real PostgreSQL instance (via Testcontainers).
-*   **Test Isolation**: Ensure database tests are isolated by wrapping test cases in transactions and issuing a `ROLLBACK` after the test, or by completely truncating tables.
-*   **Permitted Mocks**: Mocks are ONLY allowed at the absolute system boundaries for external network calls (e.g., the DeepInfra AI API endpoint).
+*   **No Database Mocks**: NEVER mock the database (Kysely/Postgres).
+*   **Real DB Testing**: All database/repository tests run against real PostgreSQL (Testcontainers).
+*   **Test Isolation**: Wrap tests in transactions with `ROLLBACK`, or truncate tables.
+*   **Permitted Mocks**: ONLY at system boundaries for external network calls (e.g., DeepInfra API).
 
-## 3. Workflow Discipline
-*   **Check Before Committing**: The agent must run `npm run gate` to gather evidence that the code works BEFORE asking the user to commit. The gate will report what's wrong.
-*   **Architectural Conflicts**: If you face a conflicted choice where instructions require keeping the architecture a certain way (e.g., limits on complexity or avoiding hasty abstractions) but the gate fails as a result, DO NOT bypass the checks with ignore directives (like `// biome-ignore`). You must pause and reach out to the human for a decision.
+## 3. Enforcing Quality
 
-## 4. Pre-Commit Gate
-*   **Single Source of Truth**: The `npm run gate` command in `package.json` is the only definition of what "clean" means. The pre-commit hook (lefthook.yml) simply invokes this gate.
-*   **Fail Fast**: If the gate fails, the commit is blocked. The agent must fix the underlying issues, not bypass the gate.
+**Validation**: After any code modification, activate **workflow-gate** to run `npm run gate`.
+
+**Architectural Conflicts**: If the gate fails due to architectural decisions (complexity limits, avoiding hasty abstractions), DO NOT bypass with ignore directives (`// biome-ignore`). Pause and ask the user for a decision.
+
+## 4. Human Decisions
+
+If you notice code changes from under you (e.g., you fix something and the user reverts it), DO NOT re-add it back. The user has made a deliberate decision. Pause and ask for clarification.
