@@ -153,17 +153,15 @@ export default function ChatController({
     transport,
     // After every stream (including user stop) refetch rows so usage
     // metadata and persisted ids replace the optimistic/streaming state.
-    // A settling first exchange also kicks off auto-titling; on failure the
-    // backend settles the sentinel title to "New Chat".
     onFinish: () => {
       onSettle();
-      if (isNewChatRef.current && onGenerateTitle) {
+      if (onGenerateTitle) {
         onGenerateTitle();
       }
     },
     onError: () => {
       onSettle();
-      if (isNewChatRef.current && onGenerateTitle) {
+      if (onGenerateTitle) {
         onGenerateTitle();
       }
     },

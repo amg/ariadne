@@ -4,7 +4,6 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
-import { DEFAULT_THREAD_TITLE, FALLBACK_THREAD_TITLE } from '@services/threadService';
 import { autoTitleThread } from '@services/titlingService';
 import { useTestDb } from '@test/test-db';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -129,10 +128,10 @@ async function startSlowProvider(title: string, delayMs: number) {
   };
 }
 
-async function createThread(title: string) {
+async function createThread(title?: string) {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
-  const thread = await insertThread({ userId: userId, title });
+  const thread = await insertThread({ userId: userId, title: title ?? null });
   return { userId, threadId: thread.id };
 }
 
@@ -145,7 +144,7 @@ async function seedExchange(threadId: string) {
   });
 }
 
-async function titleOf(userId: string, threadId: string): Promise<string> {
+async function titleOf(userId: string, threadId: string): Promise<string | null> {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) throw new Error('thread vanished');
   return thread.title;
@@ -153,7 +152,7 @@ async function titleOf(userId: string, threadId: string): Promise<string> {
 
 describe('autoTitleThread', () => {
   it('generates and persists a low-effort title from the first exchange', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     let requestBody: Record<string, unknown> | undefined;
@@ -179,7 +178,7 @@ describe('autoTitleThread', () => {
   });
 
   it('skips the thinking knob when the provider rejects it and lands on the bare shape', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     const requests: unknown[] = [];
@@ -206,13 +205,13 @@ describe('autoTitleThread', () => {
     }
   });
 
-  it('falls back to "New Chat" when there is no exchange to learn from', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+  it('falls back to "settled" when there is no exchange to learn from', async () => {
+    const { userId, threadId } = await createThread();
 
     const outcome = await autoTitleThread(userId, threadId);
 
     expect(outcome).toEqual({ type: 'settled' });
-    expect(await titleOf(userId, threadId)).toBe(FALLBACK_THREAD_TITLE);
+    expect(await titleOf(userId, threadId)).toBeNull();
   });
 
   it('never overwrites a user-chosen title when generation cannot run', async () => {
@@ -224,8 +223,8 @@ describe('autoTitleThread', () => {
     expect(await titleOf(userId, threadId)).toBe('My important notes');
   });
 
-  it('settles the sentinel to "New Chat" when every attempt fails', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+  it('fails when every attempt fails', async () => {
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     const requests: unknown[] = [];
@@ -243,14 +242,14 @@ describe('autoTitleThread', () => {
         message: expect.any(String),
       });
       expect(requests).toHaveLength(2);
-      expect(await titleOf(userId, threadId)).toBe(FALLBACK_THREAD_TITLE);
+      expect(await titleOf(userId, threadId)).toBeNull();
     } finally {
       await stop();
     }
   });
 
   it('climbs to the final shape when every attempt answers with empty content', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     const requests: unknown[] = [];
@@ -272,14 +271,14 @@ describe('autoTitleThread', () => {
       expect(requests).toHaveLength(2);
       expect((requests[1] as Record<string, unknown>)?.max_tokens).toBeUndefined();
       expect((requests[1] as Record<string, unknown>)?.chat_template_kwargs).toBeUndefined();
-      expect(await titleOf(userId, threadId)).toBe(FALLBACK_THREAD_TITLE);
+      expect(await titleOf(userId, threadId)).toBeNull();
     } finally {
       await stop();
     }
   });
 
   it('reports title_timeout when the shared budget fires mid-call', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     process.env.AI_TITLING_TIMEOUT_MS = '100';
@@ -289,14 +288,14 @@ describe('autoTitleThread', () => {
 
       expect(outcome).toMatchObject({ type: 'failed', code: ErrorCodes.TITLE_TIMEOUT });
       expect(outcome.type === 'failed' && outcome.message).toContain('aborted after 100ms');
-      expect(await titleOf(userId, threadId)).toBe(FALLBACK_THREAD_TITLE);
+      expect(await titleOf(userId, threadId)).toBeNull();
     } finally {
       await stop();
     }
   });
 
   it('fails fast with provider_not_configured without a base URL and key', async () => {
-    const { userId, threadId } = await createThread(DEFAULT_THREAD_TITLE);
+    const { userId, threadId } = await createThread();
     await seedExchange(threadId);
 
     const savedKey = process.env.DEEPINFRA_API_KEY;
@@ -327,22 +326,7 @@ describe('autoTitleThread', () => {
     });
   });
 
-  it('forced regeneration overrides a human-chosen title', async () => {
-    const { userId, threadId } = await createThread('My important notes');
-    await seedExchange(threadId);
-
-    const stop = await startProvider({ title: 'Steam Engines Explained' });
-    try {
-      const outcome = await autoTitleThread(userId, threadId, { forced: true });
-
-      expect(outcome).toEqual({ type: 'titled', title: 'Steam Engines Explained' });
-      expect(await titleOf(userId, threadId)).toBe('Steam Engines Explained');
-    } finally {
-      await stop();
-    }
-  });
-
-  it('auto-generation never overwrites a human-chosen title', async () => {
+  it('generation overwrites a human-chosen title', async () => {
     const { userId, threadId } = await createThread('My important notes');
     await seedExchange(threadId);
 
@@ -350,8 +334,8 @@ describe('autoTitleThread', () => {
     try {
       const outcome = await autoTitleThread(userId, threadId);
 
-      expect(outcome).toEqual({ type: 'settled' });
-      expect(await titleOf(userId, threadId)).toBe('My important notes');
+      expect(outcome).toEqual({ type: 'titled', title: 'Steam Engines Explained' });
+      expect(await titleOf(userId, threadId)).toBe('Steam Engines Explained');
     } finally {
       await stop();
     }

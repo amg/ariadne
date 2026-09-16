@@ -104,12 +104,12 @@
     the old manual grep.
 *   **Data flow**: no `useEffect` fetching. Threads via root loader
     (`useRouteLoaderData('root')`), messages via `useLoaderData` in `ChatPage`.
-    New chat = `/threads/new` action + `redirect()` (a navigation). Send
+    New chat = `/threads/new` action + `redirect()` (a navigation, creates thread with null title). Send
     message = `useChat` (`@ai-sdk/react`) POSTing to the streaming chat route;
     on finish the messages loader revalidates so persisted state (incl.
-    `message_usage`) becomes source of truth; optimistic/streaming rows are
-    merged in `components/chat/ChatController` until reconciliation. Rename =
-    `threads/:threadId/rename` action returning `null` (revalidates the root
+    `message_usage`) becomes source of truth. Auto-titling triggers on frontend
+    if title is null by calling `POST /api/threads/:id/generate-title`.
+    Rename = `threads/:threadId/rename` action returning `null` (revalidates the root
     threads loader); sidebar shows the draft optimistically via `pendingRename`
     while the dedicated rename fetcher settles.
 *   **Pages**: `/` (EmptyPage when no threads), `/about` (static),

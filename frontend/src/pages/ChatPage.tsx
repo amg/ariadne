@@ -1,5 +1,5 @@
 import { ChatController } from '@/components/chat';
-import { type Message, TITLE_GENERATING_SENTINEL, fetchMessages } from '@/services/api';
+import { type Message, fetchMessages } from '@/services/api';
 import type { Thread } from '@/services/api';
 import { useLoaderData, useOutletContext, useRevalidator, useRouteLoaderData } from 'react-router';
 
@@ -31,8 +31,12 @@ export default function ChatPage() {
       threadId={threadId}
       rows={rows}
       onSettle={() => revalidator.revalidate()}
-      isNewChat={title === TITLE_GENERATING_SENTINEL}
-      onGenerateTitle={() => generateTitle(threadId)}
+      isNewChat={title === null}
+      onGenerateTitle={() => {
+        if (title === null) {
+          generateTitle(threadId);
+        }
+      }}
     />
   );
 }

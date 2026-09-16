@@ -9,14 +9,14 @@ export type MessageFinishReason =
 
 export interface Thread {
   id: string;
-  title: string;
+  title: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** Title placeholder while auto-titling runs (mirrors the backend
- *  `DEFAULT_THREAD_TITLE` sentinel); UI shows a loading pulse for it. */
-export const TITLE_GENERATING_SENTINEL = 'New Chat...';
+export const DEFAULT_THREAD_TITLE = 'New Chat';
+
+export const TITLE_GENERATING_SENTINEL = 'New Chat ...';
 
 /** Telemetry for one assistant message (backend `message_usage`, 1:1). */
 export interface MessageUsage {
@@ -66,11 +66,11 @@ export function fetchThreads(): Promise<Thread[]> {
   });
 }
 
-export async function createThread(title: string): Promise<Thread> {
+export async function createThread(): Promise<Thread> {
   const res = await fetch('/api/threads', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`Failed to create thread: ${res.statusText}`);
   return res.json();

@@ -4,12 +4,7 @@ import { insertThread } from '@queries/threads/insertThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { updateThreadTitle } from '@queries/threads/updateThreadTitle';
 
-/** Sentinel shown while the UI waits for auto-titling; doubles as the
- *  "never auto-rename over this" gate for the titling service. */
-export const DEFAULT_THREAD_TITLE = 'New Chat...';
-/** Static title when auto-titling fails or has nothing to learn from. */
-export const FALLBACK_THREAD_TITLE = 'New Chat';
-const MAX_TITLE_LENGTH = 255;
+const MAX_TITLE_LENGTH = 50;
 
 export class ThreadValidationError extends Error {}
 
@@ -64,16 +59,8 @@ export async function getThreads({ userId }: GetThreadsProps): Promise<Thread[]>
 
 type CreateThreadProps = {
   userId: string;
-  title?: string;
 };
 
-export async function createThread({ userId, title }: CreateThreadProps): Promise<Thread> {
-  if (title !== undefined && typeof title !== 'string') {
-    throw new ThreadValidationError('Thread title must be a string');
-  }
-  const trimmed = title?.trim();
-  if (trimmed && trimmed.length > MAX_TITLE_LENGTH) {
-    throw new ThreadValidationError(`Thread title exceeds ${MAX_TITLE_LENGTH} characters`);
-  }
-  return insertThread({ userId, title: trimmed ? trimmed : DEFAULT_THREAD_TITLE });
+export async function createThread({ userId }: CreateThreadProps): Promise<Thread> {
+  return insertThread({ userId });
 }

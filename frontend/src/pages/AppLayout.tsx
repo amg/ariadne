@@ -52,7 +52,7 @@ export default function AppLayout() {
     const result = data as GenerateTitleActionResult;
     if (result.ok !== false || lastToastedTitleResultRef.current === result) return;
     lastToastedTitleResultRef.current = result;
-    toast.error(result.forced ? 'Title regeneration failed' : 'Auto-titling failed', {
+    toast.error('Title regeneration failed', {
       description: friendlyErrorMessage(result.errorCode),
     });
   }, [generateTitleFetcher]);
@@ -79,7 +79,7 @@ export default function AppLayout() {
 
   // Thread summary state
   const [threadSummary, setThreadSummary] = useState<ThreadSummary | null>(null);
-  const [activeThreadTitle, setActiveThreadTitle] = useState<string | undefined>(undefined);
+  const [activeThreadTitle, setActiveThreadTitle] = useState<string | null | undefined>(undefined);
   const currentThreadId = match?.params.threadId ?? null;
 
   // Fetch the summary once per active thread. NOT keyed on `visibleThreads`:
@@ -150,12 +150,9 @@ export default function AppLayout() {
           }
           onRegenerateTitle={(id) =>
             // formData (not null) so `generatingTitleThreadId` above flips the
-            // sidebar/info panel to the loading pulse immediately. `force`
-            // marks this as an explicit user action: the backend may
-            // overwrite any existing title (auto-generation stays gated on
-            // the sentinel in the ChatPage/ChatController flow).
+            // sidebar/info panel to the loading pulse immediately.
             generateTitleFetcher.submit(
-              { threadId: id, force: 'true' },
+              { threadId: id },
               { method: 'post', action: `/threads/${id}/generate-title` },
             )
           }

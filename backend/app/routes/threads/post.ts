@@ -5,18 +5,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 // Placeholder until page-level auth resolves the user.
 const REQUEST_USER_ID = DEFAULT_USER_ID;
 
-type CreateThreadBody = {
-  title?: string;
-};
-
 export async function setupThreadsPostRoute(fastify: FastifyInstance) {
-  fastify.post('/api/threads', async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = (request.body ?? {}) as CreateThreadBody;
+  fastify.post('/api/threads', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const thread =
-        body.title !== undefined
-          ? await createThread({ userId: REQUEST_USER_ID, title: body.title })
-          : await createThread({ userId: REQUEST_USER_ID });
+      const thread = await createThread({ userId: REQUEST_USER_ID });
       return reply.send(thread);
     } catch (err) {
       if (err instanceof ThreadValidationError) {

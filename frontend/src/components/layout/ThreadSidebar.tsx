@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
-import { TITLE_GENERATING_SENTINEL } from '@/services/api';
+import { DEFAULT_THREAD_TITLE, TITLE_GENERATING_SENTINEL } from '@/services/api';
 import { Ellipsis, Info, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -41,8 +41,10 @@ export default function ThreadSidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
-  const displayTitle = (thread: Thread) =>
-    pendingRename?.threadId === thread.id ? pendingRename.title : thread.title;
+  const displayTitle = (thread: Thread) => {
+    if (pendingRename?.threadId === thread.id) return pendingRename.title;
+    return thread.title ?? DEFAULT_THREAD_TITLE;
+  };
 
   const startEditing = (thread: Thread) => {
     setEditingId(thread.id);
@@ -105,7 +107,7 @@ export default function ThreadSidebar({
                     type="button"
                     onClick={() => onSelectThread(thread.id)}
                     onDoubleClick={() => startEditing(thread)}
-                    className="min-w-0 flex-1 truncate rounded-md py-2 pl-3 text-left text-sm"
+                    className="min-w-0 flex items-center flex-1 truncate rounded-md p-2 pl-3 text-left text-sm"
                   >
                     {title === TITLE_GENERATING_SENTINEL ? (
                       <span className="inline-block h-4 w-24 animate-pulse rounded bg-foreground/10" />

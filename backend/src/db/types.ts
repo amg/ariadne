@@ -22,7 +22,7 @@ export interface UsersTable {
 export interface ThreadsTable {
   id: Generated<string>; // UUID
   userId: string;
-  title: string;
+  title: string | null;
   createdAt: Generated<Date>;
 }
 

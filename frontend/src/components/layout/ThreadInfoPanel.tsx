@@ -1,33 +1,39 @@
-import { TITLE_GENERATING_SENTINEL, type ThreadSummary } from '@/services/api';
+import {
+  DEFAULT_THREAD_TITLE,
+  TITLE_GENERATING_SENTINEL,
+  type ThreadSummary,
+} from '@/services/api';
 import { formatCost, formatTokens } from '@/services/utils';
 import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 type Props = {
   summary: ThreadSummary | null;
-  threadTitle?: string;
+  threadTitle?: string | null;
   onRefreshPricing?: () => Promise<{ rateLimited?: boolean; retryAfter?: number }>;
 };
 
-/**
- * Right side panel showing thread statistics and usage info.
- * Always visible in 3-column layout: threads | chat | info
- */
-export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing }: Props) {
+function useRateLimitTimer(rateLimited: boolean, retryAfter: number) {
+  const [currentRetryAfter, setCurrentRetryAfter] = useState(retryAfter);
+
+  useEffect(() => {
+    setCurrentRetryAfter(retryAfter);
+  }, [retryAfter]);
+
+  useEffect(() => {
+    if (!rateLimited || currentRetryAfter <= 0) return;
+    const timer = setInterval(() => setCurrentRetryAfter((prev) => prev - 1), 1000);
+    return () => clearInterval(timer);
+  }, [rateLimited, currentRetryAfter]);
+
+  return currentRetryAfter;
+}
+
+function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
-  const [retryAfter, setRetryAfter] = useState(0);
-
-  // Countdown timer for rate limit
-  useEffect(() => {
-    if (!rateLimited || retryAfter <= 0) return;
-
-    const timer = setInterval(() => {
-      setRetryAfter((prev) => prev - 1);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [rateLimited, retryAfter]);
+  const [initialRetryAfter, setInitialRetryAfter] = useState(0);
+  const retryAfter = useRateLimitTimer(rateLimited, initialRetryAfter);
 
   // Reset rate limit state when retryAfter reaches 0
   useEffect(() => {
@@ -36,19 +42,69 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
     }
   }, [rateLimited, retryAfter]);
 
-  const handleRefreshWithRateLimit = async () => {
+  const handleRefresh = async () => {
     if (!onRefreshPricing || isRefreshing || rateLimited) return;
     setIsRefreshing(true);
     try {
       const result = await onRefreshPricing();
       if (result.rateLimited) {
         setRateLimited(true);
-        setRetryAfter(result.retryAfter ?? 60);
+        setInitialRetryAfter(result.retryAfter ?? 60);
       }
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
   };
+
+  return { isRefreshing, rateLimited, retryAfter, handleRefresh };
+}
+
+/**
+ * Formats model pricing for display
+ */
+function ModelPricing({
+  pricing,
+}: { pricing: Exclude<ThreadSummary['primaryModelPricing'], null> }) {
+  const formatPrice = (price: number | null | undefined) =>
+    price == null ? '—' : price < 0.01 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
+  const formatRate = (rate: number | null | undefined) =>
+    rate == null ? '—' : `${(rate * 100).toFixed(0)}%`;
+
+  return (
+    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+      <div className="flex items-center gap-3">
+        <span title="Input price per million tokens">
+          <span className="font-medium text-foreground">Input:</span>{' '}
+          {formatPrice(pricing.inputPricePerMillion)}/1M
+        </span>
+        <span title="Output price per million tokens">
+          <span className="font-medium text-foreground">Output:</span>{' '}
+          {formatPrice(pricing.outputPricePerMillion)}/1M
+        </span>
+      </div>
+      {pricing.cachedPricePerMillion !== null && (
+        <div className="flex items-center gap-3">
+          <span title="Cached token price per million tokens">
+            <span className="font-medium text-foreground">Cached:</span>{' '}
+            {formatPrice(pricing.cachedPricePerMillion)}/1M
+          </span>
+          <span title="Cached token rate (multiplier of input price)">
+            <span className="font-medium text-foreground">Rate:</span>{' '}
+            {formatRate(pricing.cachedRateMultiplier)} of input
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Right side panel showing thread statistics and usage info.
+ * Always visible in 3-column layout: threads | chat | info
+ */
+export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing }: Props) {
+  const { isRefreshing, rateLimited, retryAfter, handleRefresh } =
+    useRefreshPricing(onRefreshPricing);
 
   if (!summary) {
     return (
@@ -81,32 +137,19 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
     minute: '2-digit',
   });
 
-  // Format pricing per million tokens
-  const inputPrice = primaryModelPricing?.inputPricePerMillion;
-  const outputPrice = primaryModelPricing?.outputPricePerMillion;
-  const cachedPrice = primaryModelPricing?.cachedPricePerMillion;
-  const cachedRate = primaryModelPricing?.cachedRateMultiplier;
-  const formatPrice = (price: number | null | undefined) => {
-    if (price == null) return '—';
-    if (price < 0.01) return `$${price.toFixed(4)}`;
-    return `$${price.toFixed(2)}`;
-  };
-  const formatRate = (rate: number | null | undefined) => {
-    if (rate == null) return '—';
-    return `${(rate * 100).toFixed(0)}%`;
-  };
-
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-l bg-muted/30 p-4 pt-12 nav:pt-4 overflow-y-auto">
       <h2 className="mb-4 text-sm font-semibold text-foreground">Thread Info</h2>
 
       {/* Thread Title (pulse while auto-titling is in flight) */}
-      {threadTitle && (
+      {threadTitle !== undefined && (
         <div className="mb-4 rounded-md border bg-background p-3">
           {threadTitle === TITLE_GENERATING_SENTINEL ? (
             <span className="inline-block h-4 w-32 animate-pulse rounded bg-foreground/10" />
           ) : (
-            <p className="truncate text-sm font-medium text-foreground">{threadTitle}</p>
+            <p className="truncate text-sm font-medium text-foreground">
+              {threadTitle === null ? DEFAULT_THREAD_TITLE : threadTitle}
+            </p>
           )}
         </div>
       )}
@@ -187,7 +230,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
           </div>
           <button
             type="button"
-            onClick={handleRefreshWithRateLimit}
+            onClick={handleRefresh}
             disabled={isRefreshing || rateLimited || !primaryModel}
             title={
               rateLimited
@@ -204,32 +247,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
             <p className="truncate text-xs text-foreground" title={primaryModel}>
               {primaryModel}
             </p>
-            {primaryModelPricing && (
-              <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                <div className="flex items-center gap-3">
-                  <span title="Input price per million tokens">
-                    <span className="font-medium text-foreground">Input:</span>{' '}
-                    {formatPrice(inputPrice)}/1M
-                  </span>
-                  <span title="Output price per million tokens">
-                    <span className="font-medium text-foreground">Output:</span>{' '}
-                    {formatPrice(outputPrice)}/1M
-                  </span>
-                </div>
-                {primaryModelPricing.cachedPricePerMillion !== null && (
-                  <div className="flex items-center gap-3">
-                    <span title="Cached token price per million tokens">
-                      <span className="font-medium text-foreground">Cached:</span>{' '}
-                      {formatPrice(cachedPrice)}/1M
-                    </span>
-                    <span title="Cached token rate (multiplier of input price)">
-                      <span className="font-medium text-foreground">Rate:</span>{' '}
-                      {formatRate(cachedRate)} of input
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
+            {primaryModelPricing && <ModelPricing pricing={primaryModelPricing} />}
           </>
         ) : (
           <p className="text-xs text-muted-foreground">No model data</p>

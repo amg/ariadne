@@ -12,7 +12,7 @@ import {
 } from '../logger';
 import { ErrorCodes, type TitlingErrorCode } from '../types/errorCodes';
 import { createModel, isInferenceConfigured, resolveInferenceConfig } from './aiService/config';
-import { DEFAULT_THREAD_TITLE, FALLBACK_THREAD_TITLE, renameThread } from './threadService';
+import { renameThread } from './threadService';
 
 /**
  * Titling must never hang the UI: it owns its own time budget, independent
@@ -43,15 +43,6 @@ export type TitlingOutcome =
   | { type: 'settled' }
   /** Generation blew up; the sentinel (if present) was still settled. */
   | { type: 'failed'; code: TitlingErrorCode; message: string };
-
-export type AutoTitleOptions = {
-  /**
-   * Explicit user action ("Regenerate Title"). A successful generation
-   * overwrites any existing title — manual names are only protected from
-   * the automatic default flow, which the frontend gates on the sentinel.
-   */
-  forced?: boolean;
-};
 
 type GenerationResult =
   | { ok: true; text: string; attempt: number }
@@ -156,24 +147,10 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
 }
 
 /**
- * Swaps the "generating" sentinel for a static fallback so the UI stops
- * pulsing a title that will never resolve (no exchange to learn from,
- * model error, empty reply).
- */
-async function applyFallbackTitle(userId: string, threadId: string, originalTitle: string) {
-  if (originalTitle !== DEFAULT_THREAD_TITLE) return;
-  await renameThread({ userId, threadId, title: FALLBACK_THREAD_TITLE }).catch(() => {});
-}
-
-/**
  * Derives a short title for a thread from the first exchange.
  * Used asynchronously to avoid blocking the main chat stream.
  */
-export async function autoTitleThread(
-  userId: string,
-  threadId: string,
-  options: AutoTitleOptions = {},
-): Promise<TitlingOutcome> {
+export async function autoTitleThread(userId: string, threadId: string): Promise<TitlingOutcome> {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return {
@@ -191,12 +168,9 @@ export async function autoTitleThread(
       message: `thread ${threadId} not found for user ${userId}`,
     };
   }
-  const originalTitle = thread.title;
 
   const messages = await listMessagesByThread({ threadId });
   if (messages.length < 2) {
-    // Nothing to learn from yet — stop the UI waiting on a sentinel title.
-    await applyFallbackTitle(userId, threadId, originalTitle);
     return { type: 'settled' };
   }
 
@@ -211,25 +185,15 @@ Assistant: ${clipped(messages[1]?.content)}`;
 
     const generation = await generateTitleText(model, prompt);
     if (!generation.ok) {
-      await applyFallbackTitle(userId, threadId, originalTitle);
       return { type: 'failed', code: generation.code, message: generation.message };
     }
 
     const generatedTitle = generation.text.trim().replace(/^["']|["']$/g, '');
 
-    if (options.forced !== true) {
-      // Auto flow: only fill the untitled slots (sentinel or a stale
-      // fallback). Human-chosen names always win over auto-generation;
-      // an explicit "Regenerate Title" (`forced`) overrides them.
-      const untitled =
-        originalTitle === DEFAULT_THREAD_TITLE || originalTitle === FALLBACK_THREAD_TITLE;
-      if (!untitled) return { type: 'settled' };
-    }
     await renameThread({ userId, threadId, title: generatedTitle });
     return { type: 'titled', title: generatedTitle };
   } catch (error) {
     logger.error({ err: error }, `Auto-titling failed for thread ${threadId}`);
-    await applyFallbackTitle(userId, threadId, originalTitle);
     return { type: 'failed', code: ErrorCodes.INTERNAL_ERROR, message: errorReason(error) };
   }
 }
