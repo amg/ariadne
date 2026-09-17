@@ -69,6 +69,7 @@ describe('messageService', () => {
         cachedInputTokens: 3,
         cacheWriteTokens: 2,
         reasoningTokens: 1,
+        estimatedReasoningTokens: null,
         costUsd: '0.0000006500',
         finishReason: 'stop',
         latencyMs: 42,

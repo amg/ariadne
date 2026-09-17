@@ -43,7 +43,10 @@ export interface MessageUsageTable {
   /** NULL when the provider doesn't report cache telemetry. */
   cachedInputTokens: number | null;
   cacheWriteTokens: number | null;
+  /** Provider-reported reasoning tokens (DeepInfra reports 0 even when reasoning). */
   reasoningTokens: number | null;
+  /** Our estimate from reasoning content length (NULL when no reasoning). */
+  estimatedReasoningTokens: number | null;
   costUsd: string; // numeric(14,10) — Kysely selects numeric as string
   finishReason: string;
   latencyMs: number | null;

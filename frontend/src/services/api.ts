@@ -24,8 +24,10 @@ export interface MessageUsage {
   providerId: string;
   promptTokens: number;
   completionTokens: number;
-  /** NULL when the provider doesn't report these. */
+  /** Provider-reported reasoning tokens (DeepInfra reports 0 even when reasoning). */
   reasoningTokens: number | null;
+  /** Our estimate from reasoning content length (NULL when no reasoning). */
+  estimatedReasoningTokens: number | null;
   cachedInputTokens: number | null;
   cacheWriteTokens: number | null;
   costUsd: string;

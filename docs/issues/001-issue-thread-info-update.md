@@ -1,0 +1,1 @@
+Issue: thread info doesn't update when the current inferrence finishes, it should.

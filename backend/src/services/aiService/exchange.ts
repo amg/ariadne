@@ -197,6 +197,7 @@ export class ChatExchange {
       finishReason,
       latencyMs: this.latencyMs(),
     };
+    if (this.assistantReasoning) usageArgs.reasoningContent = this.assistantReasoning;
     if (event.providerId !== undefined) usageArgs.providerId = event.providerId;
     await insertMessageUsage(await buildUsageRow(usageArgs));
     return true;

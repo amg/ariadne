@@ -11,6 +11,46 @@ const FINISH_REASON_LABEL: Record<MessageFinishReason, string> = {
 };
 
 /**
+ * Extracts reasoning token display values from usage.
+ */
+function getReasoningDisplay(usage: MessageUsage | null): {
+  value: string | number;
+  label: string;
+  title: string;
+} {
+  if (!usage) {
+    return { value: '—', label: 'reasoning', title: 'Reasoning tokens (provider reported)' };
+  }
+
+  const { estimatedReasoningTokens, reasoningTokens } = usage;
+  const hasEstimate = estimatedReasoningTokens != null;
+  // DeepInfra reports 0 even when reasoning - only trust provider if > 0
+  const hasMeaningfulProviderReport = reasoningTokens !== null && reasoningTokens > 0;
+
+  if (hasEstimate && hasMeaningfulProviderReport) {
+    return {
+      value: estimatedReasoningTokens,
+      label: 'reasoning',
+      title: `Provider reported: ${reasoningTokens} | Our estimate: ${estimatedReasoningTokens}`,
+    };
+  }
+
+  if (hasEstimate) {
+    return {
+      value: estimatedReasoningTokens,
+      label: 'estimated reasoning',
+      title: `Estimated from reasoning content: ${estimatedReasoningTokens} (DeepInfra reports 0)`,
+    };
+  }
+
+  return {
+    value: reasoningTokens ?? '—',
+    label: 'reasoning',
+    title: 'Reasoning tokens (provider reported)',
+  };
+}
+
+/**
  * One metadata line under an assistant message: prompt / completion /
  * cached / reasoning / cost / time / status. While the reply streams,
  * `usage` is null and `status` shows the live state instead.
@@ -30,6 +70,7 @@ export default function MessageMetaRow({
 }) {
   const prompt = usage ? usage.promptTokens - (usage.cachedInputTokens ?? 0) : null;
   const completion = usage ? usage.completionTokens - (usage.reasoningTokens ?? 0) : null;
+  const reasoning = getReasoningDisplay(usage);
 
   return (
     <div
@@ -56,11 +97,9 @@ export default function MessageMetaRow({
         <span className="text-neutral-500"> cached</span>
       </span>
       {/* reasoning */}
-      <span title="Reasoning tokens">
-        <span className="font-bold text-neutral-200">
-          {formatTokens(usage?.reasoningTokens) ?? '—'}
-        </span>
-        <span className="text-neutral-500"> reasoning</span>
+      <span title={reasoning.title}>
+        <span className="font-bold text-neutral-200">{reasoning.value}</span>
+        <span className="text-neutral-500"> {reasoning.label}</span>
       </span>
       {/* cost */}
       <span title="Cost in USD">

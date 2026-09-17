@@ -20,6 +20,7 @@ export type MessageWithUsageRow = Message & {
   usageCachedInputTokens: number | null;
   usageCacheWriteTokens: number | null;
   usageReasoningTokens: number | null;
+  usageEstimatedReasoningTokens: number | null;
   usageCostUsd: string | null;
   usageFinishReason: string | null;
   usageLatencyMs: number | null;
@@ -40,6 +41,7 @@ export async function listMessagesByThread({
       'messageUsage.cachedInputTokens as usageCachedInputTokens',
       'messageUsage.cacheWriteTokens as usageCacheWriteTokens',
       'messageUsage.reasoningTokens as usageReasoningTokens',
+      'messageUsage.estimatedReasoningTokens as usageEstimatedReasoningTokens',
       'messageUsage.costUsd as usageCostUsd',
       'messageUsage.finishReason as usageFinishReason',
       'messageUsage.latencyMs as usageLatencyMs',
