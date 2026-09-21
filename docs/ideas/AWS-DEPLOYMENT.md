@@ -70,70 +70,15 @@ DEFAULT_MODEL=Qwen/Qwen3.5-9B
 AI_STREAM_IDLE_TIMEOUT_MS=30000  # 30 seconds
 ```
 
-## ECS Task Definition Example
+## ECS Task Definition Strategy
 
-```json
-{
-  "family": "chat-backend",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "containerDefinitions": [
-    {
-      "name": "backend",
-      "image": "your-ecr-repo/chat-backend:latest",
-      "portMappings": [
-        {
-          "containerPort": 3001,
-          "protocol": "tcp"
-        }
-      ],
-      "environment": [
-        { "name": "PORT", "value": "3001" },
-        { "name": "HOST", "value": "0.0.0.0" },
-        { "name": "DATABASE_URL", "value": "..." }
-      ],
-      "secrets": [
-        {
-          "name": "DEEPINFRA_API_KEY",
-          "valueFrom": "arn:aws:secretsmanager:region:account:secret:your-secret"
-        }
-      ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/chat-backend",
-          "awslogs-region": "us-east-1",
-          "awslogs-stream-prefix": "ecs"
-        }
-      }
-    }
-  ]
-}
-```
+When defining the ECS task, ensure the container specifies the correct port and uses the AWSVPC network mode. 
 
 ## Frontend SSE Client Optimization
 
-Add connection keepalive and reconnection logic:
-
-```typescript
-// In your frontend SSE client
-const eventSource = new EventSource('/api/threads/:id/chat');
-
-// Handle connection timeouts
-eventSource.onerror = (error) => {
-  console.error('SSE connection error:', error);
-  // Reconnect after delay
-  setTimeout(() => {
-    eventSource.close();
-    // Reinitialize connection
-  }, 3000);
-};
-
+The frontend client should implement connection keepalive and reconnection logic to handle AWS service timeouts.
 // Implement application-level ping/pong if needed
 // (send periodic messages to keep connection alive)
-```
 
 ## CloudFront Configuration (Optional)
 

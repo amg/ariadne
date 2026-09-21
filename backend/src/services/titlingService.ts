@@ -18,7 +18,7 @@ import { renameThread } from './threadService';
  * Titling must never hang the UI: it owns its own time budget, independent
  * of the chat stream's idle timeout. Read from centralized env config.
  * 5s gives the uncapped final shape room for long thinking (~4s) plus the
- * ~1s spent on the cheap first attempt (see backend/specs/deepinfra.md).
+ * ~1s spent on the cheap first attempt.
  */
 function resolveTitlingTimeoutMs(): number {
   return env.AI_TITLING_TIMEOUT_MS ?? 5000;
@@ -27,9 +27,7 @@ function resolveTitlingTimeoutMs(): number {
 /** How much of each message the prompt learns from — keeps prefill cheap. */
 const TITLING_CONTEXT_CHARS = 300;
 /** Titles are a few words; cap output so nothing rambles — but only for the
- *  cheap first attempt. The final attempt is uncapped by design (see
- *  `backend/specs/deepinfra.md`: thinking models consume any cap with
- *  reasoning and answer empty `content` at `finish_reason: length`). */
+ *  cheap first attempt. The final attempt is uncapped by design. */
 const TITLING_MAX_OUTPUT_TOKENS = 40;
 
 /**
@@ -75,8 +73,7 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
   const attempts: Array<Parameters<typeof generateText>[0]> = [
     // Cheapest: bound output and disable the thinking phase — DeepInfra
     // deployments honour this only via `chat_template_kwargs.enable_thinking`
-    // (a top-level `enable_thinking` is accepted but ignored — see
-    // backend/specs/deepinfra.md). Working: ~3s, direct title.
+    // (a top-level `enable_thinking` is accepted but ignored —). Working: ~3s, direct title.
     {
       ...base,
       maxOutputTokens: TITLING_MAX_OUTPUT_TOKENS,

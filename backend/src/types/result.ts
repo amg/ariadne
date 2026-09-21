@@ -1,6 +1,6 @@
 /**
  * Minimal discriminated-union Result used at the provider/service boundary
- * (see features/ai-connector/MVP.md). Failures carry a stable `code` instead
+ *. Failures carry a stable `code` instead
  * of thrown exceptions leaking to the route layer.
  */
 

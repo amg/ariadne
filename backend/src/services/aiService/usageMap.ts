@@ -34,7 +34,7 @@ function countReasoningTokens(reasoningContent: string | undefined): number | nu
 }
 
 /**
- * Reads cache telemetry from the provider's raw usage block (see MVP.md).
+ * Reads cache telemetry from the provider's raw usage block.
  * DeepInfra returns `usage.prompt_tokens_details { cached_tokens, cache_write_tokens }`.
  * The AI SDK normalizes these to inputTokenDetails, but we also check raw for compatibility.
  */

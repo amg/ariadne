@@ -1,7 +1,7 @@
 import { type Kysely, sql } from 'kysely';
 /**
  * Per-assistant-message inference telemetry, linked 1:1 to `messages`
- * (see features/ai-connector/MVP.md — "Schema (migration 002_message_usage)").
+ *").
  *
  * Token columns the provider does not report land as NULL (cache hits/writes
  * and reasoning tokens depend on the model/provider). Columns we always

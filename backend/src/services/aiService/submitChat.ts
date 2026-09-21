@@ -7,6 +7,7 @@ import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
+  NOT_CONFIGURED_MESSAGE,
   SYSTEM_PROMPT,
   createModel,
   isInferenceConfigured,
@@ -15,7 +16,7 @@ import {
 import { ChatExchange, type ChatOutcome } from './exchange';
 
 /**
- * Per-call service boundary (see features/ai-connector/MVP.md). Flow:
+ * Per-call service boundary. Flow:
  *   1. verify thread ownership,
  *   2. resolve the user turn (insert it on `submitChat`, reuse the persisted
  *      last user row on `retryLastExchange`),
@@ -44,9 +45,6 @@ type RetryLastExchangeProps = {
   userId: string;
   threadId: string;
 };
-
-const NOT_CONFIGURED_MESSAGE =
-  'Neither MOCK_AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';
 
 const STREAM_ERROR_MESSAGE = 'The assistant hit an error while generating the reply.';
 

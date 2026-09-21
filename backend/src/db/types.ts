@@ -11,6 +11,7 @@ export interface Database {
   threads: ThreadsTable;
   messages: MessagesTable;
   messageUsage: MessageUsageTable;
+  messageEmbeddings: MessageEmbeddingsTable;
   modelConfigs: ModelConfigsTable;
 }
 
@@ -53,6 +54,21 @@ export interface MessageUsageTable {
   createdAt: Generated<Date>;
 }
 
+/**
+ * Thread-health Turn embeddings keyed 1:1 to the Turn's assistant message
+ *. The row on message N holds
+ * "state of the conversation ending at this message", NOT "this message".
+ * Provenance is `(modelId)` alone — mismatched rows are re-embedded,
+ * never compared.
+ */
+export interface MessageEmbeddingsTable {
+  messageId: string; // UUID FK -> messages.id (1:1, PK, cascade delete)
+  /** pgvector `vector(1024)`; Postgres text form `[0.1,-0.2,…]` (parsed in the query layer). */
+  embedding: string;
+  modelId: string;
+  createdAt: Generated<Date>;
+}
+
 export interface ModelConfigsTable {
   modelId: string; // Primary key
   provider: string;
@@ -78,9 +94,23 @@ export type NewMessageUsage = Insertable<MessageUsageTable>;
 export type ModelConfig = Selectable<ModelConfigsTable>;
 export type NewModelConfig = Insertable<ModelConfigsTable>;
 
+export type MessageEmbeddingStored = Selectable<MessageEmbeddingsTable>;
+
+/** Turn embedding row as returned by `queries/messageEmbeddings` (vector parsed to numbers). */
+export type MessageEmbedding = Omit<MessageEmbeddingStored, 'embedding'> & {
+  embedding: number[];
+};
+
+/** Insert/upsert input for `queries/messageEmbeddings` (vector as numbers). */
+export type NewMessageEmbedding = {
+  messageId: string;
+  embedding: number[];
+  modelId: string;
+};
+
 /**
  * Synthetic + provider finish states persisted on `message_usage`
- * (see MVP.md "Schema"). `interrupted` = user stop; `timeout` = inter-token
+ *. `interrupted` = user stop; `timeout` = inter-token
  * idle guard.
  */
 export const FINISH_REASONS = [

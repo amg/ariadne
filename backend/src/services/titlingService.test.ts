@@ -168,8 +168,7 @@ describe('autoTitleThread', () => {
       expect(outcome).toEqual({ type: 'titled', title: 'Steam Engine Basics' });
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
       // Low-effort contract: bounded output and the thinking phase skipped
-      // via the deployment's actual knob (chat_template_kwargs — see
-      // backend/specs/deepinfra.md).
+      // via the deployment's actual knob (chat_template_kwargs).
       expect(requestBody?.max_tokens).toBe(40);
       expect(requestBody?.chat_template_kwargs).toEqual({ enable_thinking: false });
     } finally {
@@ -267,7 +266,7 @@ describe('autoTitleThread', () => {
       });
       // Empty content climbs the ladder just like a rejected shape: both
       // attempts ran, the last one bare and uncapped by design (caps get
-      // consumed by reasoning — see backend/specs/deepinfra.md).
+      // consumed by reasoning —).
       expect(requests).toHaveLength(2);
       expect((requests[1] as Record<string, unknown>)?.max_tokens).toBeUndefined();
       expect((requests[1] as Record<string, unknown>)?.chat_template_kwargs).toBeUndefined();

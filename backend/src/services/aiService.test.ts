@@ -7,7 +7,9 @@ import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
   type ChatStreamHandle,
+  type EmbedTextData,
   computeCostUsd,
+  embedText,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
@@ -18,7 +20,9 @@ import { readUIMessageStream } from 'ai';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   MOCK_CACHE,
+  MOCK_EMBEDDINGS,
   type MockInferenceServer,
+  buildMockEmbedding,
   startMockInferenceServer,
 } from '../../mock/inferenceServer';
 
@@ -263,6 +267,29 @@ describe('retryLastExchange', () => {
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.id)).toEqual([userMessage.id, handle.assistantMessageId]);
     expect(rows[1]?.content).toBe('Mock reply to: stuck prompt');
+  });
+});
+
+describe('embedText', () => {
+  function assertEmbedSuccess(result: Awaited<ReturnType<typeof embedText>>): EmbedTextData {
+    expect(result.type).toBe('success');
+    if (result.type !== 'success') throw new Error('expected success');
+    return result.data;
+  }
+
+  it('embeds through the mock provider with usage and deterministic vectors', async () => {
+    const text = 'drift window text';
+    const first = assertEmbedSuccess(await embedText(text));
+    const same = assertEmbedSuccess(await embedText(text));
+    const other = assertEmbedSuccess(await embedText('a different topic'));
+
+    // Deterministic per content (the mock seam contract).
+    expect(same).toEqual(first);
+
+    expect(first.embedding).toHaveLength(1024);
+    expect(first.embedding).toEqual(buildMockEmbedding(text));
+    expect(other.embedding).not.toEqual(first.embedding);
+    expect(first.promptTokens).toBe(MOCK_EMBEDDINGS.basePromptTokens + Math.ceil(text.length / 4));
   });
 });
 

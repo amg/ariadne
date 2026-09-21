@@ -11,6 +11,7 @@
     "lint:fix": "biome check --write .",
     "enforce-cn": "node scripts/enforce-cn-rule.mjs",
     "test": "npm run test --workspaces --if-present",
+    "analyze:thread": "npm run analyze:thread --workspace=backend --",
     "build:frontend": "npm run build --workspace=frontend",
     "audit:deps": "knip",
     "audit:boundaries": "depcruise frontend/src backend/src",
