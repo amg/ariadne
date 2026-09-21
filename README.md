@@ -1,12 +1,12 @@
 # Alex Chat Bot
 
-A production-ready, Dockerized chatbot application with real-time streaming, contextual memory, and cost observability.
+A production-ready, Dockerized chatbot application with real-time streaming and cost observability; factual memory (RAG) is decided (ADR 0003) but not yet implemented.
 
 ## Features
 
 - 💬 **Real-time Chat** - Streaming responses via Server-Sent Events (SSE)
 - 🧵 **Multi-thread Support** - Multiple conversation sessions per user
-- 🧠 **Factual Memory** - Long-term memory extraction for cross-session context recall
+- 🧠 **Factual Memory** *(planned — ADR 0003)* - Long-term memory extraction for cross-session context recall; storage foundation landed, pipeline pending
 - 📊 **Cost Observability** - Token usage tracking and cost calculation per message
 - 🐳 **Dockerized** - Easy deployment with Docker Compose
 - ☁️ **Cloud-Ready** - Environment-based configuration for any deployment

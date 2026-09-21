@@ -1,7 +1,8 @@
 # Chat Bot Project Knowledge
 
-A dockerized, single-user chatbot with streaming replies, cross-session
-factual memory, and cost observability. It also carries a standalone thread
+A dockerized, single-user chatbot with streaming replies and cost
+observability plus a planned cross-session factual memory (ADR 0003 is
+accepted, its pipeline unimplemented). It also carries a standalone thread
 health analyzer (topic-drift detection + live gate) decided by ADR 0006.
 
 ## Start Here

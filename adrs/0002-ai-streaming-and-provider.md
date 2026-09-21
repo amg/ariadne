@@ -28,8 +28,9 @@ provider package; we pivot to it.
 
 **Rejected**
 *   `@ai-sdk/openai` with manual base URL — works, but no DeepInfra-specific
-    typing/defaults; kept only as the mock-server escape hatch (`baseURL`
-    override).
+    typing/defaults. The mock-server escape hatch it was held back for ended
+    up riding the provider package itself: `createDeepInfra({ baseURL })`
+    with `MOCK_AI_BASE_URL`, so `@ai-sdk/openai` never entered the code.
 *   DeepInfra's hosted AI-SDK-style endpoint (`AISDKIn`/`AISDKOut` schemas) —
     parallel surface with a slimmer `UsageInfo` (no `estimated_cost`, no cache
     details); our provider package already speaks the OpenAI-compatible wire
