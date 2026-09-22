@@ -15,7 +15,6 @@ import type {
   EmdPairRow,
   EmdRevisitRow,
   GateDivergenceRow,
-  GateReplayParams,
   GateReplayPoint,
   GateReplaySection,
   GateVerdict,
@@ -33,6 +32,7 @@ import { scoreGateReplay } from './threadAnalysis/gateReplay';
 import { createPageHinkley } from './threadAnalysis/pageHinkley';
 import { createRollingStats } from './threadAnalysis/rollingStats';
 import { prospectiveText } from './threadAnalysis/turns';
+import type { JudgingParams } from './threadAnalysis/verdict';
 
 /**
  * gate replay, tested at two levels:
@@ -248,15 +248,14 @@ describe('RollingStats — the immediate channel noise state', () => {
 describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)', () => {
   const four = 4;
 
-  /** Gate params for the seeded scenarios; deterministic by construction. */
-  function scenarioParams(overrides?: Partial<GateReplayParams>): GateReplayParams {
+  /** The flat judging params for the seeded scenarios; deterministic by construction. */
+  function scenarioParams(overrides?: Partial<JudgingParams>): JudgingParams {
     return {
+      segmentThreshold: 0.45,
       lambda: 0.3,
       delta: 0,
       coldStartTurns: 1,
       minSamples: 2,
-      adjustmentRadius: 0.2,
-      sinkhornEpsilon: 0.05,
       // k = 2: the corpus-calibrated z criterion of the immediate channel
       //: fire at two ledger σ above the segment mean.
       immediateK: 2,
@@ -273,9 +272,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     turnVectorByTurn: Map<number, number[]>;
     preGravityByTurn: Map<number, number[] | null>;
     foldBoundaryTurns?: Set<number>;
-    /** The fold's T_segment — the immediate channel's bootstrap criterion. */
-    segmentThreshold?: number;
-    params?: GateReplayParams;
+    judging?: JudgingParams;
   }) {
     const turnNumbers = [...args.prospectiveByTurn.keys()].sort((a, b) => a - b);
     return scoreGateReplay({
@@ -286,8 +283,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
       foldBoundaryTurns: args.foldBoundaryTurns ?? new Set(),
       anchorVector: args.preGravityByTurn.get(1) ?? basis(four, 0),
       userMessageIndexByTurn: new Map(turnNumbers.map((turn) => [turn, 2 * turn - 1])),
-      segmentThreshold: args.segmentThreshold ?? 0.45,
-      params: args.params ?? scenarioParams(),
+      judging: args.judging ?? scenarioParams(),
     });
   }
 
@@ -400,60 +396,6 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     expect(result.points.every((p) => p.fireChannel !== 'slow')).toBe(true);
   });
 
-  it('withholds on a message near V_last even when drift_p spikes (adjustment class)', () => {
-    // Turn 4's Prospective is far from G_live (drift_p = 1) but identical
-    // to the Turn 3 Turn vector (V_last): an adjustment to the current
-    // topic — the dual reference withholds the fire. Earlier Prospectives
-    // stay in-topic so the spike lands exactly at Turn 4.
-    const e0 = basis(four, 0);
-    const e1 = basis(four, 1);
-    const result = run({
-      prospectiveByTurn: new Map([
-        [1, e0],
-        [2, e0],
-        [3, e0],
-        [4, e1], // Turn 4's Prospective: far from G_live, near V_last
-        [5, e0],
-      ]),
-      turnVectorByTurn: new Map([
-        [1, e0],
-        [2, e0],
-        [3, e1], // Turn 3's completed vector becomes V_last at Turn 4
-        [4, e0],
-        [5, e0],
-      ]),
-      preGravityByTurn: new Map<number, number[] | null>([
-        [1, null],
-        [2, e0],
-        [3, e0],
-        [4, e0],
-        [5, e0],
-      ]),
-      foldBoundaryTurns: new Set([4]),
-    });
-
-    expect(result.points.map((p) => p.verdict)).toEqual([
-      'muted',
-      'pass',
-      'pass',
-      'withheld',
-      'pass',
-    ]);
-    // The immediate channel fired on the arriving reading; the dual
-    // reference recognised the adjustment class and withheld.
-    expect(result.points[3]?.fireChannel).toBe('immediate');
-    // A withheld verdict is still a verdict: the ledger is shredded and
-    // the patrol hard-resets — the next segment re-bootstraps on the
-    // constant with an empty ledger of its own.
-    expect(result.points[4]?.immediateThreshold).toBeCloseTo(0.45, 5);
-    expect(result.points[4]?.segmentMu).toBeUndefined();
-    // The corrected patrol re-warms from its first consumed step: the
-    // reseed Turn's own raw reading (0 against the reseeded gravity)
-    // becomes the detector's fresh baseline.
-    expect(result.points[4]?.gateMean).toBeCloseTo(0, 5);
-    expect(result.divergences).toEqual([{ turnNumber: 4, kind: 'gate_withheld_fold_cut' }]);
-  });
-
   it('records gate/fold divergence rows in both disagreement directions', () => {
     // Spike at Turn 4 with NO fold cut → gate_fired_fold_quiet;
     // fold cut at Turn 5 with a flat gate stream → fold_cut_gate_quiet.
@@ -509,7 +451,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
         [2, e0],
         [3, e1],
       ]),
-      params: scenarioParams({ coldStartTurns: 5 }),
+      judging: scenarioParams({ coldStartTurns: 5 }),
     });
 
     expect(result.points.map((p) => p.verdict)).toEqual(['muted', 'muted', 'muted']);
@@ -547,7 +489,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
         [4, e0],
         [5, e1], // the fold reseeded after the Turn 4 boundary
       ]),
-      params: scenarioParams({ lambda: 0.2, minSamples: 2 }),
+      judging: scenarioParams({ lambda: 0.2, minSamples: 2 }),
     });
 
     // The fire lands mid-walk, the moment the sustained 0 → 0.29 rise
@@ -578,15 +520,14 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
    * given distance. Vectors at exactly the wanted separation keep the
    * numbers hand-computable.
    */
-  function replayReadings(readings: Array<number | null>, overrides?: Partial<GateReplayParams>) {
+  function replayReadings(readings: Array<number | null>, overrides?: Partial<JudgingParams>) {
     const turnNumbers = readings.map((_, index) => index + 1);
-    const params: GateReplayParams = {
+    const judging: JudgingParams = {
+      segmentThreshold: 0.45,
       lambda: 0.5,
       delta: 0,
       coldStartTurns: 1,
       minSamples: 2,
-      adjustmentRadius: 0.2,
-      sinkhornEpsilon: 0.05,
       immediateK: 2,
       sigmaFloor: 0.02,
       ...overrides,
@@ -606,8 +547,7 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
       foldBoundaryTurns: new Set(),
       anchorVector: e0,
       userMessageIndexByTurn: new Map(turnNumbers.map((t) => [t, 2 * t - 1])),
-      segmentThreshold: 0.45,
-      params,
+      judging,
     });
   }
 
@@ -831,9 +771,17 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     if (report.type !== 'success') throw new Error('expected success');
     const data = report.data;
 
-    // Params block carries the gate provenance.
-    const expectedParams: GateReplayParams = DEFAULT_GATE_REPLAY_OPTIONS;
-    expect(data.params.gateReplay).toEqual(expectedParams);
+    // Params block: the judging params sit flat on the root (the fold
+    // judges on every run); the gate section keeps only the EMD
+    // provenance.
+    expect(data.params.gateReplay).toEqual(DEFAULT_GATE_REPLAY_OPTIONS);
+    expect(data.params.segmentThreshold).toBe(DEFAULT_ANALYZE_OPTIONS.segmentThreshold);
+    expect(data.params.immediateK).toBe(DEFAULT_ANALYZE_OPTIONS.immediateK);
+    expect(data.params.sigmaFloor).toBe(DEFAULT_ANALYZE_OPTIONS.sigmaFloor);
+    expect(data.params.lambda).toBe(DEFAULT_ANALYZE_OPTIONS.lambda);
+    expect(data.params.delta).toBe(DEFAULT_ANALYZE_OPTIONS.delta);
+    expect(data.params.minSamples).toBe(DEFAULT_ANALYZE_OPTIONS.minSamples);
+    expect(data.params.coldStartTurns).toBe(DEFAULT_ANALYZE_OPTIONS.coldStartTurns);
     const section: GateReplaySection | undefined = data.gateReplay;
     expect(section).toBeDefined();
     if (!section) throw new Error('expected gate section');
@@ -914,7 +862,7 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     expect(
       points
         .filter((p) => p.fireChannel === 'slow')
-        .every((p) => (p.gateRise as number) >= DEFAULT_GATE_REPLAY_OPTIONS.lambda),
+        .every((p) => (p.gateRise as number) >= DEFAULT_ANALYZE_OPTIONS.lambda),
     ).toBe(true);
 
     // EMD structure over the fold's segments.
@@ -1004,23 +952,27 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     ]);
   });
 
-  it('overrides gate params per run and honors a cold start covering the thread', () => {
+  it('overrides judging params flat on the root and honors a cold start covering the thread', () => {
     return (async () => {
       const { threadId } = await seedThread('gate overrides', flipSpecs);
       const report = await analyzeThread(threadId, {
-        gateReplay: { coldStartTurns: 50, lambda: 0.1 },
+        coldStartTurns: 50,
+        lambda: 0.1,
+        gateReplay: true,
       });
       expect(report.type).toBe('success');
       if (report.type !== 'success') throw new Error('expected success');
-      expect(report.data.params.gateReplay).toEqual({
-        ...DEFAULT_GATE_REPLAY_OPTIONS,
-        coldStartTurns: 50,
-        lambda: 0.1,
-      });
+      expect(report.data.params.lambda).toBe(0.1);
+      expect(report.data.params.coldStartTurns).toBe(50);
+      expect(report.data.params.gateReplay).toEqual(DEFAULT_GATE_REPLAY_OPTIONS);
       // Cold start beyond the thread: every verdict muted, no fires, no
-      // counsel — a quiet gate is the safe failure mode.
+      // prospective counsel rows — a quiet gate is the safe failure mode.
+      // (The fold shares the mute, so its own counsel rows over the
+      // flat-open thread also stay silent here.)
       expect(report.data.gateReplay?.points.every((p) => p.verdict === 'muted')).toBe(true);
       expect(report.data.gateReplay?.anchorCounsel).toEqual([]);
+      expect(report.data.segments).toHaveLength(1);
+      expect(report.data.driftSeries.every((p) => !p.isBoundary)).toBe(true);
     })();
   });
 
@@ -1070,8 +1022,8 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     // Section + tables + params provenance.
     expect(html).toContain('Drift gate — pretend replay');
     expect(html).toContain('EMD revisit matrix');
-    expect(html).toContain('Gate lambda (λ, drift units)');
-    expect(html).toContain('Gate cold start (K_gate)');
+    expect(html).toContain('Slow patrol λ (drift units)');
+    expect(html).toContain('Cold start (K_gate)');
     expect(html).toContain('verdict-muted');
     // The prospective drift series joins the chart; every muted point has
     // no gate-fire mark.
@@ -1100,7 +1052,6 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     expect(html).toContain(
       'drift_p — the arrival reading the gate judged (rewrite when one landed, raw fallback; thin)',
     );
-    expect(html).toContain('Gate withheld (hollow dot)');
     // Toggle groups ship scoped to their own chart block.
     expect(html).toContain('data-toggle="prospective"');
     expect(html).toContain('data-toggle="fires"');

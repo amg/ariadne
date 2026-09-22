@@ -21,11 +21,65 @@ export type ExpansionMode = 'off' | 'heuristic' | 'always';
 export const DEFAULT_EXPANSION_MODE: ExpansionMode = 'heuristic';
 
 export interface ThreadReportParams {
-  /** Segment-drift threshold for Boundary turns. */
+  /**
+   * T_segment: the two-channel verdict's bootstrap prior. While a
+   * segment's noise ledger holds fewer than 2 accepted members, the flat
+   * constant adjudicates arrivals; judged arrivals otherwise clear the
+   * segment's own learned level (μ + k·max(σ, σ_floor)). Both flows —
+   * the offline fold and the gate replay — judge with it identically.
+   */
   segmentThreshold: number;
+  /**
+   * k_immediate: the per-message verdict fires at z ≥ k — the arrival
+   * reading's distance from the CURRENT SEGMENT'S ledger mean, in units
+   * of max(σ, σ_floor). Algebraically the same call as exceeding
+   * μ + k·max(σ, σ_floor), calibrated so that two standard deviations
+   * means the same thing on any well-behaved segment. Bootstraps to the
+   * constant T_segment while the ledger holds fewer than 2 accepted
+   * members.
+   */
+  immediateK: number;
+  /**
+   * σ_floor: the divisor floor under the ledger's sample σ — a perfectly
+   * calm segment (spread near zero) must not read every wobble as a
+   * breakout. Set from the corpus continuation-noise magnitude (~0.02),
+   * not guesswork.
+   */
+  sigmaFloor: number;
+  /**
+   * λ: the slow patrol's PageHinkley fire budget, in DRIFT UNITS — the
+   * patrol consumes the RAW drift readings themselves (the same
+   * verdict-lane signal the immediate channel judges), accumulated
+   * against the detector's own running mean. Fires once the accumulated
+   * rise reaches λ. Ships at 0.5 (pinned against the purpose-built
+   * slow-drift corpus).
+   */
+  lambda: number;
+  /**
+   * δ: the slow patrol's PageHinkley allowance, in drift units — raw
+   * steps below it are noise, not rise. Measured inert on the corpus, so
+   * δ ≈ 0 earns its seat without a sweep.
+   */
+  delta: number;
+  /**
+   * Minimum PageHinkley (slow-channel) samples before any fire is
+   * admitted. The immediate channel's floor is separate: the z criterion
+   * exists only once the segment ledger holds 2 accepted members; the
+   * constant T_segment bootstraps below that.
+   */
+  minSamples: number;
+  /**
+   * K_gate: completed Turns during which the analyzer mutes (no
+   * verdicts), pinning the fold's first Turn as inherently unjudgeable
+   * — no Gravity point exists to measure against yet. Turn 2 onward is
+   * judged, with the segment ledger bootstrapping on the flat constant
+   * until two accepted members exist. The knob survives for calibration
+   * runs that want to mute further into the opening segment.
+   */
+  coldStartTurns: number;
   /** Embedding model the Turn vectors were produced with (provenance). */
   embeddingModelId: string;
-  /** Gate-replay params; present only on `--gate-replay` runs. */
+  /** Gate-replay section params; present only on gate-replay runs. */
   gateReplay?: GateReplayParams;
   /** Expansion tier provenance; present only when expansion ran. */
   expansion?: {
@@ -41,68 +95,13 @@ export interface ThreadReportParams {
 }
 
 /**
- * Drift-gate replay params — provenance only, every value overridable per
- * run.
+ * Gate-replay section params — the judging params moved flat onto the
+ * report root because the fold judges on every run; the replay section
+ * keeps only what stays replay-section-only: the EMD regularization.
  */
 export interface GateReplayParams {
-  /**
-   * λ: the slow patrol's PageHinkley fire
-   * budget, in DRIFT UNITS — the patrol consumes the RAW drift readings
-   * themselves (the same verdict-lane signal the immediate channel
-   * judges), accumulated against the detector's own running mean. Fires
-   * once the accumulated rise reaches λ. Ships at 0.5, its pre-010
-   * meaning restored (the z-unit λ_z of the errored z-standardized
-   * patrol is retired with it).
-   */
-  lambda: number;
-  /**
-   * δ: the slow patrol's PageHinkley allowance,
-   * in drift units — raw steps below it are noise, not rise. Measured
-   * inert on the corpus, so δ ≈ 0 earns its seat without a sweep.
-   */
-  delta: number;
-  /**
-   * K_gate: completed Turns during which the gate mutes (no verdicts).
-   * Shipped at 1: only Turn 1 is inherently unjudgeable (no Gravity
-   * point exists to measure against yet); Turn 2 onward is judged, with
-   * the segment ledger bootstrapping on the flat constant until two
-   * accepted members exist. The knob survives for calibration runs that
-   * want to mute further into the opening segment.
-   */
-  coldStartTurns: number;
-  /**
-   * Minimum PageHinkley (slow-channel) samples before any fire is
-   * admitted. The immediate channel's floor is separate: the z criterion
-   * exists only once the segment ledger holds 2 accepted members; the
-   * constant T_segment bootstraps below that.
-   */
-  minSamples: number;
-  /**
-   * T_adjust: dual-reference tolerance — a Prospective within this cosine
-   * distance of V_last (the last completed Turn vector) withholds a fire
-   * (adjustment-message class).
-   */
-  adjustmentRadius: number;
   /** Sinkhorn entropic regularization for the EMD revisit matrix. */
   sinkhornEpsilon: number;
-  /**
-   * k_immediate: the per-message verdict
-   * fires at z ≥ k — the arrival reading's distance from the CURRENT
-   * SEGMENT'S ledger mean, in units of max(σ, σ_floor). Algebraically
-   * the same call as exceeding μ + k·max(σ, σ_floor), calibrated so that
-   * two standard deviations means the same thing on any well-behaved
-   * segment. Bootstraps to the constant T_segment while the ledger holds
-   * fewer than 2 accepted members. Default k = 2 per the design; the
-   * as-calibrated value is recorded historically.
-   */
-  immediateK: number;
-  /**
-   * σ_floor: the divisor floor under the ledger's sample σ
-   * — a perfectly calm segment (spread near zero) must not read every
-   * wobble as a breakout. Set from the corpus continuation-noise
-   * magnitude (~0.02), not guesswork.
-   */
-  sigmaFloor: number;
 }
 
 export interface ThreadReportTotals {
@@ -142,8 +141,53 @@ export interface DriftPoint {
   segmentDrift: number | null;
   /** clamp(Segment drift, 0, 1) — the single Drift score signal. */
   driftScore: number;
+  /**
+   * Boundary turns fire from EITHER channel against the thread's own
+   * state: the flat constant survives only as the bootstrap prior.
+   */
   isBoundary: boolean;
-  boundaryReason: 'segment' | null;
+  /** Which channel cut the segment here; null when the Turn joined. */
+  boundaryReason: 'segment' | 'slow' | null;
+  /**
+   * The immediate criterion this Turn was judged against — the segment
+   * ledger's μ + k·max(σ, σ_floor) once the ledger holds 2 accepted
+   * members, the constant T_segment below that (the constant survives
+   * ONLY as this bootstrap prior). The z ≥ k verdict is algebraically
+   * identical to exceeding this level. Judge first, fold second — the
+   * reading never enters its own criterion. Absent on muted Turns.
+   */
+  immediateThreshold?: number;
+  /**
+   * The immediate channel's z score at this judgment: (reading − μ) /
+   * max(σ, σ_floor) against the segment ledger as it stood BEFORE this
+   * reading. Absent while the criterion bootstraps to the constant:
+   * there is no ledger to standardize against yet. Pairs with
+   * `immediateThreshold`.
+   */
+  immediateZ?: number;
+  /**
+   * The segment ledger's mean (μ) and standard deviation (σ) as it stood
+   * at this judgment. Absent on muted Turns; σ null while the ledger
+   * holds fewer than 2 accepted members.
+   */
+  segmentMu?: number;
+  segmentSigma?: number | null;
+  /**
+   * Which channel produced the fire on this Turn: immediate — the
+   * complete-turn reading itself cleared the segment's noise level (the
+   * sharp-flip class); slow — the accumulated PageHinkley rise reached λ
+   * (the crawling class). Absent on everything else.
+   */
+  fireChannel?: 'immediate' | 'slow';
+  /**
+   * The slow patrol's own baseline and accumulated rise at this sample,
+   * in drift units, recorded only when the detector actually consumed
+   * this Turn's reading as a step: muted Turns carry nothing and an
+   * immediate-channel fire skips the detector (a spike draws no
+   * sustained rise).
+   */
+  gateMean?: number;
+  gateRise?: number;
 }
 
 export interface TopicSegment {
@@ -245,18 +289,18 @@ export interface GateReplayPoint {
    */
   immediateThreshold?: number;
   /**
-   * The segment ledger's mean (μ) and standard deviation (σ) as it stood at this judgment. Absent on muted Turns and legacy reports. The
-   * chart's Gate baseline series draws these.
+   * The segment ledger's mean (μ) and standard deviation (σ) as it stood
+   * at this judgment. Absent on muted Turns and legacy reports; the z
+   * panel's tooltip carries them.
    */
   segmentMu?: number;
   segmentSigma?: number | null;
   /**
    * Which channel produced the fire on this Turn: `immediate` — the
-   * arrival reading itself cleared the thread's noise level (the sharp-
-   * flip class, the architectural decision); `slow` — the accumulated PageHinkley rise
-   * reached λ (the crawling class). Present on `withheld` Turns too: a
-   * suppressed fire still names the channel that produced it. Absent on
-   * everything else.
+   * arrival reading itself cleared the segment's noise level (the sharp-
+   * flip class, the architectural decision); `slow` — the accumulated
+   * Page–Hinkley rise reached λ (the crawling class). Absent on
+   * everything but fires.
    */
   fireChannel?: 'immediate' | 'slow';
   verdict: GateVerdict;
@@ -264,20 +308,20 @@ export interface GateReplayPoint {
 
 /**
  * The gate's verdict on one incoming user message. `muted` inside the
- * cold start; `pass` when nothing accumulates; `withheld` when the fire
- * was suppressed by V_last nearness (adjustment class); `fire` — "had
- * this been live, the gate would have paused before this Turn".
+ * cold start; `pass` when nothing accumulates; `fire` — "had this been
+ * live, the gate would have paused before this Turn".
  */
-export type GateVerdict = 'muted' | 'pass' | 'withheld' | 'fire';
+export type GateVerdict = 'muted' | 'pass' | 'fire';
 
 /**
  * One gate/fold disagreement — the calibration data the replay exists to
- * produce: PageHinkley confirms late by construction, divergence rows are
- * expected output, not failures.
+ * produce: both flows run identical judging logic, so a divergence row
+ * can only come from the reading difference (user-only vs complete
+ * exchange). Expected output, not failures.
  */
 export interface GateDivergenceRow {
   turnNumber: number;
-  kind: 'gate_fired_fold_quiet' | 'fold_cut_gate_quiet' | 'gate_withheld_fold_cut';
+  kind: 'gate_fired_fold_quiet' | 'fold_cut_gate_quiet';
 }
 
 /** The Anchor-wander counsel: advisory rows, never a classification vote. */
@@ -339,7 +383,16 @@ export interface ThreadReport {
   /** One point per Turn, from Turn 1 onward, scored against the Anchor. */
   driftSeries: DriftPoint[];
   /** Provenance only, never the vector itself. */
-  anchor: { builtFromTurns: [number, number] };
+  anchor: {
+    builtFromTurns: [number, number];
+    /**
+     * Anchor-wander counsel (fold-based): Page–Hinkley over the complete
+     * turns' anchor distances. Advisory rows only — a sustained rise in
+     * the wander series; never a cut, never a classification vote. Fold-
+     * only reports carry the slow signal through these.
+     */
+    counsel: AnchorCounselRow[];
+  };
   /** Consecutive Turn runs between Boundary turns. */
   segments: TopicSegment[];
   /** Gate-replay results; present only on `--gate-replay` runs. */
@@ -347,8 +400,18 @@ export interface ThreadReport {
 }
 
 export interface AnalyzeThreadOptions {
-  /** Boundary turns fire on Segment drift strictly above it. */
+  /**
+   * The two-channel judging params — flat, overridable per run exactly
+   * like the fold's chartered defaults (the fold judges with them on
+   * every run; the gate replay inherits the same values).
+   */
   segmentThreshold?: number;
+  immediateK?: number;
+  sigmaFloor?: number;
+  lambda?: number;
+  delta?: number;
+  minSamples?: number;
+  coldStartTurns?: number;
   /**
    * Progress hook for the embedding phase: fires
    * immediately before each embed call with the Turn's 1-based position
@@ -382,46 +445,32 @@ export interface AnalyzeThreadOptions {
 }
 
 /** Per-run overrides over `DEFAULT_GATE_REPLAY_OPTIONS`. */
-export type GateReplayOptionOverrides = Partial<
-  Pick<
-    GateReplayParams,
-    | 'lambda'
-    | 'delta'
-    | 'coldStartTurns'
-    | 'minSamples'
-    | 'adjustmentRadius'
-    | 'sinkhornEpsilon'
-    | 'immediateK'
-    | 'sigmaFloor'
-  >
->;
+export type GateReplayOptionOverrides = Partial<Pick<GateReplayParams, 'sinkhornEpsilon'>>;
 
 /**
- * Defaults —
- * deliberately overridable per run; the analyzer exists to calibrate
- * them.
+ * The flat judging defaults — deliberately overridable per run; the
+ * analyzer exists to calibrate them. Both drift flows judge with these:
+ * the immediate channel fires at z ≥ 2 against the current segment's
+ * μ/max(σ, σ_floor) (the constant T_segment bootstraps while the ledger
+ * holds < 2 accepted members); the slow patrol rides the RAW drift
+ * readings with λ/δ in drift units (λ pinned at 0.5 against the
+ * purpose-built slow-drift corpus).
  */
 export const DEFAULT_ANALYZE_OPTIONS = {
   segmentThreshold: 0.52,
+  immediateK: 2,
+  sigmaFloor: 0.02,
+  lambda: 0.5,
+  delta: 0,
+  minSamples: 3,
+  coldStartTurns: 1,
 } as const;
 
 /**
- * Gate-replay defaults — calibration numbers exactly like K and
- * overridable per run, final values recorded historically
- * with evidence from the replay sessions. The verdict was moved
- * onto the segment ledger: the immediate channel fires at z ≥ 2 against
- * the current segment's μ/max(σ, σ_floor) (constant T_segment bootstraps
- * while the ledger holds < 2 accepted members); the correction
- * keeps the slow patrol on the RAW drift readings with λ/δ in drift
- * units (λ pinned at 0.5 against the purpose-built slow-drift corpus).
+ * Gate-replay_SECTION defaults — everything else the replay needs moved
+ * flat onto `DEFAULT_ANALYZE_OPTIONS` because the fold judges on every
+ * run.
  */
 export const DEFAULT_GATE_REPLAY_OPTIONS: GateReplayParams = {
-  lambda: 0.5,
-  delta: 0,
-  coldStartTurns: 1,
-  minSamples: 3,
-  adjustmentRadius: 0.35,
   sinkhornEpsilon: 0.05,
-  immediateK: 2,
-  sigmaFloor: 0.02,
 };

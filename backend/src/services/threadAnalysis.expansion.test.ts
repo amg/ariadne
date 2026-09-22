@@ -3,8 +3,7 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
-  DEFAULT_GATE_REPLAY_OPTIONS,
-  type GateReplayParams,
+  DEFAULT_ANALYZE_OPTIONS,
   analyzeThread,
   renderThreadReport,
 } from '@services/threadAnalysis';
@@ -29,6 +28,7 @@ import {
 } from './threadAnalysis/expansion';
 import { scoreGateReplay } from './threadAnalysis/gateReplay';
 import { type Turn, prospectiveText } from './threadAnalysis/turns';
+import type { JudgingParams } from './threadAnalysis/verdict';
 
 /**
  * The expansion tier, tested at two levels: the pure policy (anaphora heuristic, candidate
@@ -229,7 +229,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     return vector;
   }
 
-  const params: GateReplayParams = { ...DEFAULT_GATE_REPLAY_OPTIONS, coldStartTurns: 1 };
+  const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS, segmentThreshold: 0.45 };
 
   it('verdicts ride the rewritten readings; the raw reading is the fallback', () => {
     const dim = 8;
@@ -256,10 +256,9 @@ describe('scoreGateReplay — the composite verdict signal', () => {
         [4, 'rewritten four'],
       ]),
       expansionNoteByTurn: { 5: 'skip_unusable_rewrite' },
-      // Stored Turn vectors: flat until the pivot lands. V_last is still
-      // the OLD topic when the pivot arrives, so at the pivot itself the
-      // dual reference cannot withhold the immediate verdict (after the
-      // pivot, completed Turns sit on the new topic for later Turns).
+      // Stored Turn vectors: flat until the pivot lands — they carry the
+      // fold's membership, not the verdict (the replay judges the
+      // composite prospective reading alone).
       turnVectorByTurn: new Map([
         [1, flat],
         [2, flat],
@@ -274,8 +273,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       foldBoundaryTurns: new Set(),
       anchorVector: flat,
       userMessageIndexByTurn: new Map(turnNumbers.map((n) => [n, n * 2 - 1])),
-      segmentThreshold: 0.45,
-      params,
+      judging,
     });
     const points = scoring.points;
 
@@ -295,16 +293,10 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     // channel decides at the arrival Turn. The verdict
     // shreds the ledger, so the replay re-bootstraps on T_segment —
     // and Turn 5's raw fallback then reads 1.0 against that constant
-    // and fires again. Its
-    // composite sits exactly on V_last — the completed pivot Turn —
-    // so the dual reference withholds it as the adjustment class.
-    expect(points.map((point) => point.verdict)).toEqual([
-      'muted',
-      'pass',
-      'fire',
-      'pass',
-      'withheld',
-    ]);
+    // and fires again: the adjustment class gets no geometric
+    // second-guess — its treatment is uniform (the expansion tier), and
+    // an arriving pivot is a pivot whatever it sits near.
+    expect(points.map((point) => point.verdict)).toEqual(['muted', 'pass', 'fire', 'pass', 'fire']);
     expect(points[2]?.fireChannel).toBe('immediate');
     expect(points[4]?.fireChannel).toBe('immediate');
     expect(points[4]?.immediateThreshold).toBeCloseTo(0.45, 5); // re-bootstrapped
@@ -313,8 +305,14 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     expect(points[4]?.segmentMu).toBeCloseTo(0, 5);
     expect(points[4]?.segmentSigma).toBeNull();
     // The fold is static in this synthetic (no cuts), so the pivot's
-    // fire records the honest disagreement row: gate fired, fold quiet.
-    expect(scoring.divergences).toEqual([{ turnNumber: 3, kind: 'gate_fired_fold_quiet' }]);
+    // fire AND the raw-fallback re-fire both record the honest
+    // disagreement row: gate fired, fold quiet. The second row is only
+    // interesting now — the adjustment class is treated uniformly, so
+    // it is just an arriving pivot like any other.
+    expect(scoring.divergences).toEqual([
+      { turnNumber: 3, kind: 'gate_fired_fold_quiet' },
+      { turnNumber: 5, kind: 'gate_fired_fold_quiet' },
+    ]);
   });
 
   it('no expansion maps → byte-stable original shape: raw readings, no annotations', () => {
@@ -345,8 +343,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
         [2, 3],
         [3, 5],
       ]),
-      segmentThreshold: 0.45,
-      params,
+      judging,
     });
     for (const point of scoring.points) {
       expect('driftPSource' in point).toBe(false);
@@ -379,8 +376,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       foldBoundaryTurns: new Set(),
       anchorVector: flat,
       userMessageIndexByTurn: new Map(turnNumbers.map((n) => [n, n * 2 - 1])),
-      segmentThreshold: 0.45,
-      params,
+      judging,
     });
 
     // Turn 1 is muted (no Gravity point): the mute explains the gap.

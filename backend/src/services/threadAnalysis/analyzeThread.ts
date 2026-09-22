@@ -47,6 +47,7 @@ import {
   type GateReplaySection,
   type ThreadReport,
 } from './types';
+import type { JudgingParams } from './verdict';
 
 /**
  * Analyzes a thread for conversational drift by scoring topic segments and boundaries.
@@ -65,9 +66,7 @@ export async function analyzeThread(
   threadId: string,
   options?: AnalyzeThreadOptions,
 ): Promise<Result<ThreadReport>> {
-  const opts = {
-    segmentThreshold: options?.segmentThreshold ?? DEFAULT_ANALYZE_OPTIONS.segmentThreshold,
-  };
+  const opts = resolveJudgingParams(options);
   const gateParams = resolveGateParams(options?.gateReplay);
   const expansionMode: ExpansionMode = options?.expansion ?? DEFAULT_EXPANSION_MODE;
 
@@ -130,7 +129,7 @@ export async function analyzeThread(
     turns,
     vectorByMessageId,
     messageIndexByMessageId,
-    segmentThreshold: opts.segmentThreshold,
+    judging: opts,
   });
 
   const costProfile = buildCostProfile(messages);
@@ -142,6 +141,12 @@ export async function analyzeThread(
     generatedAt: new Date().toISOString(),
     params: {
       segmentThreshold: opts.segmentThreshold,
+      immediateK: opts.immediateK,
+      sigmaFloor: opts.sigmaFloor,
+      lambda: opts.lambda,
+      delta: opts.delta,
+      minSamples: opts.minSamples,
+      coldStartTurns: opts.coldStartTurns,
       embeddingModelId: EMBEDDING_MODEL_ID,
     },
     totals: {
@@ -154,7 +159,7 @@ export async function analyzeThread(
     },
     costProfile,
     driftSeries: drift.driftSeries,
-    anchor: { builtFromTurns: drift.anchorBuiltFromTurns },
+    anchor: { builtFromTurns: drift.anchorBuiltFromTurns, counsel: drift.counsel },
     segments: drift.segments,
   };
 
@@ -168,7 +173,7 @@ export async function analyzeThread(
     messageIndexByMessageId: messageIndexByMessageId,
     gateParams,
     expansionMode,
-    segmentThreshold: opts.segmentThreshold,
+    judging: opts,
     onProspectiveEmbedded: options?.onProspectiveEmbedded,
     onExpansionEmbedded: options?.onExpansionEmbedded,
   });
@@ -205,6 +210,21 @@ function recordGateSection(
   report.totals.judgeCostUsd = data.judgeCostUsd;
 }
 
+/**
+ * The flat judging params for the run: admission defaults, overridden
+ * field-by-field. Overrides apply to the run's entire judgment —
+ * offline fold and gate play read the same complete set.
+ */
+function resolveJudgingParams(options?: AnalyzeThreadOptions): JudgingParams {
+  const opts: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
+  if (!options) return opts;
+  for (const key of Object.keys(DEFAULT_ANALYZE_OPTIONS) as Array<keyof JudgingParams>) {
+    const override = options[key];
+    if (override !== undefined) opts[key] = override;
+  }
+  return opts;
+}
+
 /** `gateReplay: true` runs defaults; an object overrides individual params. */
 function resolveGateParams(
   gateReplay: AnalyzeThreadOptions['gateReplay'],
@@ -213,7 +233,6 @@ function resolveGateParams(
   if (gateReplay === true) return { ...DEFAULT_GATE_REPLAY_OPTIONS };
   return { ...DEFAULT_GATE_REPLAY_OPTIONS, ...gateReplay };
 }
-
 interface BuildGateReplaySectionProps {
   turns: Turn[];
   blocks: ReturnType<typeof buildTurnBlocks>;
@@ -222,8 +241,8 @@ interface BuildGateReplaySectionProps {
   messageIndexByMessageId: Map<string, number>;
   gateParams: GateReplayParams;
   expansionMode: ExpansionMode;
-  /** The fold's T_segment — the immediate channel's bootstrap criterion. */
-  segmentThreshold: number;
+  /** The flat judging params — the shared two-channel verdict's full set. */
+  judging: JudgingParams;
   onProspectiveEmbedded?: ((turnNumber: number, totalTurns: number) => void) | undefined;
   onExpansionEmbedded?: ((position: number, totalCandidates: number) => void) | undefined;
 }
@@ -363,7 +382,7 @@ async function buildGateReplaySection({
   messageIndexByMessageId,
   gateParams,
   expansionMode,
-  segmentThreshold,
+  judging,
   onProspectiveEmbedded,
   onExpansionEmbedded,
 }: BuildGateReplaySectionProps): Promise<
@@ -449,8 +468,7 @@ async function buildGateReplaySection({
     userMessageIndexByTurn: new Map(
       turns.map((turn) => [turn.turnNumber, messageIndexByMessageId.get(turn.userMessage.id) ?? 0]),
     ),
-    segmentThreshold,
-    params: gateParams,
+    judging,
   });
 
   const emd = buildEmdMatrix({

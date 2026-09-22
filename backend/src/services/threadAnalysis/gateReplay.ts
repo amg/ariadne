@@ -1,13 +1,15 @@
 import { cosineDistance } from './drift';
-import { createPageHinkley } from './pageHinkley';
-import { createRollingStats } from './rollingStats';
-import type {
-  AnchorCounselRow,
-  GateDivergenceRow,
-  GateReplayParams,
-  GateReplayPoint,
-  GateVerdict,
-} from './types';
+import { type PageHinkleyDetector, createPageHinkley } from './pageHinkley';
+import type { AnchorCounselRow, GateDivergenceRow, GateReplayPoint, GateVerdict } from './types';
+import {
+  type JudgingParams,
+  type Judgment,
+  type VerdictState,
+  createVerdictState,
+  judgeAndFold,
+  mutedArrival,
+  patrolOptions,
+} from './verdict';
 
 /**
  * The pretend-replay logic for the two-channel
@@ -18,29 +20,19 @@ import type {
  * then fold the Turn itself through the same 006 rules
  * (preGravityByTurn carries that trajectory).
  *
- * The arrival reading is standardized
- * against the CURRENT SEGMENT'S own ledger — the mean μ and sample σ of
- * the fold-time readings of its ACCEPTED members, judge-first-fold-
- * second — and fires at z ≥ k_immediate. A verdict (either channel)
- * shrinks the ledger and hard-resets the slow accumulator without
- * consuming the spike: the rejected reading seeds the new segment's
- * geometry (the fold re-seeds Gravity) but never enters any ledger —
- * ratchet guard; the next segment's ledger starts empty and bootstraps
- * on the constant T_segment until two accepted members exist (the
- * constant survives ONLY as this prior). Slow channel: otherwise the RAW drift reading itself — the same
- * verdict-lane signal the immediate channel judges (the expansion
- * tier's rewritten user message when one landed, the raw arrival-time
- * text as fallback — the task) — feeds a per-Thread PageHinkley,
- * accumulated against the detector's OWN running mean — no ledger
- * standardization (the z-standardized original was a design error: the
- * chasing ledger μ erased a gentle wander from the signal, and the σ
- * floor amplified reading noise into it). It speaks only while the
- * immediate channel stays silent — the crawling class. The dual
- * reference withholds fires whose Prospective still sits near V_last
- * (adjustment-message class). Advisory only: the fold stays
- * authoritative on cuts, and divergence rows ("gate fired / fold found
- * nothing" and the reverse) are expected output — they are the
- * calibration data.
+ * The judging itself is the SHARED verdict core (`verdict.ts`) — the
+ * same code the offline fold runs. The only replay-specific input is the
+ * reading: the COMPOSITE PROSPECTIVE reading (the expansion tier's
+ * rewritten user message when one landed, the raw arrival-time text as
+ * fallback). The core's mechanics live there: per-segment ledger, z ≥
+ * k_immediate with T_segment as bootstrap prior, Page–Hinkley over the
+ * raw readings, verdict shreds the ledger, immediate fires reset the
+ * patrol without consuming the spike, rejected arrivals never enter any
+ * ledger. Advisory only: the fold stays authoritative on cuts, and
+ * divergence rows ("gate fired / fold found nothing" and the reverse)
+ * are expected output — with identical judging logic on both sides they
+ * can only come from the reading difference (user-only vs complete
+ * exchange), which is precisely the calibration data.
  */
 
 export interface ScoreGateReplayProps {
@@ -74,14 +66,12 @@ export interface ScoreGateReplayProps {
   /** 1-based message numbers of the incoming user Messages. */
   userMessageIndexByTurn: Map<number, number>;
   /**
-   * T_segment: the fold's charter constant — the immediate channel's
-   * bootstrap criterion while the current segment's ledger is still
-   * warming up (fewer than 2 accepted members), and the only criterion
-   * the first segment's arrivals see under the cold start. The constant
-   * survives in the live gate ONLY as this prior.
+   * The flat judging params — the shared two-channel verdict's full set,
+   * identical to the fold's. T_segment survives in here ONLY as the
+   * immediate channel's bootstrap prior while the current segment's
+   * ledger warms up (fewer than 2 accepted members).
    */
-  segmentThreshold: number;
-  params: GateReplayParams;
+  judging: JudgingParams;
 }
 
 export interface GateReplayScoring {
@@ -90,56 +80,32 @@ export interface GateReplayScoring {
   anchorCounsel: AnchorCounselRow[];
 }
 
-/** PageHinkley options come straight from the gate params. */
-function detectors(params: GateReplayParams) {
-  const options = { lambda: params.lambda, delta: params.delta, minSamples: params.minSamples };
-  return {
-    gate: createPageHinkley(options),
-    // The Anchor-wander counsel reuses the same detector over the
-    // prospective anchor-distance stream: anchor distance IS the
-    // drift-trend equivalent — no new params, no vote.
-    anchorCounsel: createPageHinkley(options),
-  };
-}
-
-/** The verdict for one sampled Turn once the detectors have spoken. */
-function verdictFor(args: {
-  muted: boolean;
-  fired: boolean;
-  nearLastTurn: boolean;
-}): GateVerdict {
+/** Verdict for one sampled Turn once the shared core has spoken. */
+function verdictFor(args: { muted: boolean; fired: boolean }): GateVerdict {
   if (args.muted) return 'muted';
-  if (!args.fired) return 'pass';
-  return args.nearLastTurn ? 'withheld' : 'fire';
+  return args.fired ? 'fire' : 'pass';
 }
 
 /** Gate-vs-fold disagreement rows: the replay's calibration output. */
 function divergenceFor(turnNumber: number, verdict: GateVerdict, foldCut: boolean) {
   if (verdict === 'fire' && !foldCut) return { turnNumber, kind: 'gate_fired_fold_quiet' } as const;
-  if (foldCut && verdict === 'withheld')
-    return { turnNumber, kind: 'gate_withheld_fold_cut' } as const;
   if (foldCut && verdict !== 'fire') return { turnNumber, kind: 'fold_cut_gate_quiet' } as const;
   return null;
 }
 
 /** Mutable replay state threaded through the loop, one Turn at a time. */
 interface ReplayState {
-  gate: ReturnType<typeof createPageHinkley>;
-  counsel: ReturnType<typeof createPageHinkley>;
+  /** The shared two-channel verdict state (ledger + slow patrol). */
+  verdict: VerdictState;
   /**
-   * The CURRENT segment's noise ledger: rolling mean and
-   * sample spread of the fold-time readings of accepted members only,
-   * folded only AFTER the reading was judged and the verdict passed.
-   * A verdict (either channel) shrinks it wholesale — the rejected
-   * arrival that starts the next segment seeds its geometry but never
-   * enters any ledger, so the new ledger starts empty.
+   * The Anchor-wander counsel detector: the same PageHinkley shape over
+   * the prospective anchor-distance stream — anchor distance IS the
+   * drift-trend equivalent. Advisory only: no new params, no vote.
    */
-  ledger: ReturnType<typeof createRollingStats>;
+  counsel: PageHinkleyDetector;
   points: GateReplayPoint[];
   divergences: GateDivergenceRow[];
   counselRows: AnchorCounselRow[];
-  /** V_last: the last completed Turn's stored vector. */
-  lastTurnVector: number[] | null;
   completedTurns: number;
 }
 
@@ -259,12 +225,9 @@ function annotateExpansion(
  * the sample: muted Turns carry nothing and an immediate-channel fire
  * skips the accumulator (a spike draws no sustained rise).
  */
-function attachGateReadings(
-  point: GateReplayPoint,
-  gate: ReturnType<typeof createPageHinkley>,
-): void {
-  const mean = gate.lastMean;
-  const rise = gate.lastRise;
+function attachGateReadings(point: GateReplayPoint, verdict: VerdictState): void {
+  const mean = verdict.patrol.lastMean;
+  const rise = verdict.patrol.lastRise;
   if (mean !== null && rise !== null) {
     point.gateMean = mean;
     point.gateRise = rise;
@@ -272,126 +235,10 @@ function attachGateReadings(
 }
 
 /**
- * The immediate channel's bookkeeping floor: a segment with
- * fewer than 2 accepted members has no true spread yet, so the constant
- * T_segment adjudicates until then — the constant survives purely as
- * this bootstrap prior. Separate from the gate params' `minSamples`,
- * which stays the PageHinkley floor (the split the task calls for).
+ * Replays one Turn: score its Prospective, verdict, divergence row. The
+ * judgment itself is the shared core's — this half only supplies the
+ * composite prospective reading and records what the core returned.
  */
-const MIN_CRITERION_SAMPLES = 2;
-
-/**
- * One judgment's audit trail: the fire channel (null when none fired),
- * the criterion level the reading was judged against, its z score, the
- * segment ledger's μ/σ exactly as they stood at judgment — BEFORE any
- * fold, verdict reset or shred — and whether the patrol actually
- * consumed this reading as a step (its z-readings ride the point only
- * then: a verdict-shredded ledger hands over nothing, so the detector's
- * stale recording never leaks onto the first arrival of a new segment).
- */
-interface Judgment {
-  fireChannel: 'immediate' | 'slow' | null;
-  immediateThreshold: number;
-  /** Null while the criterion bootstraps on T_segment (ledger < 2). */
-  immediateZ: number | null;
-  /** Null while the ledger is empty (the bootstrap phase charts nothing). */
-  segmentMu: number | null;
-  /** Null while the ledger holds fewer than 2 accepted members. */
-  segmentSigma: number | null;
-  /** True when the patrol consumed this reading as a raw drift step. */
-  patrolConsumed: boolean;
-}
-
-/**
- * The two-channel judgment for one sample, both channels standing on the
- * CURRENT segment's ledger.
- *
- * Immediate channel: standardize the arrival reading against the ledger —
- * z = (x − μ) / max(σ, σ_floor) — and fire at z ≥ k_immediate,
- * algebraically the identical call as exceeding μ + k·max(σ, σ_floor).
- * With fewer than 2 accepted members there is no true spread yet: the
- * flat T_segment takes over as the bootstrap prior.
- *
- * Slow channel: feed the patrol the RAW drift
- * reading itself — the same verdict-lane signal the immediate channel
- * just judged — accumulated against the detector's OWN running mean
- * (unchanged PageHinkley internals). No ledger standardization: the
- * z-standardized original degenerated because the chasing ledger μ
- * erased a gentle wander from the signal and the σ floor amplified
- * reading noise. The patrol therefore warms from its first consumed
- * step — the detector's own mean handles it, and its minSamples floor
- * mutes fires through the first steps.
- *
- * A verdict — either channel — shrinks the ledger wholesale and
- * hard-resets the accumulator without consuming the spike: the rejected
- * arrival seeds the new segment's geometry but never enters any ledger
- * (ratchet guard — the deciding population is made of blessed steps
- * only).
- */
-function twoChannelJudge(
-  state: ReplayState,
-  args: ScoreGateReplayProps,
-  reading: number,
-): Judgment {
-  const mu = state.ledger.mean;
-  const sigma = state.ledger.std;
-  const sigmaEff = Math.max(sigma ?? 0, args.params.sigmaFloor);
-  const ledgerWarm = mu !== null && sigma !== null && state.ledger.count >= MIN_CRITERION_SAMPLES;
-  const immediateThreshold = ledgerWarm
-    ? mu + args.params.immediateK * sigmaEff
-    : args.segmentThreshold;
-  const immediateZ = ledgerWarm ? (reading - mu) / sigmaEff : null;
-  const base = {
-    immediateThreshold,
-    immediateZ,
-    segmentMu: mu,
-    segmentSigma: sigma,
-  };
-
-  if (reading >= immediateThreshold) {
-    // The arrival clears the segment's own noise level: verdict on the
-    // spot. Shred the ledger, hard-reset the patrol — the spike is
-    // consumed by neither.
-    state.ledger = createRollingStats();
-    state.gate.reset();
-    return { ...base, fireChannel: 'immediate', patrolConsumed: false };
-  }
-
-  // The patrol consumes the RAW drift step verbatim — every accepted reading, from the very first: its own
-  // running mean is the baseline, the minSamples floor guards the fire.
-  const firedSlow = state.gate.update(reading);
-  if (firedSlow) {
-    // The accumulated rise reached λ (drift units): verdict. Shred the
-    // ledger; the detector re-stamps its firing rise, then resets itself
-    // in update().
-    state.ledger = createRollingStats();
-    return { ...base, fireChannel: 'slow', patrolConsumed: true };
-  }
-
-  return { ...base, fireChannel: null, patrolConsumed: true };
-}
-
-/**
- * The non-muted core of one replayed Turn: judge the composite reading
- * against both verdict channels, then accept-then-fold it into the
- * segment ledger — a passing reading joins the segment's deciding
- * population; a rejected arrival never enters its OLD segment's ledger,
- * and the NEW segment's ledger starts empty of it too (its reading
- * measured the departure, not the new topic's noise).
- */
-function judgeAndFold(
-  state: ReplayState,
-  args: ScoreGateReplayProps,
-  turnNumber: number,
-  reading: number,
-): { judgment: Judgment; fired: boolean } {
-  const judgment = twoChannelJudge(state, args, reading);
-  const fired = judgment.fireChannel !== null;
-  if (!fired) state.ledger.add(reading);
-  return { judgment, fired };
-}
-
-/** Replays one Turn: score its Prospective, verdict, divergence row. */
 function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: number): void {
   const prospective = args.prospectiveVectorByTurn.get(turnNumber);
   const turnVector = args.turnVectorByTurn.get(turnNumber);
@@ -404,7 +251,7 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   const driftP = preGravity === null ? null : cosineDistance(prospective, preGravity);
   const driftPGated = preGravity === null ? null : cosineDistance(composite.vector, preGravity);
   const anchorDistance = cosineDistance(prospective, args.anchorVector);
-  const muted = state.completedTurns < args.params.coldStartTurns || driftPGated === null;
+  const muted = mutedArrival(state.completedTurns, args.judging, driftPGated);
 
   // The Anchor is Segment 1, so the wander reading exists from Turn 1 —
   // counsel sees every Turn, including the muted cold start; the gate's
@@ -415,14 +262,11 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
 
   let fired = false;
   let judgment: Judgment | null = null;
-  if (!muted) {
-    ({ judgment, fired } = judgeAndFold(state, args, turnNumber, driftPGated as number));
+  if (!muted && driftPGated !== null) {
+    ({ judgment, fired } = judgeAndFold(state.verdict, args.judging, driftPGated));
   }
 
-  const nearLastTurn =
-    state.lastTurnVector !== null &&
-    cosineDistance(composite.vector, state.lastTurnVector) <= args.params.adjustmentRadius;
-  const verdict = verdictFor({ muted, fired, nearLastTurn });
+  const verdict = verdictFor({ muted, fired });
 
   // Build the point with both channels' audit provenance, then let the
   // slow reading ride it only when the accumulator consumed the sample.
@@ -438,27 +282,23 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   // The patrol reading rides the point only when the detector actually
   // consumed this turn as a step — never on muted Turns, never on the
   // firing step of an immediate-channel verdict.
-  if (!muted && (judgment as Judgment).patrolConsumed) attachGateReadings(point, state.gate);
+  if (!muted && (judgment as Judgment).patrolConsumed) attachGateReadings(point, state.verdict);
   annotateProvenance(point, args, composite.source, turnNumber, muted);
   state.points.push(point);
 
   const divergence = divergenceFor(turnNumber, verdict, args.foldBoundaryTurns.has(turnNumber));
   if (divergence !== null) state.divergences.push(divergence);
 
-  state.lastTurnVector = turnVector;
   state.completedTurns += 1;
 }
 
 export function scoreGateReplay(args: ScoreGateReplayProps): GateReplayScoring {
-  const { gate, anchorCounsel: counsel } = detectors(args.params);
   const state: ReplayState = {
-    gate,
-    counsel,
-    ledger: createRollingStats(),
+    verdict: createVerdictState(args.judging),
+    counsel: createPageHinkley(patrolOptions(args.judging)),
     points: [],
     divergences: [],
     counselRows: [],
-    lastTurnVector: null,
     completedTurns: 0,
   };
 

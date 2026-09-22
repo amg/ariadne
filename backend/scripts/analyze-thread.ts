@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import {
   type AnalyzeThreadOptions,
   DEFAULT_ANALYZE_OPTIONS,
-  DEFAULT_GATE_REPLAY_OPTIONS,
   type ExpansionMode,
   type ThreadReport,
   analyzeThread,
@@ -27,10 +26,12 @@ import type { ResultError } from '../src/types/result';
  *   npm run analyze:thread -- <threadId> <offline|live> [--live-rewrite <mode>]
  *                                      [--debug-sweep-lambda <v,v,…>]
  *
- *   offline — stored-embedding report only: segment fold, drift, Anchor,
- *             EMD revisit matrix. No gate replay, no rewrites (the
- *             assistant reply is already on file, so every Turn is a full
- *             Turn and nothing needs expanding).
+ *   offline — stored-embedding report only: the fold judged per segment
+ *             against its own state (the same shared two-channel
+ *             verdict the live gate runs), drift, Anchor, Anchor-wander
+ *             counsel. No gate replay, no rewrites (the assistant reply
+ *             is already on file, so every Turn is a full Turn and
+ *             nothing needs expanding).
  *   live    — the pretend-replay gate on top of the same report: every
  *             incoming user message scored as a Prospective Turn with the
  *             two-channel segment-local verdict, the
@@ -59,12 +60,15 @@ import type { ResultError } from '../src/types/result';
 // Tuning constants ship at their calibrated defaults. If a future corpus
 // sweep moves these, edit here deliberately.
 //
-// The segment bar at 0.52 — the seam default since user
-// adjudications: the 2026-09-21 corpus run logged three live fires at
-// 0.49–0.50 judged false positives — steering/meta-style messages, not
-// topic departures — while every real pivot sat ≥ 0.58. System-health
-// framing wins: bias against cutting (so a false fire never triggers
-// the customer push), hence 0.52 rather than 0.45.
+// T_segment at 0.52 — since the fold shares the live gate's two-channel
+// verdict, it survives ONLY as that verdict's bootstrap prior (the flat
+// bar a segment's arrivals face while its noise ledger holds < 2
+// accepted members). The original adjudications stand: the 2026-09-21
+// corpus run logged three live fires at 0.49–0.50 judged false
+// positives — steering/meta-style messages, not topic departures —
+// while every real pivot sat ≥ 0.58. System-health framing wins: bias
+// against cutting (so a false fire never triggers the customer push),
+// hence 0.52 rather than 0.45.
 const SCRIPT_SEGMENT_THRESHOLD = 0.52;
 
 const MODES = ['offline', 'live'] as const;
@@ -81,9 +85,11 @@ const USAGE = `Usage: npm run analyze:thread -- <threadId> <offline|live> [optio
 Arguments:
   <threadId>                    Thread to analyze (UUID)
   <offline|live>                Report mode:
-                                  offline — stored embeddings only (fold,
-                                            drift, Anchor, EMD revisits); no
-                                            gate replay, no rewrites
+                                  offline — stored embeddings only (the fold
+                                            judged per segment against its
+                                            own state, drift, Anchor,
+                                            Anchor-wander counsel); no gate
+                                            replay, no rewrites
                                   live    — the pretend-replay gate plus
                                             per-message rewrite expansion on
                                             top of the offline report
@@ -111,7 +117,7 @@ Options (live only):
                                 timings across values to pick the
                                 constant. Report files are written for
                                 the run at the shipped default λ
-                                (${DEFAULT_GATE_REPLAY_OPTIONS.lambda}). Default: ${DEFAULT_SWEEP_LAMBDAS.join(',')}.
+                                (${DEFAULT_ANALYZE_OPTIONS.lambda}). Default: ${DEFAULT_SWEEP_LAMBDAS.join(',')}.
 
   This CLI has no per-parameter tuning flags. Gate thresholds, the
   segment-local criterion, and the rewrite model ship at their calibrated
@@ -268,15 +274,15 @@ if (mode === 'live') {
     };
   }
   // Live mode runs the full gate with calibrated defaults — no per-param
-  // overrides at the CLI seam.
+  // overrides at the CLI seam. The judging params sit flat on the root
+  // (the fold judges with the same values on every run), so the
+  // --debug-sweep-lambda override threads through the flat root too.
   options.gateReplay = {};
 }
 
 async function runAnalysis(lambdaOverride: number | null): Promise<ThreadReport> {
   const runOptions: AnalyzeThreadOptions =
-    lambdaOverride === null
-      ? options
-      : { ...options, gateReplay: { ...DEFAULT_GATE_REPLAY_OPTIONS, lambda: lambdaOverride } };
+    lambdaOverride === null ? options : { ...options, lambda: lambdaOverride };
   const result = await analyzeThread(threadId, runOptions);
   if (result.type === 'error') {
     console.error(`error: ${failureMessage(result, threadId)}`);
@@ -317,8 +323,7 @@ if (sweepLambdas !== null) {
   }
   // Report files reflect the run at the shipped default λ (first run if
   // the sweep skipped it) so the saved HTML/JSON stay meaningful.
-  const defaultRun =
-    runs.find((run) => run.lambda === DEFAULT_GATE_REPLAY_OPTIONS.lambda) ?? runs[0];
+  const defaultRun = runs.find((run) => run.lambda === DEFAULT_ANALYZE_OPTIONS.lambda) ?? runs[0];
   if (defaultRun === undefined) {
     console.error('error: the sweep produced no runs');
     process.exit(1);

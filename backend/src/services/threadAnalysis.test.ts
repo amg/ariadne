@@ -12,6 +12,7 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import {
   DEFAULT_ANALYZE_OPTIONS,
+  type DriftPoint,
   type RenderedThreadReport,
   type ThreadReport,
   type TopicSegmentTurn,
@@ -101,28 +102,126 @@ function centroidVector(vectors: number[][]): number[] {
 }
 
 /**
- * Mirror of the the architectural decision fold: judge first, fold second. Equal-weight
- * Gravity point over segment members; strict `>` crosses the threshold;
- * the first Turn seeds the opening segment and carries no score.
+ * The test mirror of the verdict tier's private state (the fields are
+ * deliberately unpublished): the ledger's Welford running mean/sample σ
+ * plus the Page–Hinkley patrol's accumulators.
+ */
+interface FoldMirror {
+  members: number[][];
+  count: number;
+  mean: number;
+  m2: number;
+  pCount: number;
+  pSum: number;
+  cumulative: number;
+  lowWater: number;
+}
+
+/** A calm reading joins the ledger; the patrol consumes the raw reading. Returns the slow fire. */
+function mirrorAcceptAndPatrol(
+  mirror: FoldMirror,
+  drift: number,
+  judging: typeof DEFAULT_ANALYZE_OPTIONS,
+): boolean {
+  mirror.count += 1;
+  const d = drift - mirror.mean;
+  mirror.mean += d / mirror.count;
+  mirror.m2 += d * (drift - mirror.mean);
+  mirror.pCount += 1;
+  mirror.pSum += drift;
+  mirror.cumulative += drift - mirror.pSum / mirror.pCount - judging.delta;
+  if (mirror.cumulative < mirror.lowWater) mirror.lowWater = mirror.cumulative;
+  return (
+    mirror.pCount >= judging.minSamples && mirror.cumulative - mirror.lowWater >= judging.lambda
+  );
+}
+
+/** Any verdict shreds the ledger and resets the patrol. */
+function mirrorShred(mirror: FoldMirror): void {
+  mirror.count = 0;
+  mirror.mean = 0;
+  mirror.m2 = 0;
+  mirror.pCount = 0;
+  mirror.pSum = 0;
+  mirror.cumulative = 0;
+  mirror.lowWater = 0;
+}
+
+/**
+ * The two-channel verdict for one judged arrival: immediate against the
+ * warm ledger (flat T_segment bootstraps), otherwise the calm reading
+ * joins the ledger while the patrol may catch the slow class.
+ */
+function mirrorJudgeArrival(
+  mirror: FoldMirror,
+  drift: number,
+  judging: typeof DEFAULT_ANALYZE_OPTIONS,
+): boolean {
+  const sigma = mirror.count < 2 ? null : Math.sqrt(mirror.m2 / Math.max(mirror.count - 1, 1));
+  const warm = mirror.count >= 2;
+  const threshold = warm
+    ? mirror.mean + judging.immediateK * Math.max(sigma ?? 0, judging.sigmaFloor)
+    : judging.segmentThreshold;
+  return drift >= threshold || mirrorAcceptAndPatrol(mirror, drift, judging);
+}
+
+/**
+ * Mirror of the analyzer's fold: judge first, fold second. Equal-weight
+ * Gravity point over segment members; the SHARED two-channel verdict
+ * judges the arrival against the segment's own state — the immediate
+ * channel (z ≥ k over the warm ledger, T_segment as bootstrap prior)
+ * then the slow patrol (raw readings at λ). A fire from either channel
+ * is a Boundary turn: the ledger shreds, the rejected vector reseeds the
+ * next Gravity point, and the first Turn seeds the opening segment with
+ * no score.
  */
 function expectedFold(
   vectors: number[][],
-  threshold: number,
+  judging: typeof DEFAULT_ANALYZE_OPTIONS,
 ): Array<{ segmentDrift: number | null; isBoundary: boolean }> {
   const points: Array<{ segmentDrift: number | null; isBoundary: boolean }> = [];
-  let members: number[][] = [];
+  const mirror: FoldMirror = {
+    members: [],
+    count: 0,
+    mean: 0,
+    m2: 0,
+    pCount: 0,
+    pSum: 0,
+    cumulative: 0,
+    lowWater: 0,
+  };
+  let completed = 0;
   for (const vector of vectors) {
-    if (members.length === 0) {
+    if (mirror.members.length === 0) {
       points.push({ segmentDrift: null, isBoundary: false });
-      members = [vector];
+      mirror.members = [vector];
+      completed += 1;
       continue;
     }
-    const drift = cosineDistance(vector, centroidVector(members));
-    const isBoundary = drift > threshold;
+    const drift = cosineDistance(vector, centroidVector(mirror.members));
+    let isBoundary = false;
+    if (completed >= judging.coldStartTurns) {
+      isBoundary = mirrorJudgeArrival(mirror, drift, judging);
+      if (isBoundary) mirrorShred(mirror);
+    }
     points.push({ segmentDrift: drift, isBoundary });
-    members = isBoundary ? [vector] : [...members, vector];
+    mirror.members = isBoundary ? [vector] : [...mirror.members, vector];
+    completed += 1;
   }
   return points;
+}
+
+/**
+ * The audit trail every judged Turn must record: the criterion it was
+ * held to, and — for a Boundary turn — the channel that cut it.
+ * (The fixtures are immediate-channel only: spikes fire, crawls stay
+ * under λ per minSamples.)
+ */
+function expectJudgmentAudit(series: DriftPoint[]): void {
+  for (const point of series.slice(1)) {
+    expect(typeof point.immediateThreshold).toBe('number');
+    if (point.isBoundary) expect(point.fireChannel).toBe('immediate');
+  }
 }
 
 type TurnSpec = { user: string; assistant?: string; costUsd?: string };
@@ -312,7 +411,7 @@ describe('analyzeThread — report shell and cost profile', () => {
     expect(report.title).toBe('analysis thread');
     expect(report.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(report.params).toEqual({
-      segmentThreshold: DEFAULT_ANALYZE_OPTIONS.segmentThreshold,
+      ...DEFAULT_ANALYZE_OPTIONS,
       embeddingModelId: EMBEDDING_MODEL_ID,
     });
 
@@ -353,8 +452,12 @@ describe('analyzeThread — report shell and cost profile', () => {
     // Drift series scored from Turn 1 onward; the first Turn seeds the
     // opening Gravity point and carries no Segment drift. The Anchor IS
     // Segment 1: the mock's near-orthogonal topics flip the fold at
-    // Turn 2, so Segment 1 leaves the Anchor as Turn 1 alone.
-    expect(report.anchor).toEqual({ builtFromTurns: [1, 1] });
+    // Turn 2, so Segment 1 leaves the Anchor as Turn 1 alone — and the
+    // fold's own patrol on the Anchor wander turns advisory here: the
+    // opening topic was abandoned immediately, so the sustained-rise
+    // counsel records it at Turn 3 once the wander series has warmed.
+    expect(report.anchor.builtFromTurns).toEqual([1, 1]);
+    expect(report.anchor.counsel.map((row) => row.turnNumber)).toEqual([3]);
     expect(report.driftSeries).toHaveLength(3);
     expect(report.driftSeries.map((point) => point.turnNumber)).toEqual([1, 2, 3]);
     expect(report.driftSeries.map((point) => point.messageIndex)).toEqual([2, 4, 6]);
@@ -432,8 +535,9 @@ describe('analyzeThread — report shell and cost profile', () => {
     const report = assertSuccess(await analyzeThread(threadId));
 
     // Segment 1 spans the whole one-Turn thread — the Anchor is that
-    // single member.
-    expect(report.anchor).toEqual({ builtFromTurns: [1, 1] });
+    // single member; one sample cannot warm any detector, so the counsel
+    // list is provably empty.
+    expect(report.anchor).toEqual({ builtFromTurns: [1, 1], counsel: [] });
     expect(report.driftSeries).toEqual([
       {
         turnNumber: 1,
@@ -582,13 +686,13 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     const report = assertSuccess(await analyzeThread(threadId));
 
     const vectors = referenceVectors();
-    const expected = expectedFold(vectors, DEFAULT_ANALYZE_OPTIONS.segmentThreshold);
+    const expected = expectedFold(vectors, DEFAULT_ANALYZE_OPTIONS);
 
     // The Anchor IS Segment 1: the fixture's first topic
     // flips at Turn 2, so Segment 1 is Turn 1 alone and the Anchor is
     // its vector — the pure opening topic.
     const anchor = (vectors[0] ?? []) as number[];
-    expect(report.anchor).toEqual({ builtFromTurns: [1, 1] });
+    expect(report.anchor.builtFromTurns).toEqual([1, 1]);
     expect(report.driftSeries).toHaveLength(10);
 
     for (let i = 0; i < expected.length; i += 1) {
@@ -605,6 +709,10 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
       expect(point.isBoundary).toBe(exp.isBoundary);
     }
 
+    // Audit trail: every non-seed Turn records its judgment, and a
+    // Boundary Turn names the channel that cut it.
+    expectJudgmentAudit(report.driftSeries);
+
     // Segment drift is null on the first scored Turn only.
     expect(report.driftSeries[0]?.segmentDrift).toBeNull();
     expect(report.driftSeries[1]?.segmentDrift).not.toBeNull();
@@ -618,7 +726,9 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     const specs = [topicTurn('alpha'), topicTurn('beta'), topicTurn('gamma'), topicTurn('delta')];
     const { threadId } = await seedThread('rolling gravity', specs);
 
-    const report = assertSuccess(await analyzeThread(threadId, { segmentThreshold: 1.5 }));
+    const report = assertSuccess(
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+    );
 
     const vectors = multiVector(['alpha', 'beta', 'gamma', 'delta']);
     expect(report.driftSeries[0]?.segmentDrift).toBeNull();
@@ -770,15 +880,19 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     expect(mock.embeddings.requestCount()).toBe(callsBefore + 10); // one per Turn
 
     // A threshold above any possible drift: zero boundaries, one segment.
-    const second = assertSuccess(await analyzeThread(threadId, { segmentThreshold: 1.5 }));
+    // The flat override also silences the immediate channel so warm-ledger
+    // levels cannot cut either.
+    const second = assertSuccess(
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+    );
     expect(mock.embeddings.requestCount()).toBe(callsBefore + 10); // zero new calls
     expect(second.totals.embeddingCostUsd).toBe(0); // this run spent nothing
     expect(second.driftSeries.every((point) => !point.isBoundary)).toBe(true);
     // The Anchor follows Segment 1, and Segment 1 follows the threshold:
     // the default run's segment never made it past Turn 1, while this
     // run's single all-thread segment makes the Anchor every member.
-    expect(first.anchor).toEqual({ builtFromTurns: [1, 1] });
-    expect(second.anchor).toEqual({ builtFromTurns: [1, 10] });
+    expect(first.anchor.builtFromTurns).toEqual([1, 1]);
+    expect(second.anchor.builtFromTurns).toEqual([1, 10]);
     expect(second.segments).toEqual([
       {
         index: 1,
@@ -811,8 +925,10 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
 
     // Two near-orthogonal topics → the fold flips at Turn 2, so Segment
     // 1 stays Turn 1 alone and the Anchor refuses everything after it.
+    // Two wander samples cannot warm the patrol (minSamples ≥ 3), so the
+    // counsel list stays provably empty.
     const report = assertSuccess(await analyzeThread(threadId));
-    expect(report.anchor).toEqual({ builtFromTurns: [1, 1] });
+    expect(report.anchor).toEqual({ builtFromTurns: [1, 1], counsel: [] });
 
     const vectors = multiVector2('one', 'uno', 'two', 'dos');
     const anchor = (vectors[0] ?? []) as number[];
@@ -828,8 +944,11 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     // The same thread with a threshold nothing crosses: no cut, so
     // Segment 1 is the whole opening theme and the Anchor its centroid
     // — its members sit symmetric around it, none at distance zero.
-    const uncut = assertSuccess(await analyzeThread(threadId, { segmentThreshold: 1.5 }));
-    expect(uncut.anchor).toEqual({ builtFromTurns: [1, 2] });
+    // (Immediate channel silenced too, so warm-ledger levels cannot cut.)
+    const uncut = assertSuccess(
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+    );
+    expect(uncut.anchor).toEqual({ builtFromTurns: [1, 2], counsel: [] });
     const whole = centroidVector(vectors);
     expect(uncut.driftSeries[0]?.anchorDistance).toBeCloseTo(
       cosineDistance(vectors[0] ?? [], whole),
@@ -976,6 +1095,12 @@ describe('renderThreadReport — pure rendering', () => {
       generatedAt: '2026-01-02T03:04:05.678Z',
       params: {
         segmentThreshold: 0.35,
+        immediateK: 2,
+        sigmaFloor: 0.02,
+        lambda: 0.5,
+        delta: 0,
+        minSamples: 3,
+        coldStartTurns: 1,
         embeddingModelId: 'test/embed-model',
       },
       totals: {
@@ -1049,7 +1174,7 @@ describe('renderThreadReport — pure rendering', () => {
           boundaryReason: 'segment',
         },
       ],
-      anchor: { builtFromTurns: [1, 1] },
+      anchor: { builtFromTurns: [1, 1], counsel: [] },
       segments: [
         {
           index: 1,
@@ -1145,7 +1270,7 @@ describe('renderThreadReport — pure rendering', () => {
     // it to the live (purple) lane.
     expect(countMatches(html, /class="boundary-mark"/g)).toBe(2);
     expect(countMatches(html, /class="threshold-line"/g)).toBe(1);
-    expect(html).toContain('segment criterion (fixed fold) 0.35');
+    expect(html).toContain('segment threshold (bootstrap prior) 0.35');
     const thresholdGroup = html.match(/<g class="threshold-line">[\s\S]*?<\/g>/)?.[0] ?? '';
     expect(thresholdGroup).toContain('stroke="#ef6c00"');
     expect(html).not.toContain('anchor threshold');
@@ -1175,7 +1300,7 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('2026-01-02T03:04:05.678Z');
     expect(html).toContain('test/embed-model');
     expect(html).toContain('Anchor built from turns');
-    expect(html).toContain('Segment threshold (T_segment)');
+    expect(html).toContain('Segment threshold (T_segment, bootstrap prior)');
     expect(html).toContain('0.35');
     expect(html).not.toContain('Window size');
     expect(html).toContain('$0.000012'); // total cost
@@ -1207,17 +1332,18 @@ describe('renderThreadReport — pure rendering', () => {
       ...base,
       params: {
         ...base.params,
-        gateReplay: {
-          lambda: 1.0,
-          delta: 0,
-          coldStartTurns: 1,
-          minSamples: 2,
-          adjustmentRadius: 0.35,
-          sinkhornEpsilon: 0.05,
-          immediateK: 2,
-          sigmaFloor: 0.02,
-        },
+        immediateK: 2,
+        sigmaFloor: 0.02,
+        lambda: 1.0,
+        delta: 0,
+        minSamples: 2,
+        coldStartTurns: 1,
+        gateReplay: { sinkhornEpsilon: 0.05 },
       },
+      // The fold's own Anchor-wander counsel carries this row — the ring
+      // on the offline chart's blue line (the live side's patrol rows are
+      // plain prospected, no re-judgment).
+      anchor: { ...base.anchor, counsel: [{ turnNumber: 5, anchorDistance: 0.5 }] },
       gateReplay: {
         points: [
           {

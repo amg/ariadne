@@ -2,10 +2,10 @@ import { round10 } from './cost';
 import type {
   CostPoint,
   DriftPoint,
-  GateReplayParams,
   GateReplayPoint,
   GateVerdict,
   ThreadReport,
+  ThreadReportParams,
   TopicSegmentTurn,
 } from './types';
 
@@ -17,13 +17,15 @@ import type {
  * wave 2's UI will later serve). String transforms only; no I/O — the
  * CLI performs every filesystem write.
  *
- * The two scoring algorithms get separate charts: the offline fold
- * (every completed Turn judged against the fixed T_segment constant)
- * renders its own chart with its flat criterion line; the live gate
- * (arrivals judged against each segment's learned trigger) renders its
- * own chart in two stacked panels — arrival drift in drift units
- * against the per-segment trigger line above, the same arrivals
- * standardised to z against the flat z = k trigger below.
+ * The two scoring flows share one verdict but read different signals, so
+ * they get separate charts: the offline fold (every completed Turn
+ * judged on the full-turn reading against its segment's own state, with
+ * T_segment drawn as the bootstrap prior) renders its own chart; the
+ * live gate (arrivals judged on the composite prospective reading against
+ * the same per-segment trigger) renders its own chart in two stacked
+ * panels — arrival drift in drift units against the per-segment trigger
+ * line above, the same arrivals standardised to z against the flat
+ * z = k trigger below.
  */
 
 export interface RenderedThreadReport {
@@ -159,7 +161,7 @@ function buildLiveFrame(report: ThreadReport): LiveFrame {
   // The z panel's scale fits the thread's own spread: always the trigger
   // at comfortable height (≥ 2k), padded for the tallest spike; negative
   // readings (arrivals calmer than the segment mean) extend downward.
-  const k = report.params.gateReplay?.immediateK ?? 2;
+  const k = report.params.immediateK;
   const zValues = gatePoints.flatMap((point) =>
     point.immediateZ === undefined ? [] : [point.immediateZ],
   );
@@ -256,15 +258,17 @@ function renderOfflineChart(report: ThreadReport): string {
     .join('');
   parts.push(group('boundary', boundaryMarks));
 
-  // The fold judges every completed Turn against the fixed constant
-  // T_segment (drift scale) — Segment drift is the single Boundary-turn
-  // authority. The live gate's adaptive trigger lives in the
-  // live chart, never here. Not toggleable: it is the scale's landmark.
+  // The fold judges every completed Turn with the shared two-channel
+  // verdict against its segment's OWN state; the flat constant is drawn
+  // as the bootstrap prior — the level a segment's arrivals face while
+  // its noise ledger warms (< 2 accepted members). The live gate's
+  // trigger steps live in the live chart, never here; the drawn constant
+  // is landmark and prior both. Not toggleable.
   parts.push(
     thresholdLine(
       frame,
       report.params.segmentThreshold,
-      'segment criterion (fixed fold)',
+      'segment threshold (bootstrap prior)',
       '#ef6c00',
     ),
   );
@@ -293,9 +297,7 @@ function renderOfflineChart(report: ThreadReport): string {
   const recordPoints = report.driftSeries
     .filter((point): point is DriftPoint & { segmentDrift: number } => point.segmentDrift !== null)
     .map((point) => ({ turnNumber: point.turnNumber, value: point.segmentDrift }));
-  const boundaryByTurn = new Set(
-    report.driftSeries.filter((point) => point.isBoundary).map((point) => point.turnNumber),
-  );
+  const pointByTurn = new Map(report.driftSeries.map((point) => [point.turnNumber, point]));
   const anchorBody = driftSeriesElement(
     'series-anchor-distance',
     '#1565c0',
@@ -308,19 +310,19 @@ function renderOfflineChart(report: ThreadReport): string {
   const recordBody =
     driftSeriesElement('series-segment-drift', '#ef6c00', recordPoints, frame, '7 4', 2.5) +
     driftPointMarkers(recordPoints, frame, 'drift-point', '#ef6c00', 1.75, (point) => {
-      const boundary = boundaryByTurn.has(point.turnNumber) ? ' — Boundary turn' : '';
-      return `Turn ${point.turnNumber} — recorded Segment drift ${point.value.toFixed(3)}${boundary}`;
+      const full = pointByTurn.get(point.turnNumber);
+      return full && hasJudgedDrift(full) ? driftPointTooltip(full) : '';
     });
   parts.push(group('anchor', anchorBody), group('segments', recordBody));
 
-  // Anchor-wander counsel (live replay output) rides the Anchor series
+  // Anchor-wander counsel (the fold's own rows) rides the Anchor series
   // it warns about — a ring on the counsel Turn's wander point.
-  const counselMarks = (report.gateReplay?.anchorCounsel ?? [])
+  const counselMarks = report.anchor.counsel
     .map((row) => {
       const cx = frame.x(row.turnNumber);
       const cy = frame.driftY(row.anchorDistance);
       return `<circle class="counsel-mark" cx="${cx}" cy="${cy}" r="4.5" fill="none" stroke="#1565c0" stroke-width="1.5"><title>${escapeHtml(
-        `Turn ${row.turnNumber} — slow-drift counsel: sustained rise in Anchor wander (distance ${row.anchorDistance.toFixed(3)}) — advisory only`,
+        `Turn ${row.turnNumber} — slow-drift counsel: sustained rise in Anchor wander (complete-turn reading, distance ${row.anchorDistance.toFixed(3)}) — advisory only`,
       )}</title></circle>`;
     })
     .join('');
@@ -344,8 +346,8 @@ function renderLiveChart(report: ThreadReport): string {
   const frame = buildLiveFrame(report);
   const gate = report.gateReplay;
   if (!gate) return '';
-  const gateParams = report.params.gateReplay;
-  const immediateK = gateParams?.immediateK ?? 2;
+  const params = report.params;
+  const immediateK = params.immediateK;
   const parts: string[] = [];
 
   parts.push(
@@ -371,7 +373,7 @@ function renderLiveChart(report: ThreadReport): string {
   // while the segment's ledger warms, the learned μ + k·max(σ, σ_floor)
   // once it speaks, resetting to T_segment on every fired Turn. Not
   // toggleable: it is the live lane's landmark.
-  parts.push(liveTriggerElement(frame, gate.points, gateParams, report.params.segmentThreshold));
+  parts.push(liveTriggerElement(frame, gate.points, params, report.params.segmentThreshold));
 
   // The arrival drift series: drift_p — the non-standardised reading of
   // the judged signal (the expansion tier's rewritten user message when
@@ -388,7 +390,7 @@ function renderLiveChart(report: ThreadReport): string {
       frame,
       '2 3',
       1.25,
-    ) + gatePointMarkers(verdictPoints, frame, gateParams?.lambda);
+    ) + gatePointMarkers(verdictPoints, frame, params.lambda);
   parts.push(group('prospective', verdictBody));
 
   // The raw audit series: the arrival-time message exactly
@@ -405,7 +407,7 @@ function renderLiveChart(report: ThreadReport): string {
     parts.push(group('raw', rawBody));
   }
 
-  parts.push(zPanelElement(frame, gate.points, gateParams));
+  parts.push(zPanelElement(frame, gate.points, params));
   parts.push('</svg>');
   return parts.join('\n');
 }
@@ -486,14 +488,13 @@ interface TriggerStep {
  * judged against — bootstrap flat vs the learned formula — and the live
  * segment the Turn belongs to.
  */
-function triggerPointTooltip(step: TriggerStep, gateParams: GateReplayParams | undefined): string {
+function triggerPointTooltip(step: TriggerStep, params: ThreadReportParams): string {
   const base = `Turn ${step.turnNumber} — arrival judged against ${step.threshold.toFixed(3)}`;
   const tail = ` · live segment ${step.segment}`;
   if (step.mu === null || step.sigma === null) {
     return `${base} — bootstrap: flat T_segment until the ledger holds 2 accepted members${tail}`;
   }
-  if (!gateParams) return `${base} — z-adjusted segment criterion${tail}`;
-  const { immediateK, sigmaFloor } = gateParams;
+  const { immediateK, sigmaFloor } = params;
   const mu = (step.mu ?? 0).toFixed(3);
   const sigma = (step.sigma ?? 0).toFixed(3);
   return `${base} — z-adjusted: μ ${mu} + ${immediateK}·max(σ ${sigma}, σ_floor ${sigmaFloor})${tail}`;
@@ -518,7 +519,7 @@ function triggerPointTooltip(step: TriggerStep, gateParams: GateReplayParams | u
 function liveTriggerElement(
   frame: LiveFrame,
   points: GateReplayPoint[],
-  gateParams: GateReplayParams | undefined,
+  params: ThreadReportParams,
   segmentThreshold: number,
 ): string {
   const segmentByTurn = new Map<number, number>();
@@ -590,7 +591,7 @@ function liveTriggerElement(
     .map((step) => {
       const cx = frame.x(step.turnNumber);
       const cy = frame.driftY(step.threshold);
-      return `<circle class="live-trigger-point" cx="${cx}" cy="${cy}" r="2.2" fill="#6a1b9a"><title>${escapeHtml(triggerPointTooltip(step, gateParams))}</title></circle>`;
+      return `<circle class="live-trigger-point" cx="${cx}" cy="${cy}" r="2.2" fill="#6a1b9a"><title>${escapeHtml(triggerPointTooltip(step, params))}</title></circle>`;
     })
     .join('');
   return [...parts, marks].join('');
@@ -609,10 +610,10 @@ function zPointTooltip(point: GateReplayPoint & { driftPGated: number }): string
 function zPanelElement(
   frame: LiveFrame,
   points: GateReplayPoint[],
-  gateParams: GateReplayParams | undefined,
+  params: ThreadReportParams,
 ): string {
   const { zTop, zBottom } = LIVE_LAYOUT;
-  const immediateK = gateParams?.immediateK ?? 2;
+  const immediateK = params.immediateK;
   const zTriggerY = frame.zY(immediateK);
   const zMeanY = frame.zY(0);
 
@@ -732,10 +733,9 @@ function driftPointMarkers(
 
 /**
  * Verdict markers on the live gate series: fire = filled dot (plus the
- * vertical mark), withheld = hollow dot (a veto, not a miss), pass =
- * faint dot; muted Turns carry no point. Tooltip carries the verdict
- * language verbatim and names which reading fed the signal
- * so a chart alone tells the row's story.
+ * vertical mark), pass = faint dot; muted Turns carry no point. Tooltip
+ * carries the verdict language verbatim and names which reading fed the
+ * signal so a chart alone tells the row's story.
  */
 type MarkerShape = {
   className: string;
@@ -747,10 +747,38 @@ type MarkerShape = {
 
 const VERDICT_MARKER: Record<GateVerdict, MarkerShape> = {
   fire: { className: 'gate-point-fire', radius: 3, fill: '#6a1b9a' },
-  withheld: { className: 'gate-point-withheld', radius: 2.6, fill: '#ffffff', stroke: '#6a1b9a' },
   pass: { className: 'gate-point-pass', radius: 1.6, fill: '#6a1b9a', opacity: 0.6 },
   muted: { className: 'gate-point-pass', radius: 1.6, fill: '#6a1b9a', opacity: 0.6 },
 };
+
+/**
+ * Drift-point tooltip on the offline fold series: the Turn's recorded
+ * Segment drift plus its two-channel judgment trail when one exists —
+ * the criterion that judged it (with the z once the ledger could
+ * standardize), the channel that cut a Boundary turn, and the patrol's
+ * own reading when it consumed the step.
+ */
+/** Type guard: a DriftPoint whose recorded Segment drift is present. */
+function hasJudgedDrift(point: DriftPoint): point is DriftPoint & { segmentDrift: number } {
+  return point.segmentDrift !== null;
+}
+
+function driftPointTooltip(point: DriftPoint & { segmentDrift: number }): string {
+  const base = `Turn ${point.turnNumber} — recorded Segment drift ${point.segmentDrift.toFixed(3)}`;
+  if (point.immediateThreshold === undefined) return base;
+  const boundary = point.isBoundary
+    ? ` — Boundary turn (fired by the ${point.fireChannel === 'slow' ? 'slow' : 'immediate'} channel)`
+    : '';
+  const z =
+    point.immediateZ === undefined
+      ? `${base}${boundary} · criterion ${point.immediateThreshold.toFixed(3)} (bootstrap — the constant stands in until the ledger holds 2 accepted members)`
+      : `${base}${boundary} · criterion ${point.immediateThreshold.toFixed(3)} (z ${point.immediateZ.toFixed(2)})`;
+  const patrol =
+    point.gateMean === undefined || point.gateRise === undefined
+      ? ''
+      : ` · patrol baseline ${point.gateMean.toFixed(3)} · accumulated rise ${point.gateRise.toFixed(3)}`;
+  return z + patrol;
+}
 
 /**
  * Names the reading that fed the verdict signal: the
@@ -902,7 +930,7 @@ function offlineToggleEntries(report: ThreadReport): ToggleEntry[] {
     {
       series: 'counsel',
       label: 'Slow drift counsel marks',
-      available: (report.gateReplay?.anchorCounsel.length ?? 0) > 0,
+      available: report.anchor.counsel.length > 0,
     },
   ];
 }
@@ -1011,7 +1039,7 @@ function legendItems(entries: LegendEntry[]): string {
 /** The offline chart's legend + fold note. */
 function renderOfflineLegend(report: ThreadReport, hasLiveChart: boolean): string {
   const hasDrift = report.driftSeries.length > 0;
-  const hasCounsel = (report.gateReplay?.anchorCounsel.length ?? 0) > 0;
+  const hasCounsel = report.anchor.counsel.length > 0;
   const entries: LegendEntry[] = [
     { color: '#a5d6a7', label: 'marginal cost (per turn)', bar: true },
     { color: '#2e7d32', label: 'running total cost' },
@@ -1037,13 +1065,16 @@ function renderOfflineLegend(report: ThreadReport, hasLiveChart: boolean): strin
         ]
       : []),
     { color: '#c62828', label: 'Boundary turn' },
-    { color: '#ef6c00', label: 'segment criterion — the fold’s fixed constant T_segment' },
+    {
+      color: '#ef6c00',
+      label: 'segment threshold — the bootstrap prior T_segment (flat only while the ledger warms)',
+    },
   ];
   const followUp = hasLiveChart
-    ? ' The live gate’s view of the same thread — arrivals against their per-segment trigger — lives in its own chart below.'
+    ? ' The live gate’s view of the same thread — arrivals on the prospective reading against the same per-segment trigger — lives in its own chart below.'
     : '';
   const laneNote = hasDrift
-    ? `<p class="lane-note"><strong>Offline fold.</strong> Every Turn is scored once, after it completes, on the full Turn vector including the assistant reply, against the rolling Gravity point of its segment — the authoritative cut lives here. A Turn whose Segment drift crosses the flat orange criterion T_segment becomes a Boundary Turn. The Anchor IS Segment 1 — the opening segment's own members, frozen at its cut — so Anchor wander measures the thread's flight from its pure opening topic; it replays from Turn 1 and stays advisory: no threshold, no vote.${followUp}</p>`
+    ? `<p class="lane-note"><strong>Offline fold.</strong> Every Turn is scored once, after it completes, on the full Turn vector including the assistant reply — the SAME two-channel verdict the live gate runs, just on the complete-turn reading. A Turn is judged against its segment's OWN state: the arrival's distance from the rolling Gravity point, standardized against the segment's noise ledger (μ, σ with the σ_floor) — the flat orange line drawn here is only the bootstrap prior, in force while the ledger holds fewer than 2 accepted members. A fire from either channel is a Boundary Turn: immediate (the reading cleared the segment's level) or slow (the Page–Hinkley patrol accumulated a λ-budgeted sustained rise); the cut shreds the ledger and the rejected Turn seeds the next segment but joins no ledger. The Anchor IS Segment 1 — the opening segment's own members, frozen at its cut — so Anchor wander measures the thread's flight from its pure opening topic; it replays from Turn 1 and stays advisory: no threshold, no vote. The fold's own counsel rows (sustained rise in this wander series) are the rings on the blue series.${followUp}</p>`
     : '';
   return `<ul class="legend">${legendItems(entries)}</ul>${laneNote}`;
 }
@@ -1071,11 +1102,6 @@ function renderLiveLegend(report: ThreadReport): string {
         'z reading — the same arrival standardised onto its own segment (bottom panel; fires at z ≥ k)',
     },
     { color: '#6a1b9a', label: 'Gate fire (vertical band; channel named in tooltip)' },
-    {
-      color: '#ffffff',
-      label: 'Gate withheld (hollow dot)',
-      style: 'width:9px;height:9px;border:1.5px solid #6a1b9a;border-radius:50%',
-    },
     ...(hasRawLane
       ? [
           {
@@ -1103,7 +1129,13 @@ function renderMeta(report: ThreadReport): string {
   const entries: Array<[string, string]> = [
     ['Thread', `${escapeHtml(report.title || '(untitled)')} · ${escapeHtml(report.threadId)}`],
     ['Generated', escapeHtml(report.generatedAt)],
-    ['Segment threshold (T_segment)', String(params.segmentThreshold)],
+    ['Segment threshold (T_segment, bootstrap prior)', String(params.segmentThreshold)],
+    ['Immediate k (z ≥ k)', String(params.immediateK)],
+    ['σ floor (σ_floor)', String(params.sigmaFloor)],
+    ['Slow patrol λ (drift units)', String(params.lambda)],
+    ['Slow patrol δ (drift units)', String(params.delta)],
+    ['Slow patrol min samples', String(params.minSamples)],
+    ['Cold start (K_gate)', String(params.coldStartTurns)],
     ['Embedding model', escapeHtml(params.embeddingModelId)],
     [
       'Anchor built from turns',
@@ -1115,16 +1147,7 @@ function renderMeta(report: ThreadReport): string {
     ['Embedding cost (this run)', formatUsd(totals.embeddingCostUsd)],
   ];
   if (gate) {
-    entries.push(
-      ['Gate lambda (λ, drift units)', String(gate.lambda)],
-      ['Gate delta (δ, drift units)', String(gate.delta)],
-      ['Gate cold start (K_gate)', String(gate.coldStartTurns)],
-      ['Gate min samples (slow channel)', String(gate.minSamples)],
-      ['Gate immediate k (z ≥ k)', String(gate.immediateK)],
-      ['Gate σ floor (σ_floor)', String(gate.sigmaFloor)],
-      ['Gate adjustment radius (T_adjust)', String(gate.adjustmentRadius)],
-      ['EMD Sinkhorn epsilon (ε)', String(gate.sinkhornEpsilon)],
-    );
+    entries.push(['EMD Sinkhorn epsilon (ε)', String(gate.sinkhornEpsilon)]);
   }
   const items = entries
     .map(([term, detail]) => `<div><dt>${escapeHtml(term)}</dt><dd>${detail}</dd></div>`)
@@ -1176,7 +1199,6 @@ function renderTurnLines(turn: TopicSegmentTurn): string {
 const VERDICT_LABEL: Record<GateVerdict, string> = {
   muted: 'muted (cold start)',
   pass: 'pass',
-  withheld: 'withheld (near V_last)',
   fire: 'fire — pause before this Turn',
 };
 
@@ -1209,7 +1231,14 @@ function expandedRewriteCell(point: GateReplayPoint, hasExpanded: boolean): stri
   return `<td title="${escapeHtml(point.expandedText)}">${escapeHtml(short)}</td>`;
 }
 
-function renderGateTable(points: GateReplayPoint[]): string {
+/** One Turn's messages carried by the gate replay table — mirrors TopicSegmentTurn. */
+export interface GateReplayTurn {
+  turnNumber: number;
+  userContent: string;
+  assistantContent: string | null;
+}
+
+function renderGateTable(points: GateReplayPoint[], turns: GateReplayTurn[]): string {
   // The expansion columns appear only on expansion runs — off replays
   // render byte-identical to the task.
   const hasExpanded = points.some((point) => point.driftPSource !== undefined);
@@ -1220,37 +1249,54 @@ function renderGateTable(points: GateReplayPoint[]): string {
     ? '<th title="The exact decontextualised text the verdict drift embeds (truncated here; full text on hover). Blank where no rewrite landed.">rewritten user message (the expanded embed)</th>'
     : '';
   const anchorHead = hasExpanded
-    ? `<th title="How far the arrival wanders from the thread’s opening topic (the Anchor). Advisory only — it never drives a verdict.">Anchor distance</th>`
+    ? `<th title="How far the arrival wanders from the thread's opening topic (the Anchor). Advisory only — it never drives a verdict.">Anchor distance</th>`
     : '<th>Anchor distance</th>';
+  const turnByNumber = new Map(turns.map((turn) => [turn.turnNumber, turn]));
   const rows = points
     .map((point) => {
       const gatedCellHtml = gatedCell(point, hasExpanded);
       const rewriteCellHtml = expandedRewriteCell(point, hasExpanded);
+      const turn = turnByNumber.get(point.turnNumber);
+      const messagesCell = turn
+        ? `<td class="segment-messages">${renderTurnLines({ turnNumber: turn.turnNumber, userContent: turn.userContent, assistantContent: turn.assistantContent })}</td>`
+        : '<td>—</td>';
       return (
         `<tr class="gate-point${point.verdict === 'fire' ? ' gate-point-fire' : ''}">` +
         `<td>${point.turnNumber}</td><td>${point.messageIndex}</td>` +
         `<td>${point.driftP === null ? '—' : point.driftP.toFixed(3)}</td>${gatedCellHtml}${rewriteCellHtml}` +
         `<td>${point.anchorDistance.toFixed(3)}</td>` +
+        `${messagesCell}` +
         `<td><span class="verdict verdict-${point.verdict}">${escapeHtml(VERDICT_LABEL[point.verdict])}</span></td></tr>`
       );
     })
     .join('\n');
-  return `<table class="segments gate"><thead><tr>${
-    hasExpanded
-      ? `<th title="The Turn being measured (your message arriving; the reply is folded in when the Turn completes).">Turn</th><th title="The global index of the message across the thread, for cross-referencing raw data.">Msg #</th><th title="Drift of the arriving message exactly as it came in, against the segment baseline — the measurement lane. It never alone decides a verdict.">drift_p (raw)</th>`
-      : '<th>Turn</th><th>Msg #</th><th>drift_p (raw)</th>'
-  }${gatedHeader}${rewriteHeader}${anchorHead}<th title="The outcome for the Turn: muted (cold start, not yet observed), pass, withheld (dual-reference: near the previous verdict), fire (pause before this Turn).">Gate verdict</th></tr></thead><tbody>\n${rows}\n</tbody></table>`;
+  const baseHeaders = hasExpanded
+    ? `<th title="The Turn being measured (your message arriving; the reply is folded in when the Turn completes).">Turn</th><th title="The global index of the message across the thread, for cross-referencing raw data.">Msg #</th><th title="Drift of the arriving message exactly as it came in, against the segment baseline — the measurement lane. It never alone decides a verdict.">drift_p (raw)</th>${gatedHeader}${rewriteHeader}${anchorHead}`
+    : '<th>Turn</th><th>Msg #</th><th>drift_p (raw)</th><th>Anchor distance</th>';
+  return `<table class="segments gate"><thead><tr>${baseHeaders}<th title="The messages in this Turn (user + assistant reply when present).">Messages</th><th title="The outcome for the Turn: muted (cold start, not yet observed), pass, fire (pause before this Turn) — the segment-local two-channel verdict.">Gate verdict</th></tr></thead><tbody>\n${rows}\n</tbody></table>`;
 }
 
 const DIVERGENCE_LABEL: Record<string, string> = {
   gate_fired_fold_quiet: 'gate fired, fold found no boundary',
   fold_cut_gate_quiet: 'fold cut a boundary, gate stayed quiet',
-  gate_withheld_fold_cut: 'fold cut a boundary, gate withheld (near V_last)',
 };
 
 function renderDivergenceRows(report: ThreadReport): string {
   const gate = report.gateReplay;
   if (!gate) return '';
+
+  // Flatten all turns from segments into a lookup by turnNumber for the gate table
+  const allTurns: GateReplayTurn[] = [];
+  for (const segment of report.segments) {
+    for (const turn of segment.turns) {
+      allTurns.push({
+        turnNumber: turn.turnNumber,
+        userContent: turn.userContent,
+        assistantContent: turn.assistantContent,
+      });
+    }
+  }
+
   const divergenceSection =
     gate.divergences.length === 0
       ? '<p class="empty">No gate/fold divergences on this replay.</p>'
@@ -1262,11 +1308,11 @@ function renderDivergenceRows(report: ThreadReport): string {
           .join('')}</ul>`;
   const counselSection =
     gate.anchorCounsel.length === 0
-      ? '<p class="empty">No Anchor-wander counsel: no sustained rise recorded.</p>'
+      ? '<p class="empty">No Anchor-wander counsel on the prospective side: no sustained rise recorded.</p>'
       : `<ul class="divergences">${gate.anchorCounsel
           .map(
             (row) =>
-              `<li>Turn ${row.turnNumber}: the thread has gone somewhere (wander ${row.anchorDistance.toFixed(3)}) — advisory only</li>`,
+              `<li>Turn ${row.turnNumber}: the thread has gone somewhere (prospective wander ${row.anchorDistance.toFixed(3)}) — advisory only</li>`,
           )
           .join('')}</ul>`;
   const hasExpanded = gate.points.some((point) => point.driftPSource !== undefined);
@@ -1274,10 +1320,10 @@ function renderDivergenceRows(report: ThreadReport): string {
     ? '<p class="gate-note">Expansion pipeline active: the drift_p (verdict) column is the live signal — the recomposed user message for ambiguous Turns, the raw message where no rewrite landed (falls back explained via expansion note); the drift_p (raw) column keeps the arrival-time reading for inspection.</p>\n'
     : '';
   const readingGuide = hasExpanded
-    ? '<p class="gate-note"><strong>Reading the table.</strong> Each row is one Turn’s arrival-time measurement, not its history. <em>drift_p (raw)</em> is how the message looked as it arrived — a measurement; it never fires the gate by itself. <em>drift_p (verdict)</em> is what the gate judges: drift on the rewritten (decontextualised) message when a rewrite landed, on the raw message otherwise. <em>Anchor distance</em> is distance from the thread’s opening topic — advisory only. The outcome in <em>Gate verdict</em> comes from the segment-local criterion in the chart (the live trigger line), not from the raw drift alone: a large raw drift can pass when its segment accepts large steps, and a modest one can fire when the segment has learned a tight band.</p>\n'
+    ? '<p class="gate-note"><strong>Reading the table.</strong> Each row is one Turn&#39;s arrival-time measurement, not its history. <em>drift_p (raw)</em> is how the message looked as it arrived — a measurement; it never fires the gate by itself. <em>drift_p (verdict)</em> is what the gate judges: drift on the rewritten (decontextualised) message when a rewrite landed, on the raw message otherwise. <em>Anchor distance</em> is distance from the thread&#39;s opening topic — advisory only. The outcome in <em>Gate verdict</em> comes from the segment-local criterion in the chart (the live trigger line), not from the raw drift alone: a large raw drift can pass when its segment accepts large steps, and a modest one can fire when the segment has learned a tight band.</p>\n'
     : '';
-  return `<p class="gate-note">Pretend replay: every stored user message scored as a Prospective Turn through the live-gate logic. Advisory only — the fold stays authoritative; divergence rows are calibration data, not failures.</p>
-${expansionNote}${readingGuide}${renderGateTable(gate.points)}
+  return `<p class="gate-note">Pretend replay: every stored user message scored as a Prospective Turn through the live-gate logic — the SAME two-channel verdict the offline fold runs; only the reading differs (user-only message vs the complete exchange). Advisory only — the fold stays authoritative, and with identical judging logic a divergence row can only come from that reading difference: calibration data, not failures. The fold's own Anchor-wander counsel carries this report's slow signal on the offline chart; the rows below are the prospective side's.</p>
+${expansionNote}${readingGuide}${renderGateTable(gate.points, allTurns)}
 <h3>Gate/fold divergences</h3>
 ${divergenceSection}
 <h3>Anchor-wander counsel</h3>
@@ -1367,13 +1413,21 @@ const STYLES = `
       .gate-note { color: #616161; font-size: 0.85rem; margin: 0 0 0.75rem; }
       .verdict { font-size: 0.8rem; }
       .verdict-fire { color: #6a1b9a; font-weight: 600; }
-      .verdict-withheld { color: #ef6c00; }
       .verdict-muted { color: #9e9e9e; }
       .gate-point-fire td { background: #f3e5f5; }
       ul.divergences { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; }
       ul.divergences li { margin: 0.15rem 0; }
       .emd-baseline { font-size: 0.85rem; margin: 0 0 0.75rem; color: #424242; }
       .emd-revisit td { background: #f3e5f5; }
+      /* Gate table column widths — mirrors the Topic segments table layout. */
+      table.segments.gate th:nth-child(1), table.segments.gate td:nth-child(1) { width: 3rem; }
+      table.segments.gate th:nth-child(2), table.segments.gate td:nth-child(2) { width: 5rem; }
+      table.segments.gate th:nth-child(3), table.segments.gate td:nth-child(3) { width: 6rem; }
+      table.segments.gate th:nth-child(4), table.segments.gate td:nth-child(4) { width: 7rem; }
+      table.segments.gate th:nth-child(5), table.segments.gate td:nth-child(5) { width: 18rem; }
+      table.segments.gate th:nth-child(6), table.segments.gate td:nth-child(6) { width: 6rem; }
+      table.segments.gate th:nth-child(7), table.segments.gate td:nth-child(7) { width: 30%; }
+      table.segments.gate th:nth-child(8), table.segments.gate td:nth-child(8) { width: 10rem; }
 `;
 
 function renderHtml(report: ThreadReport): string {
