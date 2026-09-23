@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { env } from '@config/env';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
-import { EMBEDDING_MODEL_ID, REWRITE_MODEL_ID } from '@services/aiService/config';
+import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
 import { getThreadSummary } from '@services/threadSummaryService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -89,7 +90,7 @@ describe('getThreadSummary', () => {
     expect(summary?.models).toEqual([
       { modelId: 'provider/model-a', roles: ['chat'], pricing: null },
       { modelId: EMBEDDING_MODEL_ID, roles: ['embedding'], pricing: null },
-      { modelId: REWRITE_MODEL_ID, roles: ['rewrite', 'judge'], pricing: null },
+      { modelId: env.REWRITE_MODEL, roles: ['rewrite', 'judge'], pricing: null },
     ]);
   });
 

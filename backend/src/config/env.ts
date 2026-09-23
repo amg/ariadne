@@ -36,6 +36,8 @@ export type EnvConfig = {
 
   // Thread analysis (live drift gate)
   THREAD_ANALYSIS_MODE: 'off' | 'heuristic' | 'always';
+  JUDGE_MODEL: string;
+  REWRITE_MODEL: string;
 
   // CORS
   CORS_ORIGINS: string | undefined;
@@ -76,6 +78,8 @@ const defaultConfig: Omit<EnvConfig, 'NODE_ENV'> = {
 
   // Thread analysis (live drift gate)
   THREAD_ANALYSIS_MODE: 'heuristic',
+  JUDGE_MODEL: 'Qwen/Qwen3.5-9B',
+  REWRITE_MODEL: 'Qwen/Qwen3.5-9B',
 
   // CORS
   CORS_ORIGINS: undefined,
@@ -190,6 +194,15 @@ export const env: EnvConfig = {
   // Stored signals survive an `off` period and reappear when flipped back.
   get THREAD_ANALYSIS_MODE() {
     return getThreadAnalysisMode('THREAD_ANALYSIS_MODE', 'heuristic');
+  },
+  // Expansion-trigger judge and rewrite calls run on small, cheap models —
+  // classification and bounded rephrasing, never answering. Overridable so
+  // each can be repointed independently when a better small model appears.
+  get JUDGE_MODEL() {
+    return process.env.JUDGE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
+  },
+  get REWRITE_MODEL() {
+    return process.env.REWRITE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
   },
 
   // CORS

@@ -1,3 +1,4 @@
+import { env } from '@config/env';
 import type { Message } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
@@ -15,7 +16,6 @@ import {
   buildMockEmbedding,
   startMockInferenceServer,
 } from '../../mock/inferenceServer';
-import { JUDGE_MODEL_ID, REWRITE_MODEL_ID } from './aiService';
 import { parseJudgeLabel } from './aiService/judge';
 import { simulateGateReplay } from './threadAnalysis/gateReplay';
 import {
@@ -464,8 +464,8 @@ describe('analyzeThread — rewrite e2e', () => {
     // and the judge (consulted in heuristic mode), exactly once.
     expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
-      modelId: REWRITE_MODEL_ID,
-      judgeModelId: JUDGE_MODEL_ID,
+      modelId: env.REWRITE_MODEL,
+      judgeModelId: env.JUDGE_MODEL,
     });
 
     // Turns 2, 3 and 5 ride the rewritten reading: 3 and 5 via the
@@ -593,8 +593,8 @@ describe('analyzeThread — rewrite e2e', () => {
     expect(report.totals.judgeCostUsd).toBeGreaterThan(0);
     expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
-      modelId: REWRITE_MODEL_ID,
-      judgeModelId: JUDGE_MODEL_ID,
+      modelId: env.REWRITE_MODEL,
+      judgeModelId: env.JUDGE_MODEL,
     });
     for (const point of report.gateReplay?.points ?? []) {
       expect(point.driftPSource).toBe('raw-fallback');
@@ -629,7 +629,7 @@ describe('analyzeThread — rewrite e2e', () => {
         .filter((point) => point.driftPSource === 'rewritten')
         .map((point) => point.turnNumber) ?? [];
     expect(rewrittenTurns).toEqual([2, 3, 4, 5]);
-    expect(report.params.rewrite).toEqual({ mode: 'always', modelId: REWRITE_MODEL_ID });
+    expect(report.params.rewrite).toEqual({ mode: 'always', modelId: env.REWRITE_MODEL });
     // Always mode rewrites everything — the judge has nothing to add.
     expect(report.totals.judgeCostUsd).toBe(0);
   });
@@ -659,8 +659,8 @@ describe('analyzeThread — rewrite e2e', () => {
     expect(report.gateReplay?.points[3]?.rewriteNote).toBe('skip_judge_failed');
     expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
-      modelId: REWRITE_MODEL_ID,
-      judgeModelId: JUDGE_MODEL_ID,
+      modelId: env.REWRITE_MODEL,
+      judgeModelId: env.JUDGE_MODEL,
     });
   });
 });

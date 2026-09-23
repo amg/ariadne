@@ -33,6 +33,8 @@ services:
       - ENABLE_REASONING=${ENABLE_REASONING}
       - CORS_ORIGINS=${CORS_ORIGINS}
       - THREAD_ANALYSIS_MODE=${THREAD_ANALYSIS_MODE}
+      - JUDGE_MODEL=${JUDGE_MODEL}
+      - REWRITE_MODEL=${REWRITE_MODEL}
     ports:
       - "${PORT:-3001}:3001"
     depends_on:

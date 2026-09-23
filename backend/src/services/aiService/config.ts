@@ -11,31 +11,11 @@ export const SYSTEM_PROMPT = 'You are a helpful assistant.';
 
 /**
  * Embedding model for thread-health Turn embeddings. A configuration
- * constant — no env toggle.
+ * constant — deliberately not env-toggleable: the segment chain and its
+ * stored signals are keyed by this model id, so repointing it mid-life
+ * silently starts a new chain.
  */
 export const EMBEDDING_MODEL_ID = 'BAAI/bge-m3';
-
-/**
- * Expanded-signal rewrite model: the detached decontextualising rewriter
- * that turns an ambiguous incoming user message into a self-contained one
- * before its Prospective Turn embeds. Small, cheap instruct capacity is
- * enough — the task is bounded rephrasing, never answering. Tracks the
- * chat model; kept as its own constant — no env toggle — so the rewriter
- * can be repointed independently when a reliable small model appears.
- */
-export const REWRITE_MODEL_ID = 'Qwen/Qwen3.5-9B';
-
-/**
- * Expansion trigger judge model: the tiny classifier that decides whether
- * a short, non-heuristic incoming message dangles a referent into the
- * prior Turn before a rewrite is even attempted. Classification-only
- * (one verdict label out, nothing else), so cheap small-model capacity is
- * enough. Small models load on demand (cold starts up to ~15s), so the
- * judge call carries a load-tolerant timeout. Tracks the chat model; kept
- * as its own constant — no env toggle — so the judge can be repointed to
- * a cheap small model independently.
- */
-export const JUDGE_MODEL_ID = 'Qwen/Qwen3.5-9B';
 
 export const NOT_CONFIGURED_MESSAGE =
   'Neither MOCK_AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';

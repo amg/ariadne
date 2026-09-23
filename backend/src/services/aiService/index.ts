@@ -9,7 +9,7 @@
  * exchange.ts (per-exchange lifecycle/persistence + idle watchdog), submitChat.ts (flow).
  */
 export { computeCostUsd } from './cost';
-export { EMBEDDING_MODEL_ID, JUDGE_MODEL_ID, REWRITE_MODEL_ID } from './config';
+export { EMBEDDING_MODEL_ID } from './config';
 export { embedText, type EmbedTextData } from './embedText';
 export { rewriteFollowUp } from './rewrite';
 export {

@@ -11,9 +11,7 @@ import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSe
 import { type Result, err, ok } from '../../types/result';
 import {
   EMBEDDING_MODEL_ID,
-  JUDGE_MODEL_ID,
   type JudgeContextDependenceInput,
-  REWRITE_MODEL_ID,
   embedText,
   judgeContextDependence,
   rewriteFollowUp,
@@ -137,7 +135,7 @@ async function rewriteUserMessage(input: {
     return { rewrittenText: null, rewriteCostUsd: null, judgeCostUsd: null };
   }
   const rewriteCostUsd = await computeInferenceCostUsd(
-    REWRITE_MODEL_ID,
+    env.REWRITE_MODEL,
     rewritten.data.usage.promptTokens,
     rewritten.data.usage.completionTokens,
   );
@@ -165,7 +163,7 @@ async function needsRewrite(input: {
   const judged = await judgeContextDependence(judgeInput);
   if (judged.type === 'error') return { rewrite: false, judgeCostUsd: null };
   const judgeCostUsd = await computeInferenceCostUsd(
-    JUDGE_MODEL_ID,
+    env.JUDGE_MODEL,
     judged.data.usage.promptTokens,
     judged.data.usage.completionTokens,
   );

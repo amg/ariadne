@@ -1,3 +1,4 @@
+import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { upsertMessageEmbedding } from '@queries/messageEmbeddings/upsertMessageEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
@@ -7,9 +8,7 @@ import { type Result, err, ok } from '../../types/result';
 import {
   type ContextDependenceVerdict,
   EMBEDDING_MODEL_ID,
-  JUDGE_MODEL_ID,
   type JudgeContextDependenceInput,
-  REWRITE_MODEL_ID,
   embedText,
   judgeContextDependence,
   rewriteFollowUp,
@@ -198,10 +197,10 @@ function recordGateSection(
   },
 ): void {
   if (rewriteMode !== 'off') {
-    report.params.rewrite = { mode: rewriteMode, modelId: REWRITE_MODEL_ID };
+    report.params.rewrite = { mode: rewriteMode, modelId: env.REWRITE_MODEL };
     // The backstop only consults in `heuristic` mode; record its model
     // only when it actually ran.
-    if (data.judgeConsulted) report.params.rewrite.judgeModelId = JUDGE_MODEL_ID;
+    if (data.judgeConsulted) report.params.rewrite.judgeModelId = env.JUDGE_MODEL;
   }
   report.gateReplay = data.section;
   report.totals.embeddingCostUsd = round10(embeddingCostUsd + data.prospectiveCostUsd);
@@ -273,7 +272,7 @@ async function generateRewrite(candidate: RewriteCandidate): Promise<RewriteAtte
     return { kind: 'skip_rewrite_failed', costUsd: 0 };
   }
   const costUsd = await computeInferenceCostUsd(
-    REWRITE_MODEL_ID,
+    env.REWRITE_MODEL,
     rewritten.data.usage.promptTokens,
     rewritten.data.usage.completionTokens,
   );
@@ -321,7 +320,7 @@ async function evaluateCandidatesForRewrite(
     judgeCostUsd = round10(
       judgeCostUsd +
         (await computeInferenceCostUsd(
-          JUDGE_MODEL_ID,
+          env.JUDGE_MODEL,
           judged.data.usage.promptTokens,
           judged.data.usage.completionTokens,
         )),

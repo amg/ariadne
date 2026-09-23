@@ -61,6 +61,8 @@ const origins = getCorsOrigins();
   `off` skips the live pipeline and hides the Analysis surface (stored signals
   survive and reappear when flipped back); `heuristic`/`always` run the live
   lane with that expansion tier.
+- `JUDGE_MODEL` - Expansion-trigger judge model (default: 'Qwen/Qwen3.5-9B')
+- `REWRITE_MODEL` - Expanded-signal rewrite model (default: 'Qwen/Qwen3.5-9B')
 
 ### CORS
 - `CORS_ORIGINS` - Comma-separated allowed origins (optional, defaults to localhost)

@@ -1,7 +1,7 @@
+import { env } from '@config/env';
 import { generateText } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
-  JUDGE_MODEL_ID,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
@@ -18,8 +18,8 @@ import { withOnDemandBackoff } from './onDemandRetry';
  * prior exchange, or does it stand on its own? The verdict only ever
  * ADDS rewrite candidates — the heuristic's own picks never touch this
  * path, and a failed or unreadable verdict fails open to the raw fast
- * path, exactly like the heuristic said no. Crawling on the small model
- * (`JUDGE_MODEL_ID`); inherits the established provider config
+ * path, exactly like the heuristic said no. Crawling on the configured
+ * judge model (`env.JUDGE_MODEL`); inherits the established provider config
  * resolution (mock switch, configured check) exactly like the chat,
  * embedding and rewrite paths, and the shared on-demand busy-backoff
  * (`onDemandRetry`) that absorbs the provider's instance-loading stall.
@@ -103,7 +103,7 @@ async function judgeOnce(
     // maxRetries 0, like every other boundary call: busyness retries are
     // bounded in judgeContextDependence's backoff instead.
     const result = await generateText({
-      model: createModel({ ...config, model: JUDGE_MODEL_ID }),
+      model: createModel({ ...config, model: env.JUDGE_MODEL }),
       system: JUDGE_SYSTEM_PROMPT,
       prompt: buildJudgePrompt(input),
       maxRetries: 0,

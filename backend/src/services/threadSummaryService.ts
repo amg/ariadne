@@ -1,8 +1,9 @@
+import { env } from '@config/env';
 import { sumAnalyzerCostsByThread } from '@queries/messageEmbeddings/sumAnalyzerCostsByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
 import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import { EMBEDDING_MODEL_ID, JUDGE_MODEL_ID, REWRITE_MODEL_ID } from './aiService/config';
+import { EMBEDDING_MODEL_ID } from './aiService/config';
 import { type ModelConfigRow, getModelConfig } from './modelConfigService';
 
 /** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
@@ -252,8 +253,8 @@ export async function getThreadSummary(args: {
     [
       { role: 'chat', modelId: primaryModel },
       { role: 'embedding', modelId: embeddingCost > 0 ? EMBEDDING_MODEL_ID : null },
-      { role: 'rewrite', modelId: rewriteCost > 0 ? REWRITE_MODEL_ID : null },
-      { role: 'judge', modelId: judgeCost > 0 ? JUDGE_MODEL_ID : null },
+      { role: 'rewrite', modelId: rewriteCost > 0 ? env.REWRITE_MODEL : null },
+      { role: 'judge', modelId: judgeCost > 0 ? env.JUDGE_MODEL : null },
     ],
     loadConfig,
   );

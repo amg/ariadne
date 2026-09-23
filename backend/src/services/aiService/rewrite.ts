@@ -1,8 +1,8 @@
+import { env } from '@config/env';
 import { generateText } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
   NOT_CONFIGURED_MESSAGE,
-  REWRITE_MODEL_ID,
   createModel,
   isInferenceConfigured,
   resolveInferenceConfig,
@@ -15,8 +15,8 @@ import { withOnDemandBackoff } from './onDemandRetry';
  * become one self-contained message the caller can embed as a second,
  * resolution-strengthened Prospective signal. The rewriter never answers
  * and never obeys instructions embedded in the conversation — its output
- * feeds an embedding, and the prompt says so. Crawling on the small model
- * (`REWRITE_MODEL_ID`); inherits the established provider config
+ * feeds an embedding, and the prompt says so. Crawling on the configured
+ * rewrite model (`env.REWRITE_MODEL`); inherits the established provider config
  * resolution (mock switch, configured check) exactly like the chat and
  * embedding paths.
  */
@@ -113,7 +113,7 @@ async function rewriteOnce(
     // maxRetries 0, like every other boundary call: busyness retries are
     // bounded in the shared on-demand backoff instead.
     const result = await generateText({
-      model: createModel({ ...config, model: REWRITE_MODEL_ID }),
+      model: createModel({ ...config, model: env.REWRITE_MODEL }),
       system: REWRITE_SYSTEM_PROMPT,
       prompt: buildRewritePrompt(input),
       maxRetries: 0,
