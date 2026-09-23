@@ -188,6 +188,7 @@ function mirrorJudge(
 interface ExpectedArrival {
   verdict: 'muted' | 'pass' | 'fire';
   fireChannel: 'immediate' | 'slow' | null;
+  slowDriftStartMessageId: string | null;
   driftP: number | null;
   mu: number | null;
   sigma: number | null;
@@ -253,7 +254,7 @@ function expectedChain(specs: TurnSpec[]): ExpectedArrival[] {
             unitVector(memberSum),
           );
     const judged = mirrorArrival(state, reading, completedTurns);
-    arrived.push({ ...judged, segmentStartIndex });
+    arrived.push({ ...judged, segmentStartIndex, slowDriftStartMessageId: null });
     if (judged.verdict === 'fire') segmentStartIndex = arrived.length - 1;
     const foldedVector = toFloat4(buildMockEmbedding(turnBlock(specRow.user, specRow.assistant)));
     memberSum = foldTurnVector(memberSum, foldedVector, judged.verdict === 'fire');
@@ -372,6 +373,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(outcome).toEqual({
       verdict: lastExpected?.verdict ?? null,
       fireChannel: lastExpected?.fireChannel ?? null,
+      slowDriftStartMessageId: lastExpected?.slowDriftStartMessageId ?? null,
       messageId: userMessageIds[userMessageIds.length - 1] ?? null,
     });
 
@@ -530,6 +532,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     const unanswered = await seedThread('user only', [{ user: `a question with no reply${PAD}` }]);
     expect(assertSuccess(await runLiveGate({ threadId: empty.threadId }))).toEqual({
       verdict: null,
+      slowDriftStartMessageId: null,
       fireChannel: null,
       messageId: null,
     });
@@ -587,7 +590,7 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
     const outcome = await withAnalysisOff(() => runLiveGate({ threadId }));
     expect(outcome).toEqual({
       type: 'success',
-      data: { verdict: null, fireChannel: null, messageId: null },
+      data: { verdict: null, slowDriftStartMessageId: null, fireChannel: null, messageId: null },
     });
     const { logs, segments } = await readChain(threadId);
     expect(logs).toHaveLength(0);

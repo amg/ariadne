@@ -73,6 +73,8 @@ export const MIN_CRITERION_SAMPLES = 2;
  */
 export interface Judgment {
   fireChannel: 'immediate' | 'slow' | null;
+  /** When fireChannel === 'slow', the message ID of the turn that anchored the Page-Hinkley low-water mark. */
+  slowDriftStartMessageId: string | null;
   immediateThreshold: number;
   /** Null while the criterion bootstraps on T_segment (baseline < 2). */
   immediateZ: number | null;
@@ -148,6 +150,8 @@ export function twoChannelJudge(
   state: VerdictState,
   params: JudgingParams,
   reading: number,
+  anchorReading: number,
+  sampleId: string,
 ): Judgment {
   const mu = state.baseline.mean;
   const sigma = state.baseline.std;
@@ -163,6 +167,7 @@ export function twoChannelJudge(
     immediateZ,
     segmentMu: mu,
     segmentSigma: sigma,
+    slowDriftStartMessageId: null,
   };
 
   if (reading >= immediateThreshold) {
@@ -177,13 +182,14 @@ export function twoChannelJudge(
   // The patrol consumes the raw drift step verbatim — every accepted
   // reading, from the very first: its own running mean is the baseline,
   // the minSamples floor guards the fire.
-  const firedSlow = state.patrol.update(reading);
+  const firedSlow = state.patrol.update(anchorReading, sampleId);
   if (firedSlow) {
     // The accumulated rise reached λ (drift units): verdict. Shred the
     // baseline; the detector re-stamps its firing rise, then resets itself
     // in update().
+    const slowDriftStartMessageId = state.patrol.lowWaterId;
     state.baseline = createSegmentRollingStats();
-    return { ...base, fireChannel: 'slow', patrolConsumed: true };
+    return { ...base, fireChannel: 'slow', patrolConsumed: true, slowDriftStartMessageId };
   }
 
   return { ...base, fireChannel: null, patrolConsumed: true };
@@ -200,8 +206,10 @@ export function evaluateAndRecord(
   state: VerdictState,
   params: JudgingParams,
   reading: number,
+  anchorReading: number,
+  sampleId: string,
 ): { judgment: Judgment; fired: boolean } {
-  const judgment = twoChannelJudge(state, params, reading);
+  const judgment = twoChannelJudge(state, params, reading, anchorReading, sampleId);
   const fired = judgment.fireChannel !== null;
   if (!fired) state.baseline.add(reading);
   return { judgment, fired };

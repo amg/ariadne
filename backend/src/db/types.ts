@@ -112,6 +112,8 @@ export interface SegmentDriftLogsTable {
   verdict: 'muted' | 'pass' | 'fire';
   /** Which channel produced a fire; null otherwise. */
   fireChannel: 'immediate' | 'slow' | null;
+  /** When fireChannel === 'slow', the message ID of the turn that anchored the Page-Hinkley low-water mark. */
+  slowDriftStartMessageId: string | null;
   createdAt: Generated<Date>;
 }
 

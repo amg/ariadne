@@ -29,7 +29,7 @@ export interface PageHinkleyOptions {
 
 export interface PageHinkleyDetector {
   /** Feed one sample; true when this sample fires a detection. */
-  update(sample: number): boolean;
+  update(sample: number, sampleId: string): boolean;
   /**
    * Hard reset: the regime after a verdict becomes its own baseline
    *. The immediate channel fires this when it catches a sharp
@@ -55,6 +55,8 @@ export interface PageHinkleyDetector {
    * gate draws from these two.
    */
   readonly lastRise: number | null;
+  /** The id of the sample that anchors the low-water mark. */
+  readonly lowWaterId: string | null;
 }
 
 export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetector {
@@ -62,16 +64,20 @@ export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetec
   let sum = 0;
   let cumulative = 0;
   let lowWater = 0;
+  let lowWaterIdValue: string | null = null;
   let lastMeanValue: number | null = null;
   let lastRiseValue: number | null = null;
 
   return {
-    update(sample: number): boolean {
+    update(sample: number, sampleId: string): boolean {
       count += 1;
       sum += sample;
       const mean = sum / count;
       cumulative += sample - mean - options.delta;
-      if (cumulative < lowWater) lowWater = cumulative;
+      if (count === 1 || cumulative < lowWater) {
+        lowWater = cumulative;
+        lowWaterIdValue = sampleId;
+      }
       lastMeanValue = mean;
       lastRiseValue = cumulative - lowWater;
       const fired = count >= options.minSamples && cumulative - lowWater >= options.lambda;
@@ -94,6 +100,7 @@ export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetec
       sum = 0;
       cumulative = 0;
       lowWater = 0;
+      lowWaterIdValue = null;
       lastMeanValue = null;
       lastRiseValue = null;
     },
@@ -108,6 +115,9 @@ export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetec
     },
     get lastRise(): number | null {
       return lastRiseValue;
+    },
+    get lowWaterId(): string | null {
+      return lowWaterIdValue;
     },
   };
 }

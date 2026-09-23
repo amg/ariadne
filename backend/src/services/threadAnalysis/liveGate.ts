@@ -52,6 +52,7 @@ export interface LiveArrivalOutcome {
   /** Verdict on the walk's last processed arrival; null when nothing arrived. */
   verdict: GateVerdict | null;
   fireChannel: 'immediate' | 'slow' | null;
+  slowDriftStartMessageId: string | null;
   /** The user Message the last arrival landed on; null when nothing arrived. */
   messageId: string | null;
 }
@@ -287,6 +288,12 @@ interface LiveWalkState {
    * against. Null until the segment folds its first complete Turn.
    */
   memberSum: number[] | null;
+  /**
+   * The folded Turn vector of the first turn of the current segment.
+   * Null until the segment folds its first complete Turn. Used to measure
+   * the anchor distance for the slow channel.
+   */
+  currentSegmentAnchor: number[] | null;
   /** Complete Turns folded so far — the cold-start mute counter. */
   completedTurns: number;
   /** The live-chain segment row the next verdict logs against. */
@@ -332,7 +339,7 @@ export async function runLiveGate({
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
   if (env.THREAD_ANALYSIS_MODE === 'off')
-    return ok({ verdict: null, fireChannel: null, messageId: null });
+    return ok({ verdict: null, fireChannel: null, slowDriftStartMessageId: null, messageId: null });
   return runSequentially(threadId, () =>
     processLiveChain(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
   );
@@ -383,7 +390,8 @@ async function processLiveChain({
   // Fresh read at walk time: a queued walk runs after whatever elapsed
   // between its surface call and its turn under the lock.
   const mode = env.THREAD_ANALYSIS_MODE;
-  if (mode === 'off') return ok({ verdict: null, fireChannel: null, messageId: null });
+  if (mode === 'off')
+    return ok({ verdict: null, fireChannel: null, slowDriftStartMessageId: null, messageId: null });
   const rows = await listMessagesByThread({ threadId });
   const messages = rows.map((row) => ({
     id: row.id,
@@ -393,7 +401,8 @@ async function processLiveChain({
     createdAt: row.createdAt,
   }));
   const turns = buildLiveTurns(messages);
-  if (turns.length === 0) return ok({ verdict: null, fireChannel: null, messageId: null });
+  if (turns.length === 0)
+    return ok({ verdict: null, fireChannel: null, slowDriftStartMessageId: null, messageId: null });
 
   let endIndex = turns.length;
   if (upToMessageId !== undefined) {
@@ -428,6 +437,7 @@ async function processLiveChain({
     judging,
     verdictState: createVerdictState(judging),
     memberSum: null,
+    currentSegmentAnchor: null,
     completedTurns: 0,
     currentSegmentId: null,
     storedSegments: storedSegments.map((segment) => ({
@@ -437,7 +447,12 @@ async function processLiveChain({
     loggedMessageIds: new Set(storedLogs.map((log) => log.messageId)),
   };
 
-  let outcome: LiveArrivalOutcome = { verdict: null, fireChannel: null, messageId: null };
+  let outcome: LiveArrivalOutcome = {
+    verdict: null,
+    fireChannel: null,
+    slowDriftStartMessageId: null,
+    messageId: null,
+  };
 
   for (let i = 0; i < endIndex; i += 1) {
     const row = turns[i];
@@ -462,6 +477,7 @@ interface ArrivedJudgment {
   muted: boolean;
   fired: boolean;
   fireChannel: 'immediate' | 'slow' | null;
+  slowDriftStartMessageId: string | null;
   driftP: number | null;
   segmentMu: number | null;
   segmentSigma: number | null;
@@ -475,14 +491,26 @@ interface ArrivedJudgment {
  * the arrival's own Turn contributes nothing to the reading it is
  * measured with.
  */
-function evaluateArrivalAgainstLedger(state: LiveWalkState, vector: number[]): ArrivedJudgment {
+function evaluateArrivalAgainstLedger(
+  state: LiveWalkState,
+  vector: number[],
+  sampleId: string,
+): ArrivedJudgment {
   const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
   const driftP = gravity === null ? null : cosineDistance(vector, gravity);
+  const anchorDriftP =
+    state.currentSegmentAnchor === null ? null : cosineDistance(vector, state.currentSegmentAnchor);
   const muted = isColdStart(state.completedTurns, state.judging, driftP);
   let fired = false;
   let judgment: ReturnType<typeof evaluateAndRecord>['judgment'] | null = null;
-  if (!muted && driftP !== null) {
-    ({ judgment, fired } = evaluateAndRecord(state.verdictState, state.judging, driftP));
+  if (!muted && driftP !== null && anchorDriftP !== null) {
+    ({ judgment, fired } = evaluateAndRecord(
+      state.verdictState,
+      state.judging,
+      driftP,
+      anchorDriftP,
+      sampleId,
+    ));
   }
   let arrivedVerdict: GateVerdict = 'pass';
   if (muted) arrivedVerdict = 'muted';
@@ -491,6 +519,7 @@ function evaluateArrivalAgainstLedger(state: LiveWalkState, vector: number[]): A
     muted,
     fired,
     fireChannel: judgment?.fireChannel ?? null,
+    slowDriftStartMessageId: judgment?.slowDriftStartMessageId ?? null,
     driftP,
     segmentMu: judgment?.segmentMu ?? null,
     segmentSigma: judgment?.segmentSigma ?? null,
@@ -516,6 +545,7 @@ async function logArrivalIfNeeded(
     zScore: judged.immediateZ,
     verdict: judged.arrivedVerdict,
     fireChannel: judged.fireChannel,
+    slowDriftStartMessageId: judged.slowDriftStartMessageId,
   });
   state.loggedMessageIds.add(userMessageId);
 }
@@ -542,6 +572,7 @@ async function completeTurn(input: {
   const { state } = input;
   if (input.reseed || state.memberSum === null) {
     state.memberSum = [...folded.data];
+    state.currentSegmentAnchor = [...folded.data];
   } else {
     state.memberSum = accumulate(state.memberSum, folded.data);
   }
@@ -581,7 +612,7 @@ async function processUserMessage(input: {
   });
   if (signal.type === 'error') return signal;
 
-  const judged = evaluateArrivalAgainstLedger(state, signal.data.vector);
+  const judged = evaluateArrivalAgainstLedger(state, signal.data.vector, userMessageId);
   await logArrivalIfNeeded(state, userMessageId, judged);
 
   if (judged.fired) {
@@ -605,6 +636,7 @@ async function processUserMessage(input: {
   return ok({
     verdict: judged.arrivedVerdict,
     fireChannel: judged.fireChannel,
+    slowDriftStartMessageId: judged.slowDriftStartMessageId,
     messageId: userMessageId,
   });
 }

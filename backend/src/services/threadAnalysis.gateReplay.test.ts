@@ -117,16 +117,18 @@ describe('PageHinkley — the crawling channel detector', () => {
     const gate = createPageHinkley({ lambda: 0.2, delta: 0.02, minSamples: 2 });
     // Flat baseline: nothing accumulates past the allowance.
     for (const sample of [0.3, 0.31, 0.29, 0.3, 0.305]) {
-      expect(gate.update(sample)).toBe(false);
+      expect(gate.update(sample, 'test-id')).toBe(false);
     }
     // Sustained rise above baseline + allowance fires.
-    const verdicts = [0.62, 0.66, 0.7].map((sample) => gate.update(sample));
+    const verdicts = [0.62, 0.66, 0.7].map((sample) => gate.update(sample, 'test-id'));
     expect(verdicts).toContain(true);
   });
 
   it('is blind to rises smaller than the allowance delta', () => {
     const gate = createPageHinkley({ lambda: 0.05, delta: 0.1, minSamples: 2 });
-    const verdicts = [0.3, 0.31, 0.35, 0.33, 0.32, 0.36].map((sample) => gate.update(sample));
+    const verdicts = [0.3, 0.31, 0.35, 0.33, 0.32, 0.36].map((sample) =>
+      gate.update(sample, 'test-id'),
+    );
     expect(verdicts).toEqual([false, false, false, false, false, false]);
   });
 
@@ -135,19 +137,19 @@ describe('PageHinkley — the crawling channel detector', () => {
     // A true rise begins at sample 3, but the detector is locked until it
     // has seen minSamples — the valuable early evidence is deliberately
     // spent to keep the baseline honest.
-    expect(gate.update(0.1)).toBe(false);
-    expect(gate.update(0.1)).toBe(false);
-    expect(gate.update(0.9)).toBe(false); // rising already, still locked
-    expect(gate.update(0.9)).toBe(true); // sample 4: admitted and firing
+    expect(gate.update(0.1, 'test-id')).toBe(false);
+    expect(gate.update(0.1, 'test-id')).toBe(false);
+    expect(gate.update(0.9, 'test-id')).toBe(false); // rising already, still locked
+    expect(gate.update(0.9, 'test-id')).toBe(true); // sample 4: admitted and firing
   });
 
   it('learns the new regime after a fire: an equal rise does not re-fire', () => {
     const gate = createPageHinkley({ lambda: 0.2, delta: 0.02, minSamples: 2 });
-    for (const sample of [0.3, 0.3, 0.75, 0.78, 0.8]) gate.update(sample);
+    for (const sample of [0.3, 0.3, 0.75, 0.78, 0.8]) gate.update(sample, 'test-id');
     // The fire happened; state was reset (O(1): four scalars, nothing kept).
     expect(gate.sampleCount).toBeLessThan(5);
     // The elevated-but-flat new regime is the new baseline: no re-fire.
-    const verdicts = [0.8, 0.79, 0.81, 0.8].map((sample) => gate.update(sample));
+    const verdicts = [0.8, 0.79, 0.81, 0.8].map((sample) => gate.update(sample, 'test-id'));
     expect(verdicts).toEqual([false, false, false, false]);
   });
 
@@ -155,14 +157,14 @@ describe('PageHinkley — the crawling channel detector', () => {
     const gate = createPageHinkley({ lambda: 0.2, delta: 0.02, minSamples: 2 });
     expect(gate.lastMean).toBeNull();
     expect(gate.lastRise).toBeNull();
-    gate.update(0.3);
+    gate.update(0.3, 'test-id');
     expect(gate.lastMean).toBeCloseTo(0.3);
     expect(gate.lastRise).toBeCloseTo(0);
-    gate.update(0.3);
+    gate.update(0.3, 'test-id');
     expect(gate.lastRise).toBeCloseTo(0);
     // The spike fires on the third sample; the recording keeps the
     // firing rise even though the detector reset its own state.
-    expect(gate.update(0.9)).toBe(true);
+    expect(gate.update(0.9, 'test-id')).toBe(true);
     expect(gate.lastMean).toBeCloseTo(0.5);
     expect(gate.lastRise).toBeCloseTo(0.38);
     expect(gate.rise).toBe(0); // post-reset state, not the recorded sample
@@ -170,8 +172,8 @@ describe('PageHinkley — the crawling channel detector', () => {
 
   it('an external reset clears the accumulator AND its recording', () => {
     const gate = createPageHinkley({ lambda: 0.1, delta: 0.01, minSamples: 1 });
-    expect(gate.update(0.1)).toBe(false);
-    expect(gate.update(0.2)).toBe(false);
+    expect(gate.update(0.1, 'test-id')).toBe(false);
+    expect(gate.update(0.2, 'test-id')).toBe(false);
     expect(gate.lastMean).toBeCloseTo(0.15);
     expect(gate.lastRise).not.toBeNull();
     // An immediate-channel verdict hard-resets the accumulator: the spike
@@ -191,7 +193,7 @@ describe('PageHinkley — the crawling channel detector', () => {
     // ±0.04 white noise around a quiet baseline: nothing accumulates and
     // the detector stays silent across 10 turns.
     const noise = [0.3, 0.34, 0.26, 0.32, 0.28, 0.33, 0.27, 0.31, 0.29, 0.3].map((step) =>
-      gate.update(step),
+      gate.update(step, 'test-id'),
     );
     expect(noise).toEqual(new Array(10).fill(false));
     // A sustained creep: a quiet baseline step, then +0.06 per turn.
@@ -199,11 +201,11 @@ describe('PageHinkley — the crawling channel detector', () => {
     // mean, so the accumulated rise grows monotonically and fires once
     // it crosses the λ budget.
     gate.reset();
-    expect(gate.update(0.3)).toBe(false); // baseline
+    expect(gate.update(0.3, 'test-id')).toBe(false); // baseline
     const rises: number[] = [];
     const verdicts: boolean[] = [];
     for (let turn = 1; turn <= 8; turn += 1) {
-      verdicts.push(gate.update(0.3 + 0.06 * turn));
+      verdicts.push(gate.update(0.3 + 0.06 * turn, 'test-id'));
       rises.push(gate.lastRise as number);
       if (verdicts[verdicts.length - 1]) break;
     }
@@ -282,6 +284,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
       preGravityByTurn: args.preGravityByTurn,
       foldBoundaryTurns: args.foldBoundaryTurns ?? new Set(),
       anchorVector: args.preGravityByTurn.get(1) ?? basis(four, 0),
+      userMessageIdByTurn: new Map(turnNumbers.map((t) => [t, 'msg'])),
       userMessageIndexByTurn: new Map(turnNumbers.map((turn) => [turn, 2 * turn - 1])),
       judging: args.judging ?? scenarioParams(),
     });
@@ -546,6 +549,7 @@ describe('scoreGateReplay — segment baseline, z verdict, verdict resets', () =
       ),
       foldBoundaryTurns: new Set(),
       anchorVector: e0,
+      userMessageIdByTurn: new Map(turnNumbers.map((t) => [t, 'msg'])),
       userMessageIndexByTurn: new Map(turnNumbers.map((t) => [t, 2 * t - 1])),
       judging,
     });

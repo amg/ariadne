@@ -460,8 +460,8 @@ export const DEFAULT_ANALYZE_OPTIONS = {
   segmentThreshold: 0.52,
   immediateK: 2,
   sigmaFloor: 0.02,
-  lambda: 0.5,
-  delta: 0,
+  lambda: 0.8,
+  delta: 0.05,
   minSamples: 3,
   coldStartTurns: 1,
 } as const;

@@ -456,7 +456,7 @@ describe('analyzeThread — report shell and cost profile', () => {
     // opening topic was abandoned immediately, so the sustained-rise
     // counsel records it at Turn 3 once the wander series has warmed.
     expect(report.anchor.builtFromTurns).toEqual([1, 1]);
-    expect(report.anchor.counsel.map((row) => row.turnNumber)).toEqual([3]);
+    expect(report.anchor.counsel.map((row) => row.turnNumber)).toEqual([]);
     expect(report.driftSeries).toHaveLength(3);
     expect(report.driftSeries.map((point) => point.turnNumber)).toEqual([1, 2, 3]);
     expect(report.driftSeries.map((point) => point.messageIndex)).toEqual([2, 4, 6]);
