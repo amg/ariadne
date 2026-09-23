@@ -37,7 +37,6 @@ export interface LiveAnalysisSegment {
   index: number;
   segmentId: string;
   startMessageId: string;
-  label: string;
   arrivalCount: number;
   closed: boolean;
   createdAt: string;
@@ -45,6 +44,7 @@ export interface LiveAnalysisSegment {
 
 export interface LiveAnalysisPoint {
   messageId: string;
+  messageText: string;
   turnNumber: number;
   segmentIndex: number;
   verdict: DriftVerdict;

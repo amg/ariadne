@@ -1,5 +1,6 @@
-import { type LiveAnalysisView, fetchThreadAnalysis } from '@/services/api';
-import { useEffect, useState } from 'react';
+import { type LiveAnalysisPoint, type LiveAnalysisView, fetchThreadAnalysis } from '@/services/api';
+import { PencilSparkles } from 'lucide-react';
+import { Fragment, useEffect, useState } from 'react';
 
 /**
  * The Analysis tab: the thread's live reading straight from the persisted
@@ -173,6 +174,10 @@ function DriftChart({ model }: { model: ChartModel }) {
     (fraction) => model.yMin + (model.yMax - model.yMin) * fraction,
   );
 
+  const turnStep = Math.max(1, Math.ceil((model.xMax - model.xMin) / 10));
+  const turnTicks: number[] = [];
+  for (let turn = model.xMin; turn <= model.xMax; turn += turnStep) turnTicks.push(turn);
+
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
@@ -202,6 +207,48 @@ function DriftChart({ model }: { model: ChartModel }) {
           </text>
         </g>
       ))}
+      {/* X axis: judged arrival turns. */}
+      <line
+        x1={margin.left}
+        y1={height - margin.bottom}
+        x2={width - margin.right}
+        y2={height - margin.bottom}
+        stroke="currentColor"
+        strokeOpacity={0.35}
+      />
+      {turnTicks.map((turn) => (
+        <g key={`turn-${turn}`}>
+          <line
+            x1={sx(turn)}
+            y1={height - margin.bottom}
+            x2={sx(turn)}
+            y2={height - margin.bottom + 4}
+            stroke="currentColor"
+            strokeOpacity={0.45}
+          />
+          <text
+            x={sx(turn)}
+            y={height - margin.bottom + 14}
+            textAnchor="middle"
+            fontSize={9}
+            fill="currentColor"
+            opacity={0.6}
+          >
+            {turn}
+          </text>
+        </g>
+      ))}
+      <text
+        transform={`rotate(-90 12 ${margin.top + innerH / 2})`}
+        x={12}
+        y={margin.top + innerH / 2}
+        textAnchor="middle"
+        fontSize={10}
+        fill="currentColor"
+        opacity={0.6}
+      >
+        arrival drift
+      </text>
       {/* Segment spans — one tick one per live-chain segment. */}
       {model.segmentStarts.map((segment) => (
         <g key={segment.index}>
@@ -312,6 +359,9 @@ function ZChart({ model }: { model: ChartModel }) {
   const zMax = Math.max(...zs, model.immediateK) + 0.5;
   const zMin = Math.min(0, ...zs) - 0.5;
 
+  const zTicks: number[] = [];
+  for (let z = Math.ceil(zMin); z <= Math.floor(zMax); z += 1) zTicks.push(z);
+
   const sx = (turn: number) =>
     margin.left + ((turn - model.xMin) / (model.xMax - model.xMin)) * innerW;
   const sy = (z: number) => margin.top + innerH - ((z - zMin) / (zMax - zMin)) * innerH;
@@ -346,15 +396,29 @@ function ZChart({ model }: { model: ChartModel }) {
           <title>{`Turn ${point.turnNumber} · z ${(point.zScore as number).toFixed(2)}`}</title>
         </circle>
       ))}
+      {zTicks.map((z) => (
+        <text
+          key={`z-${z}`}
+          x={margin.left - 6}
+          y={sy(z) + 3}
+          textAnchor="end"
+          fontSize={9}
+          fill="currentColor"
+          opacity={0.6}
+        >
+          {z}
+        </text>
+      ))}
       <text
-        x={margin.left - 6}
-        y={sy(0) + 3}
-        textAnchor="end"
-        fontSize={9}
+        transform={`rotate(-90 12 ${margin.top + innerH / 2})`}
+        x={12}
+        y={margin.top + innerH / 2}
+        textAnchor="middle"
+        fontSize={10}
         fill="currentColor"
         opacity={0.6}
       >
-        0
+        z (σ)
       </text>
       <text
         x={width / 2}
@@ -371,9 +435,10 @@ function ZChart({ model }: { model: ChartModel }) {
 }
 
 function Legend() {
-  const entries = [
+  const entries: { color: string; label: string; dashed?: boolean }[] = [
     { color: DRIFT_COLORS.drift, label: 'Arrival drift (composite reading)' },
     { color: DRIFT_COLORS.trigger, label: 'Trigger (μ + k·max(σ, σ_floor), or T_segment)' },
+    { color: DRIFT_COLORS.ledgerMean, label: 'Ledger mean (μ)', dashed: true },
     { color: DRIFT_COLORS.fire, label: 'Gate fire — segment ends' },
     { color: DRIFT_COLORS.pass, label: 'Accepted arrival' },
   ];
@@ -381,10 +446,17 @@ function Legend() {
     <ul className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
       {entries.map((entry) => (
         <li key={entry.label} className="flex items-center gap-1.5">
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ backgroundColor: entry.color }}
-          />
+          {entry.dashed ? (
+            <span
+              className="inline-block w-4 border-t-2 border-dashed"
+              style={{ borderColor: entry.color }}
+            />
+          ) : (
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+          )}
           {entry.label}
         </li>
       ))}
@@ -394,34 +466,69 @@ function Legend() {
 
 function SegmentTable({ view }: { view: LiveAnalysisView }) {
   if (view.segments.length === 0) return null;
+  const arrivalsBySegment = new Map<number, LiveAnalysisPoint[]>();
+  for (const point of view.points) {
+    const rows = arrivalsBySegment.get(point.segmentIndex) ?? [];
+    rows.push(point);
+    arrivalsBySegment.set(point.segmentIndex, rows);
+  }
+  for (const rows of arrivalsBySegment.values()) {
+    rows.sort((a, b) => a.turnNumber - b.turnNumber);
+  }
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[480px] text-sm">
         <thead>
           <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="px-2 py-1.5">Segment</th>
-            <th className="px-2 py-1.5">Opened by</th>
-            <th className="px-2 py-1.5 text-right">Arrivals</th>
-            <th className="px-2 py-1.5">Status</th>
+            <th className="px-2 py-1.5">Turn</th>
+            <th className="px-2 py-1.5">Arrival message</th>
           </tr>
         </thead>
         <tbody>
-          {view.segments.map((segment) => (
-            <tr key={segment.segmentId} className="border-b border-border/50">
-              <td className="px-2 py-1.5 font-medium">#{segment.index}</td>
-              <td className="max-w-[360px] truncate px-2 py-1.5" title={segment.label}>
-                {segment.label}
-              </td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{segment.arrivalCount}</td>
-              <td className="px-2 py-1.5">
-                {segment.closed ? (
-                  <span className="text-purple-400">closed by fire</span>
-                ) : (
-                  <span className="text-emerald-400">open</span>
-                )}
-              </td>
-            </tr>
-          ))}
+          {view.segments.map((segment) => {
+            const arrivals = arrivalsBySegment.get(segment.index) ?? [];
+            return (
+              <Fragment key={segment.segmentId}>
+                <tr className="border-b border-border/50 bg-card/40">
+                  <td colSpan={2} className="px-2 py-1.5 text-xs text-muted-foreground">
+                    Segment #{segment.index} ·{' '}
+                    {segment.closed ? (
+                      <span className="text-purple-400">closed by fire</span>
+                    ) : (
+                      <span className="text-emerald-400">open</span>
+                    )}
+                  </td>
+                </tr>
+                {arrivals.map((point) => {
+                  const rewritten = point.expandedText;
+                  return (
+                    <tr key={point.messageId} className="border-b border-border/50">
+                      <td
+                        className="px-2 py-1.5 align-top tabular-nums text-muted-foreground"
+                        title={
+                          point.verdict === 'muted'
+                            ? `Turn ${point.turnNumber} · muted (ledger warming up)`
+                            : `Turn ${point.turnNumber}`
+                        }
+                      >
+                        {point.turnNumber}
+                      </td>
+                      <td className="px-2 py-1.5" title={rewritten ?? point.messageText}>
+                        <span className="flex max-w-[420px] items-center">
+                          {rewritten !== null && (
+                            <span className="mr-1 shrink-0 cursor-default" title={rewritten}>
+                              <PencilSparkles className="h-3 w-3 text-amber-400" aria-hidden />
+                            </span>
+                          )}
+                          <span className="min-w-0 truncate">{point.messageText}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -472,8 +579,8 @@ export default function AnalysisTab({
   const fires = view.points.filter((point) => point.verdict === 'fire').length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-      <div className="mx-auto flex w-full min-w-0 max-w-[760px] flex-col gap-6">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="mx-auto flex w-full min-w-0 max-w-[900px] py-4 flex-col gap-6">
         <header className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Live reading</h2>
           <p className="text-xs text-muted-foreground">

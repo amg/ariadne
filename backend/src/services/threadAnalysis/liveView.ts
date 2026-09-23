@@ -17,9 +17,11 @@ import type { JudgingParams } from './verdict';
  * renders its loading state.
  */
 
-/** One arrival as the Analysis tab charts it. */
+/** One arrival as the Analysis tab reads it. */
 export interface LiveAnalysisPoint {
   messageId: string;
+  /** The arrival's user-message text — the segment table's rows. */
+  messageText: string;
   /** 1-based arrival ordinal — the chart's x axis. */
   turnNumber: number;
   /** 1-based index of the segment the arrival was judged in. */
@@ -50,8 +52,6 @@ export interface LiveAnalysisSegment {
   segmentId: string;
   /** The user Message whose arrival opened the segment. */
   startMessageId: string;
-  /** The opening user message's content — the segment's label. */
-  label: string;
   /** Number of arrivals judged inside the segment (muted included). */
   arrivalCount: number;
   /** True when a fired arrival closed this segment. */
@@ -138,6 +138,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
           : params.segmentThreshold;
     return {
       messageId: log.messageId,
+      messageText: contentById.get(log.messageId) ?? '',
       turnNumber: arrivalTurnByMessageId.get(log.messageId) ?? 0,
       segmentIndex: segmentIndexById.get(log.segmentId) ?? 0,
       verdict: log.verdict as GateVerdict,
@@ -167,7 +168,6 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       index: index + 1,
       segmentId: segment.id,
       startMessageId: segment.startMessageId,
-      label: contentById.get(segment.startMessageId) ?? '',
       arrivalCount: arrivalCountBySegment.get(index + 1) ?? 0,
       closed: next !== undefined,
       createdAt: segment.createdAt.toISOString(),
