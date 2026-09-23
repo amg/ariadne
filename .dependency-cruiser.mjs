@@ -33,7 +33,7 @@ export default {
       severity: 'error',
       from: {
         path: '^frontend/src/',
-        pathNot: `${FRONTEND_GLUE}|components/chat/ChatController\\.tsx`,
+        pathNot: `${FRONTEND_GLUE}|components/chat/ChatController/ChatController\\.tsx`,
       },
       to: { path: '(^|/)@ai-sdk/react' },
     },

@@ -1,17 +1,6 @@
-import { cn } from '@/services/utils';
-import { memo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 
-/**
- * Renders one markdown document inside an assistant bubble (GFM tables,
- * task lists, strikethrough; fenced code highlighted via rehype-highlight).
- * Memoized so settled rows never re-parse on unrelated re-renders; the one
- * actively streaming row re-renders per chunk by design.
- */
-
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
   p: ({ children }) => <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
   h1: ({ children }) => (
     <h1 className="mb-1.5 mt-3 text-lg font-semibold first:mt-0">{children}</h1>
@@ -88,27 +77,3 @@ const markdownComponents: Components = {
     return <code className="font-mono">{children}</code>;
   },
 };
-
-type Props = {
-  content: string;
-  /** True while the row is still streaming — appends a blinking caret. */
-  streaming?: boolean;
-  /** Allows parents to inject layout/margin classes. */
-  className?: string;
-};
-
-function MarkdownContent({ content, streaming = false, className }: Props) {
-  return (
-    <div className={cn('min-w-0 max-w-full', className, streaming && 'markdown-cursor')}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
-        components={markdownComponents}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-}
-
-export default memo(MarkdownContent);
