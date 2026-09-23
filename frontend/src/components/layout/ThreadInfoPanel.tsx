@@ -177,11 +177,15 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
         )}
       </div>
 
-      {/* Token Usage */}
+      {/* Token Usage — chat model only: the analyzer pipeline spends are cost-only */}
       <div className="mb-4 rounded-md border bg-background p-3">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
+        <div
+          className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground"
+          title="Token counts from the main chat model. Analyzer steps (embedding, rewrite, judgement) record cost only, so they are not included here."
+        >
           <TrendingUp className="h-4 w-4 text-blue-500" />
           Token Usage
+          <span className="font-normal text-muted-foreground">(chat model)</span>
         </div>
         <div className="space-y-1 text-xs">
           <TokenRow label="Prompt" value={formatTokens(totalTokens.prompt)} />
