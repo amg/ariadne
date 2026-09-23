@@ -89,16 +89,6 @@ The check that scores an incoming user Message *before* inference. It may
 pause the Turn and present a choice; it never blocks silently.
 _Avoid_: guard, interceptor, blocker, middleware
 
-**Opt out**:
-The user's decision, made at the Drift gate, to abandon the current Thread
-for a Fresh start rather than continue.
-_Avoid_: abort, cancel, reset
-
-**Fresh start**:
-A new Thread seeded with a summary of the previous one, so topic knowledge
-survives while Baggage is dropped.
-_Avoid_: fork, clone, restart
-
 **Replay**:
 Offline re-scoring of an existing Thread's Turns through the same Drift
 gate logic used live. Backs the standalone analyzer, threshold
@@ -115,10 +105,10 @@ _Avoid_: draft turn, pending message, preview, hypothesis
 
 **Live chain**:
 The live gate's persisted arrival history under ONE embedding model:
-one record per judged arrival (the reading, the segment-ledger snapshot
+one record per judged arrival (the reading, the segment-baseline snapshot
 taken before the verdict, the verdict, the firing channel) and one
 segment per live segment, each carrying the model that produced the
-reading as provenance — the same identity the embedding rows use. A
+reading as its source — the same identity the embedding rows use. A
 thread runs one chain per model: switching models starts a fresh chain
 from the walk, and the retired one stays stored for pruning. The chain
 is the conversation's truth about the live lane — the walk is
@@ -128,7 +118,7 @@ walk resuming where the chain stops. (An edit invalidates signals under
 every model.)
 _Avoid_: verdict history, ledger table, live audit
 
-**Expanded signal / composite verdict signal**:
+**Rewritten signal / composite verdict signal**:
 The arrival-time verdict signal of the live gate after the
 pipeline: the incoming user Message rewritten into self-contained form against the prior
 Turn by a small cheap model — the *rewrite* decides the verdict when one
@@ -136,11 +126,11 @@ lands, the raw message as audited fallback (`driftP`). It restores
 what the Prospective Turn loses by withholding the assistant reply:
 concrete referents that anchor it to the real topic. Both readings are
 charted (`driftPGated` = verdict signal, `driftP` = raw audit), and every
-fallback carries an `expansionNote`.
-_Avoid_: rewrite embedding, paraphrase signal, topic expansion
+fallback carries a `rewriteNote`.
+_Avoid_: expansion signal, paraphrase signal, topic expansion
 
-**Expansion trigger judge**:
-The small-model classifier that backstops the expansion tier's anaphora
+**Rewrite trigger judge**:
+The small-model classifier that backstops the rewrite tier's anaphora
 heuristic: in `heuristic` mode every short incoming message the regex
 trigger lets through asks the judge one question — does the message
 dangle a referent into the prior Turn (`CONTEXT_DEPENDENT`) or stand on
@@ -148,9 +138,9 @@ its own (`SELF_CONTAINED`)? A dependent verdict adds the message to the
 rewrite list — the judge only ever adds rewrite candidates, never vetoes
 the heuristic's picks — and every other outcome (`SELF_CONTAINED`,
 failed or unreadable verdict) keeps the raw fast path and explains
-itself in the Turn's `expansionNote`. Exists because the regex misses
+itself in the Turn's `rewriteNote`. Exists because the regex misses
 quirks it cannot anticipate ("Is there a silver bullet for this?").
-_Avoid_: anaphora detector, context classifier, rewrite gate
+_Avoid_: anaphora detector, context classifier, expansion gate
 
 **Immediate criterion**:
 The live gate's per-message decision level (ADR 0006): the thread's own
@@ -172,7 +162,3 @@ _Avoid_: turn cost, delta cost
 Cumulative Thread cost to date: the sum of Marginal costs of all Turns.
 _Avoid_: total spend (keep the column name canonical), cumulative cost
 
-**Savings estimate**:
-Projected cost difference over the next N Turns between continuing in the
-current Thread and taking a Fresh start.
-_Avoid_: projection, forecast, ROI estimate

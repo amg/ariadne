@@ -8,6 +8,7 @@ description: Enforces strict rules for code comments and project documentation t
 This skill must be followed during every implementation loop, code modification, or documentation update. It enforces strict standards for what goes into comments and external documentation.
 
 ## 1. Code Comments
+- **Vocabulary**: Comments must follow the `domain-language` skill. Use domain vocabulary consistently.
 - **Describe the Interface**: Comments should explain *what* the interface does, not where it is used, why it was built, or who uses it.
 - **Explain Non-Obvious Behavior**: Only write comments for behavior that is truly non-obvious. 
 - **NO Implementation Details in JSDocs**: Interface comments (JSDocs, function headers) must focus purely on parameters, return values, and consumer-facing behavior. They must NEVER leak internal mechanics, specific algorithm names, or underlying dependencies (e.g., avoid mentioning `aiService` or `PageHinkley` inside a top-level service comment).
