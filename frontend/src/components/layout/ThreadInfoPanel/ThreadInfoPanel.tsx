@@ -6,9 +6,10 @@ import {
 import { formatCost, formatTokens } from '@/services/utils';
 import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
 import { useState } from 'react';
-
-type ModelInfo = ThreadSummary['models'][number];
-type ModelRole = ModelInfo['roles'][number];
+import { CostBreakdown } from './CostBreakdown';
+import { ModelRow } from './ModelRow';
+import { StatRow } from './StatRow';
+import { TokenRow } from './TokenRow';
 
 type Props = {
   summary: ThreadSummary | null;
@@ -30,71 +31,6 @@ function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
   };
 
   return { isRefreshing, handleRefresh };
-}
-
-/**
- * Formats model pricing for display
- */
-function ModelPricing({ pricing }: { pricing: NonNullable<ModelInfo['pricing']> }) {
-  const formatPrice = (price: number | null | undefined) =>
-    price == null ? '—' : price < 0.01 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
-
-  const savingsPct =
-    pricing.cachedRateMultiplier != null
-      ? Math.round((1 - pricing.cachedRateMultiplier) * 100)
-      : null;
-
-  return (
-    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-      <div className="flex items-center gap-3">
-        <span title="Input price per million tokens">
-          <span className="font-medium text-foreground">Input:</span>{' '}
-          {formatPrice(pricing.inputPricePerMillion)}/1M
-        </span>
-        <span title="Output price per million tokens">
-          <span className="font-medium text-foreground">Output:</span>{' '}
-          {formatPrice(pricing.outputPricePerMillion)}/1M
-        </span>
-      </div>
-      {pricing.cachedPricePerMillion !== null && (
-        <div
-          title={`Price per million cached input tokens${savingsPct != null ? ` — saves ${savingsPct}% vs input price` : ''}`}
-        >
-          <span className="font-medium text-foreground">Cache input:</span>{' '}
-          {formatPrice(pricing.cachedPricePerMillion)}/1M
-          {savingsPct != null && <span className="text-green-600"> · saves {savingsPct}%</span>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Generated labels for pipeline roles the model serves. */
-const ROLE_LABELS: Record<ModelRole, string> = {
-  chat: 'Chat',
-  embedding: 'Embedding',
-  rewrite: 'Rewrite',
-  judge: 'Judgement',
-};
-
-/** One model card: role labels, model id, pricing. */
-function ModelRow({ model }: { model: ModelInfo }) {
-  const roles = model.roles.map((role) => ROLE_LABELS[role]).join(' · ');
-  return (
-    <div className="border-t py-2 first:border-t-0 first:pt-0 last:pb-0">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {roles}
-      </p>
-      <p className="truncate text-xs text-foreground" title={model.modelId}>
-        {model.modelId}
-      </p>
-      {model.pricing ? (
-        <ModelPricing pricing={model.pricing} />
-      ) : (
-        <p className="mt-1 text-xs text-muted-foreground">No pricing data</p>
-      )}
-    </div>
-  );
 }
 
 /**
@@ -248,131 +184,5 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
         )}
       </div>
     </aside>
-  );
-}
-
-/** Cost categories for the Includes breakdown. */
-const CHAT_COST_ROW = {
-  field: 'chat',
-  label: 'Chat',
-  title: 'Conversation token cost from the chat model',
-} as const;
-
-/** Analyzer categories are omitted from the list when their spend is zero. */
-const ANALYZER_COST_ROWS = [
-  {
-    field: 'embedding',
-    label: 'Embeddings',
-    title: 'Thread analyzer: embedding arriving user messages',
-  },
-  {
-    field: 'rewrite',
-    label: 'Rewrite',
-    title: 'Thread analyzer: expanding context-dependent follow-ups',
-  },
-  {
-    field: 'judge',
-    label: 'Judgement',
-    title: 'Thread analyzer: classifying context dependence',
-  },
-] as const;
-
-type CostRow = typeof CHAT_COST_ROW | (typeof ANALYZER_COST_ROWS)[number];
-
-/** Share of the thread's total spend; '—' when total spend is zero. */
-function formatShare(valueUsd: string, totalUsd: number): string {
-  if (totalUsd <= 0) return '—';
-  const pct = (Number.parseFloat(valueUsd) / totalUsd) * 100;
-  if (pct <= 0) return '0%';
-  if (pct < 0.1) return '<0.1%';
-  return `${pct.toFixed(1)}%`;
-}
-
-/** One breakdown row: label, share of the total, USD amount. */
-function BreakdownRow({
-  row,
-  valueUsd,
-  totalUsd,
-}: { row: CostRow; valueUsd: string; totalUsd: number }) {
-  return (
-    <>
-      <span className="truncate text-muted-foreground" title={row.title}>
-        {row.label}:
-      </span>
-      <span className="text-right font-medium tabular-nums text-foreground">
-        {formatShare(valueUsd, totalUsd)}
-      </span>
-      <span className="text-right tabular-nums text-muted-foreground">
-        {formatCost(valueUsd) ?? '$0.00'}
-      </span>
-    </>
-  );
-}
-
-/** "Includes" list under the total: label, share of the total, cost per row. */
-function CostBreakdown({ breakdown }: { breakdown: ThreadSummary['costBreakdown'] }) {
-  const rows = [
-    CHAT_COST_ROW,
-    ...ANALYZER_COST_ROWS.filter((row) => Number.parseFloat(breakdown[row.field]) > 0),
-  ];
-  const totalUsd =
-    Number.parseFloat(breakdown.chat) +
-    Number.parseFloat(breakdown.embedding) +
-    Number.parseFloat(breakdown.rewrite) +
-    Number.parseFloat(breakdown.judge);
-
-  return (
-    <div className="mt-2 border-t pt-2 text-xs">
-      <p className="mb-1 text-muted-foreground">Includes:</p>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-3 gap-y-1">
-        {rows.map((row) => (
-          <BreakdownRow
-            key={row.field}
-            row={row}
-            valueUsd={breakdown[row.field]}
-            totalUsd={totalUsd}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StatRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-      <span className="text-muted-foreground">{label}:</span>
-      <span className="font-medium text-foreground">{value}</span>
-    </div>
-  );
-}
-
-function TokenRow({
-  label,
-  value,
-  bold,
-  title,
-}: {
-  label: string;
-  value: string | null;
-  bold?: boolean;
-  title?: string;
-}) {
-  return (
-    <div className="flex justify-between" title={title}>
-      <span className="text-muted-foreground">{label}:</span>
-      <span className={bold ? 'font-bold text-foreground' : 'font-medium text-foreground'}>
-        {value ?? '—'}
-      </span>
-    </div>
   );
 }
