@@ -102,7 +102,7 @@ function centroidVector(vectors: number[][]): number[] {
 
 /**
  * The test mirror of the verdict tier's private state (the fields are
- * deliberately unpublished): the ledger's Welford running mean/sample σ
+ * deliberately unpublished): the baseline's Welford running mean/sample σ
  * plus the Page–Hinkley patrol's accumulators.
  */
 interface FoldMirror {
@@ -116,7 +116,7 @@ interface FoldMirror {
   lowWater: number;
 }
 
-/** A calm reading joins the ledger; the patrol consumes the raw reading. Returns the slow fire. */
+/** A calm reading joins the baseline; the patrol consumes the raw reading. Returns the slow fire. */
 function mirrorAcceptAndPatrol(
   mirror: FoldMirror,
   drift: number,
@@ -135,7 +135,7 @@ function mirrorAcceptAndPatrol(
   );
 }
 
-/** Any verdict shreds the ledger and resets the patrol. */
+/** Any verdict shreds the baseline and resets the patrol. */
 function mirrorShred(mirror: FoldMirror): void {
   mirror.count = 0;
   mirror.mean = 0;
@@ -148,8 +148,8 @@ function mirrorShred(mirror: FoldMirror): void {
 
 /**
  * The two-channel verdict for one judged arrival: immediate against the
- * warm ledger (flat T_segment bootstraps), otherwise the calm reading
- * joins the ledger while the patrol may catch the slow class.
+ * warm baseline (flat T_segment bootstraps), otherwise the calm reading
+ * joins the baseline while the patrol may catch the slow class.
  */
 function mirrorJudgeArrival(
   mirror: FoldMirror,
@@ -168,9 +168,9 @@ function mirrorJudgeArrival(
  * Mirror of the analyzer's fold: judge first, fold second. Equal-weight
  * Gravity point over segment members; the SHARED two-channel verdict
  * judges the arrival against the segment's own state — the immediate
- * channel (z ≥ k over the warm ledger, T_segment as bootstrap prior)
+ * channel (z ≥ k over the warm baseline, T_segment as bootstrap prior)
  * then the slow patrol (raw readings at λ). A fire from either channel
- * is a Boundary turn: the ledger shreds, the rejected vector reseeds the
+ * is a Boundary turn: the baseline shreds, the rejected vector reseeds the
  * next Gravity point, and the first Turn seeds the opening segment with
  * no score.
  */
@@ -879,7 +879,7 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     expect(mock.embeddings.requestCount()).toBe(callsBefore + 10); // one per Turn
 
     // A threshold above any possible drift: zero boundaries, one segment.
-    // The flat override also silences the immediate channel so warm-ledger
+    // The flat override also silences the immediate channel so warm-baseline
     // levels cannot cut either.
     const second = assertSuccess(
       await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
@@ -943,7 +943,7 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     // The same thread with a threshold nothing crosses: no cut, so
     // Segment 1 is the whole opening theme and the Anchor its centroid
     // — its members sit symmetric around it, none at distance zero.
-    // (Immediate channel silenced too, so warm-ledger levels cannot cut.)
+    // (Immediate channel silenced too, so warm-baseline levels cannot cut.)
     const uncut = assertSuccess(
       await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
     );
@@ -1324,7 +1324,7 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('—');
   });
 
-  /** The same thread after a gate-replay run with ledger readings. */
+  /** The same thread after a gate-replay run with baseline readings. */
   function gateFixtureReport(): ThreadReport {
     const base = fixtureReport();
     return {
@@ -1359,7 +1359,7 @@ describe('renderThreadReport — pure rendering', () => {
             driftP: 0.2,
             driftPGated: 0.2,
             anchorDistance: 0.2,
-            // Bootstrap: the ledger is empty — the constant judges,
+            // Bootstrap: the baseline is empty — the constant judges,
             // nothing to chart yet. The corrected patrol, though, warms
             // from its first consumed step: this very raw reading.
             immediateThreshold: 0.35,
@@ -1374,7 +1374,7 @@ describe('renderThreadReport — pure rendering', () => {
             driftPGated: 0.21,
             anchorDistance: 0.22,
             // Still bootstrapping (1 accepted member): flat constant, no
-            // z — but the ledger's mean already charts. The patrol took
+            // z — but the baseline's mean already charts. The patrol took
             // its second raw drift step: baseline (0.2 + 0.21)/2, the
             // beginning of an accumulated rise.
             immediateThreshold: 0.35,
@@ -1390,7 +1390,7 @@ describe('renderThreadReport — pure rendering', () => {
             driftP: 0.24,
             driftPGated: 0.24,
             anchorDistance: 0.24,
-            // The ledger speaks: μ + k·σ_eff = 0.245 (σ below the floor);
+            // The baseline speaks: μ + k·σ_eff = 0.245 (σ below the floor);
             // z = 1.75 stays under k = 2 — pass, the patrol keeps rising
             // on the raw drift steps (its third, against its own mean).
             immediateThreshold: 0.245,
@@ -1409,7 +1409,7 @@ describe('renderThreadReport — pure rendering', () => {
             anchorDistance: 0.5,
             // The arriving reading clears the segment's criterion — the
             // verdict lands on arrival; the spike never reaches the slow
-            // accumulator and the ledger is shredded.
+            // accumulator and the baseline is shredded.
             immediateThreshold: 0.258,
             immediateZ: 16.01,
             segmentMu: 0.217,
@@ -1440,7 +1440,7 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('class="series-live-trigger"');
     expect(countMatches(html, /class="live-trigger-point"/g)).toBe(4);
     expect(html).toContain(
-      'arrival judged against 0.350 — bootstrap: flat T_segment until the ledger holds 2 accepted members · live segment 1',
+      'arrival judged against 0.350 — bootstrap: flat T_segment until the baseline holds 2 accepted members · live segment 1',
     );
     expect(html).toContain(
       'arrival judged against 0.245 — z-adjusted: μ 0.205 + 2·max(σ 0.007, σ_floor 0.02) · live segment 1',
@@ -1448,13 +1448,13 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('live segment 2');
     expect(html).toContain('class="series-live-trigger-lead"');
     expect(html).toContain('standing T_segment 0.35');
-    // The old ledger clutter is gone: no allowance band, no μ baseline
+    // The old baseline clutter is gone: no allowance band, no μ baseline
     // series, no dotted criterion trail.
     expect(html).not.toContain('gate-allowance-band');
     expect(html).not.toContain('series-gate-baseline');
     expect(html).not.toContain('series-immediate-criterion');
     // The z panel: the flat segment-local trigger at z = k, the segment
-    // mean at z = 0, and one marker per ledger-warm arrival (2 of 4).
+    // mean at z = 0, and one marker per baseline-warm arrival (2 of 4).
     expect(html).toContain('class="z-trigger-line"');
     expect(html).toContain('fires at z ≥ k = 2');
     expect(html).toContain('segment mean μ (z 0)');
@@ -1480,7 +1480,7 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('criterion 0.245 (z 1.75)');
     expect(html).toContain('criterion 0.258 (z 16.01) · fired by the immediate channel');
     expect(html).toContain(
-      'criterion 0.350 (bootstrap — the constant stands in until the ledger holds 2 accepted members)',
+      'criterion 0.350 (bootstrap — the constant stands in until the baseline holds 2 accepted members)',
     );
     // Each chart's control row scopes to its own block.
     expect(html).toContain('data-controls="live"');
@@ -1488,10 +1488,10 @@ describe('renderThreadReport — pure rendering', () => {
     expect(html).toContain('Slow drift counsel marks');
   });
 
-  it('renders legacy gate points without ledger readings gracefully', () => {
+  it('renders legacy gate points without baseline readings gracefully', () => {
     const report = gateFixtureReport();
     if (!report.gateReplay) throw new Error('fixture carries the gate section');
-    // Older reports predate the ledger/z contract: strip every audit
+    // Older reports predate the baseline/z contract: strip every audit
     // field from the points.
     report.gateReplay.points = report.gateReplay.points.map(
       ({

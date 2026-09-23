@@ -28,10 +28,10 @@ import {
   startMockInferenceServer,
 } from '../../mock/inferenceServer';
 import { buildEmdMatrix, sinkhornEmd } from './threadAnalysis/emd';
-import { scoreGateReplay } from './threadAnalysis/gateReplay';
+import { simulateGateReplay } from './threadAnalysis/gateReplay';
 import { createPageHinkley } from './threadAnalysis/pageHinkley';
-import { createRollingStats } from './threadAnalysis/rollingStats';
-import { prospectiveText } from './threadAnalysis/turns';
+import { createSegmentRollingStats } from './threadAnalysis/segmentRollingStats';
+import { formattedProspectiveTurn } from './threadAnalysis/turns';
 import type { JudgingParams } from './threadAnalysis/verdict';
 
 /**
@@ -176,7 +176,7 @@ describe('PageHinkley — the crawling channel detector', () => {
     expect(gate.lastRise).not.toBeNull();
     // An immediate-channel verdict hard-resets the accumulator: the spike
     // was never its sample, so its recording goes dormant too (the
-    // segment ledger is a separate counter — it gets shredded the same
+    // segment baseline is a separate counter — it gets shredded the same
     // way by the replay, the task).
     gate.reset();
     expect(gate.sampleCount).toBe(0);
@@ -217,9 +217,9 @@ describe('PageHinkley — the crawling channel detector', () => {
   });
 });
 
-describe('RollingStats — the immediate channel noise state', () => {
+describe('SegmentRollingStats — the immediate channel noise state', () => {
   it('folds Welford-style, mean from the first sample, SAMPLE std from the second', () => {
-    const stats = createRollingStats();
+    const stats = createSegmentRollingStats();
     expect(stats.mean).toBeNull();
     expect(stats.std).toBeNull();
     stats.add(0.2);
@@ -233,7 +233,7 @@ describe('RollingStats — the immediate channel noise state', () => {
   });
 
   it('keeps moments honest over many mixed folds (sample variance)', () => {
-    const stats = createRollingStats();
+    const stats = createSegmentRollingStats();
     const samples = [0.1, 0.5, 0.3, 0.9, 0.2, 0.4, 0.8, 0.6];
     for (const sample of samples) stats.add(sample);
     const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
@@ -257,9 +257,9 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
       coldStartTurns: 1,
       minSamples: 2,
       // k = 2: the corpus-calibrated z criterion of the immediate channel
-      //: fire at two ledger σ above the segment mean.
+      //: fire at two baseline σ above the segment mean.
       immediateK: 2,
-      // The σ floor under the ledger's sample σ (corpus continuation-noise
+      // The σ floor under the baseline's sample σ (corpus continuation-noise
       // magnitude).
       sigmaFloor: 0.02,
       ...overrides,
@@ -275,7 +275,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     judging?: JudgingParams;
   }) {
     const turnNumbers = [...args.prospectiveByTurn.keys()].sort((a, b) => a - b);
-    return scoreGateReplay({
+    return simulateGateReplay({
       turnNumbers,
       prospectiveVectorByTurn: args.prospectiveByTurn,
       turnVectorByTurn: args.turnVectorByTurn,
@@ -321,7 +321,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     expect(result.points.map((p) => p.verdict)).toEqual(['muted', 'pass', 'pass', 'fire', 'pass']);
     expect(result.points[0]?.driftP).toBeNull();
     expect(result.points[3]?.driftP).toBeCloseTo(1, 5); // the spike
-    // The verdict arrives at the flip Turn itself: after two zero folds the segment ledger sits at μ = 0
+    // The verdict arrives at the flip Turn itself: after two zero folds the segment baseline sits at μ = 0
     // with zero spread — the σ floor keeps it honest, so the criterion
     // is μ + k·σ_floor = 0.04; the spike clears it at first touch and
     // never reaches the slow accumulator — no baseline reading rides
@@ -330,7 +330,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     expect(result.points[3]?.immediateThreshold).toBeCloseTo(0.04, 5);
     expect(result.points[3]?.immediateZ).toBeCloseTo(50, 3); // 1.0 / σ_floor
     expect(result.points[3]?.gateMean).toBeUndefined();
-    // The segment ledger rides each judged point, exactly as it stood at
+    // The segment baseline rides each judged point, exactly as it stood at
     // judgment: absent during bootstrap, then the accepted members' moments.
     expect(result.points[1]?.segmentMu).toBeUndefined(); // bootstrapping
     expect(result.points[2]?.segmentMu).toBeCloseTo(0, 5); // first fold
@@ -343,7 +343,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
     expect(result.divergences).toEqual([]); // gate fired AND the fold cut: agreement
   });
 
-  it('bootstraps the immediate criterion on T_segment until the segment ledger warms up', () => {
+  it('bootstraps the immediate criterion on T_segment until the segment baseline warms up', () => {
     // A segment with fewer than 2 accepted members has no true spread
     // yet — the constant T_segment adjudicates (0 accepted, AND 1
     // accepted). Once two quiet folds land, the criterion becomes the
@@ -374,21 +374,21 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
       ]),
       foldBoundaryTurns: new Set([4]),
     });
-    // 0 accepted members: flat constant, no z, no ledger to chart.
+    // 0 accepted members: flat constant, no z, no baseline to chart.
     expect(result.points[1]?.immediateThreshold).toBeCloseTo(0.45, 5);
     expect(result.points[1]?.immediateZ).toBeUndefined();
     expect(result.points[1]?.segmentMu).toBeUndefined();
-    // 1 accepted member: still the flat constant — but the ledger's mean
+    // 1 accepted member: still the flat constant — but the baseline's mean
     // already exists for the chart (σ not yet).
     expect(result.points[2]?.immediateThreshold).toBeCloseTo(0.45, 5);
     expect(result.points[2]?.immediateZ).toBeUndefined();
     expect(result.points[2]?.segmentMu).toBeCloseTo(0, 5);
     expect(result.points[2]?.segmentSigma).toBeNull();
-    // 2 accepted members: the ledger speaks — zero spread floors to
+    // 2 accepted members: the baseline speaks — zero spread floors to
     // σ_floor, so the criterion is μ + k·σ_floor, not the constant.
     expect(result.points[3]?.immediateThreshold).toBeCloseTo(0.04, 5);
     expect(result.points[3]?.fireChannel).toBe('immediate');
-    // The verdict shredded the ledger: the next segment re-bootstraps.
+    // The verdict shredded the baseline: the next segment re-bootstraps.
     expect(result.points[4]?.immediateThreshold).toBeCloseTo(0.45, 5);
     expect(result.points[4]?.segmentMu).toBeUndefined();
     // The slow channel stays silent throughout: the spike never reaches
@@ -504,7 +504,7 @@ describe('scoreGateReplay — pretend-replay verdict logic (synthetic vectors)',
   });
 });
 
-describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => {
+describe('scoreGateReplay — segment baseline, z verdict, verdict resets', () => {
   const four = 4;
   const e0 = basis(four, 0);
 
@@ -532,7 +532,7 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
       sigmaFloor: 0.02,
       ...overrides,
     };
-    return scoreGateReplay({
+    return simulateGateReplay({
       turnNumbers,
       prospectiveVectorByTurn: new Map(
         turnNumbers.map((t, i) => [
@@ -561,14 +561,14 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
     expect(spike?.fireChannel).toBe('immediate');
     expect(spike?.immediateThreshold).toBeCloseTo(0.35, 5);
     expect(spike?.immediateZ).toBeCloseTo(2.25, 4);
-    // The criterion was judged against the ledger as it stood BEFORE the
+    // The criterion was judged against the baseline as it stood BEFORE the
     // spike — the rejected arrival never widened σ (ratchet guard).
     expect(spike?.segmentMu).toBeCloseTo(0.31, 5);
     expect(spike?.segmentSigma).toBeCloseTo(0.01414, 4); // σ pre-spike
     expect(spike?.gateMean).toBeUndefined(); // the spike never reaches the patrol
-    // After the verdict the ledger is shredded: the arrival that seeds
+    // After the verdict the baseline is shredded: the arrival that seeds
     // the next segment is judged by the bootstrap constant, and it did
-    // NOT enter either ledger — the new one starts empty.
+    // NOT enter either baseline — the new one starts empty.
     const reseed = fire.points[4];
     expect(reseed?.verdict).toBe('pass');
     expect(reseed?.immediateThreshold).toBeCloseTo(0.45, 5);
@@ -577,18 +577,18 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
     expect(reseed?.segmentSigma).toBeUndefined();
 
     // The identical segment, arrival at μ + 1.9·σ_eff instead: z = 1.895
-    // stays below k = 2 — pass, and the ledger simply grows.
+    // stays below k = 2 — pass, and the baseline simply grows.
     const pass = replayReadings([null, 0.3, 0.32, 0.3479, 0.33]);
     expect(pass.points.map((p) => p.verdict)).toEqual(['muted', 'pass', 'pass', 'pass', 'pass']);
     const quiet = pass.points[3];
     expect(quiet?.fireChannel).toBeUndefined();
     expect(quiet?.immediateZ).toBeCloseTo(1.895, 3);
-    // Accepted into the segment's ledger (a pass folds) — T5 judges
+    // Accepted into the segment's baseline (a pass folds) — T5 judges
     // against the moments that PRECEDED its own fold.
     expect(pass.points[4]?.segmentMu).toBeCloseTo((0.3 + 0.32 + 0.3479) / 3, 5);
   });
 
-  it('uses the ledger σ itself once it outgrows the floor', () => {
+  it('uses the baseline σ itself once it outgrows the floor', () => {
     // 0.30 and 0.40: μ = 0.35, sample σ = 0.1/√2 ≈ 0.0707 > σ_floor —
     // the spread, not the floor, sets the bar: criterion ≈ 0.4914.
     const spread = replayReadings([null, 0.3, 0.4, 0.5]);
@@ -613,7 +613,7 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
     expect(above.points[1]?.immediateZ).toBeUndefined(); // bootstrap has no z
   });
 
-  it('a slow-channel verdict empties the ledger AND the patrol, rejects the creep, and re-bootstraps', () => {
+  it('a slow-channel verdict empties the baseline AND the patrol, rejects the creep, and re-bootstraps', () => {
     // A calibrated crawl on the RAW drift readings: two quiet warm-up folds, then a consistent +0.015
     // climb 0.315 → 0.45. Every arrival stays inside the immediate
     // criterion — the peak z is 1.81, never reaching k = 2 — but the
@@ -663,10 +663,10 @@ describe('scoreGateReplay — segment ledger, z verdict, verdict resets', () => 
     expect(slowFire?.fireChannel).toBe('slow');
     expect(slowFire?.gateMean).toBeCloseTo(0.367, 2); // mean of 0.28…0.45
     expect(slowFire?.gateRise as number).toBeGreaterThanOrEqual(0.5); // reached λ
-    // The verdict shredded the ledger: the arrival seeding the next
-    // segment sees the bootstrap constant and an empty ledger, and the
-    // rejected creep reading did NOT enter the old segment's ledger —
-    // every ledger reading along the way is the ACCEPTED members' moments.
+    // The verdict shredded the baseline: the arrival seeding the next
+    // segment sees the bootstrap constant and an empty baseline, and the
+    // rejected creep reading did NOT enter the old segment's baseline —
+    // every baseline reading along the way is the ACCEPTED members' moments.
     const reseed = result.points[13];
     expect(reseed?.immediateThreshold).toBeCloseTo(0.45, 5);
     expect(reseed?.segmentMu).toBeUndefined();
@@ -798,7 +798,7 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
 
     // One point per Turn; Turn 1 has no Gravity point (null) and is the
     // only muted arrival (coldStartTurns 1): Turn 2 onward is judged,
-    // bootstrapping on the flat constant while the segment ledger holds
+    // bootstrapping on the flat constant while the segment baseline holds
     // fewer than two accepted members.
     expect(points).toHaveLength(5);
     expect(points[0]?.driftP).toBeNull();
@@ -811,7 +811,7 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     }
     // The mock's prospective readings are near-orthogonal (≈1, far above
     // the constant), so the immediate channel fires on every judged
-    // arrival against the BOOTSTRAP criterion — the ledger never warms
+    // arrival against the BOOTSTRAP criterion — the baseline never warms
     // because a fired reading never folds (ratchet guard) — and the fold
     // cuts those same near-orthogonal Turns, so gate and fold never
     // disagree here.
@@ -906,7 +906,8 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     // 5 Turn embeds + 5 transient prospective embeds.
     expect(mock.embeddings.requestCount() - callsBefore).toBe(10);
     const prospectiveCost = flipSpecs.reduce(
-      (sum, spec) => Number((sum + embeddingCostUsd(prospectiveText(spec.user))).toFixed(10)),
+      (sum, spec) =>
+        Number((sum + embeddingCostUsd(formattedProspectiveTurn(spec.user))).toFixed(10)),
       0,
     );
     const turnCost = flipSpecs.reduce((sum, spec) => {

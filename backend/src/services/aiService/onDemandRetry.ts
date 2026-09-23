@@ -2,7 +2,7 @@ import { type Result, err } from '../../types/result';
 
 /**
  * Bounded busy-backoff against DeepInfra's on-demand model pool —
- * provider-behaviour handling shared by the expansion tier's two small
+ * provider-behaviour handling shared by the rewrite tier's two small
  * model calls (judge, rewrite). While an on-demand instance loads the
  * provider answers "Model busy, retry later": a retry hint from the
  * provider itself, so these calls (alone among the boundary calls)

@@ -43,13 +43,13 @@ export interface LiveAnalysisPoint {
   zScore: number | null;
   /**
    * The immediate criterion the reading was judged against: μ +
-   * k·max(σ, σ_floor) once the ledger warms, the flat T_segment while it
+   * k·max(σ, σ_floor) once the baseline warms, the flat T_segment while it
    * bootstraps. The chart's trigger series; derivable only for judged
    * arrivals.
    */
   immediateThreshold: number | null;
   /** The self-contained rewrite behind the reading, when one landed. */
-  expandedText: string | null;
+  rewrittenText: string | null;
 }
 
 /** One live-chain segment as the Analysis tab lists it. */
@@ -121,7 +121,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   );
 
   // Membership follows the segment SPAN, not the judging row: the segment
-  // a drift log names is the ledger that judged the arrival — for a fired
+  // a drift log names is the baseline that judged the arrival — for a fired
   // arrival that is the segment it burned — while the Boundary turn closes
   // the current Topic segment and seeds the next one, so it lists under
   // the segment it opens. An arrival belongs to the last segment whose own
@@ -141,21 +141,21 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   const arrivalRows = await listMessageEmbeddingsByMessageIds({
     messageIds: userMessages.map((message) => message.id),
   });
-  const expandedTextById = new Map(
+  const rewrittenTextById = new Map(
     arrivalRows
-      .filter((row) => row.modelId === EMBEDDING_MODEL_ID && row.expandedText !== null)
-      .map((row) => [row.messageId, row.expandedText]),
+      .filter((row) => row.modelId === EMBEDDING_MODEL_ID && row.rewrittenText !== null)
+      .map((row) => [row.messageId, row.rewrittenText]),
   );
 
   const loggedByMessageId = new Set(logs.map((log) => log.messageId));
   const contentById = new Map(messages.map((message) => [message.id, message.content]));
 
   const points: LiveAnalysisPoint[] = logs.map((log) => {
-    const ledgerWarm = log.mu !== null && log.sigma !== null;
+    const baselineWarm = log.mu !== null && log.sigma !== null;
     const immediateThreshold =
       log.driftP === null
         ? null
-        : ledgerWarm
+        : baselineWarm
           ? (log.mu as number) +
             params.immediateK * Math.max(log.sigma as number, params.sigmaFloor)
           : params.segmentThreshold;
@@ -172,7 +172,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       sigma: log.sigma,
       zScore: log.zScore,
       immediateThreshold,
-      expandedText: expandedTextById.get(log.messageId) ?? null,
+      rewrittenText: rewrittenTextById.get(log.messageId) ?? null,
     };
   });
 

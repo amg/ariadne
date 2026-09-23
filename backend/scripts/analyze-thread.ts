@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   type AnalyzeThreadOptions,
   DEFAULT_ANALYZE_OPTIONS,
-  type ExpansionMode,
+  type RewriteMode,
   type ThreadReport,
   analyzeThread,
   renderThreadReport,
@@ -73,9 +73,9 @@ const SCRIPT_SEGMENT_THRESHOLD = 0.52;
 
 const MODES = ['offline', 'live'] as const;
 type RunMode = (typeof MODES)[number];
-const EXPANSION_MODES: readonly ExpansionMode[] = ['off', 'heuristic', 'always'] as const;
+const EXPANSION_MODES: readonly RewriteMode[] = ['off', 'heuristic', 'always'] as const;
 /** Live-mode default: rewrite only when the message looks anaphoric. */
-const DEFAULT_LIVE_REWRITE: ExpansionMode = 'heuristic';
+const DEFAULT_LIVE_REWRITE: RewriteMode = 'heuristic';
 
 /** Default λ values (drift units) for the --debug-sweep-lambda calibration sweep. */
 const DEFAULT_SWEEP_LAMBDAS: readonly number[] = [0.5, 0.75, 1.0];
@@ -134,7 +134,7 @@ Examples:
 interface ParsedArgs {
   threadId: string;
   mode: RunMode;
-  liveRewrite: ExpansionMode;
+  liveRewrite: RewriteMode;
   sweepLambdas: number[] | null;
 }
 
@@ -153,7 +153,7 @@ function applyRewriteFlag(
   arg: string,
   raw: string | undefined,
 ): {
-  mode: ExpansionMode;
+  mode: RewriteMode;
   consumed: number;
 } | null {
   if (arg !== '--live-rewrite') return null;
@@ -161,7 +161,7 @@ function applyRewriteFlag(
   if (!(EXPANSION_MODES as readonly string[]).includes(raw)) {
     usageError(`--live-rewrite expects ${EXPANSION_MODES.join(' | ')}, got "${raw}"`);
   }
-  return { mode: raw as ExpansionMode, consumed: 2 };
+  return { mode: raw as RewriteMode, consumed: 2 };
 }
 
 /** Reads `--debug-sweep-lambda <v1,v2,…>`; null when the flag is absent. */
@@ -265,9 +265,9 @@ if (mode === 'live') {
   options.onProspectiveEmbedded = (turnNumber, totalTurns) => {
     console.log(`Embedding prospective turn ${turnNumber}/${totalTurns} (transient)…`);
   };
-  options.expansion = liveRewrite;
+  options.rewrite = liveRewrite;
   if (liveRewrite !== 'off') {
-    options.onExpansionEmbedded = (position, totalCandidates) => {
+    options.onRewriteEmbedded = (position, totalCandidates) => {
       console.log(
         `Rewriting + embedding expanded turn ${position}/${totalCandidates} (transient)…`,
       );
@@ -372,9 +372,9 @@ if (report.gateReplay) {
     `Gate: ${firedCount} fire(s) · ${gate.divergences.length} divergence row(s) · ` +
       `${gate.emd.revisits.length} EMD revisit(s)${baseline}`,
   );
-  if (report.params.expansion) {
+  if (report.params.rewrite) {
     summaryLines.push(
-      `Expansion (${report.params.expansion.mode}): ${verdictCount} rewritten Turn(s) · ` +
+      `Rewrite (${report.params.rewrite.mode}): ${verdictCount} rewritten Turn(s) · ` +
         `${fallbackCount} raw-fallback Turn(s)`,
     );
   }

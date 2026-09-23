@@ -17,34 +17,33 @@ import {
 import {
   buildCostProfile,
   computeEmbeddingCostUsd,
-  computeJudgeCostUsd,
-  computeRewriteCostUsd,
+  computeInferenceCostUsd,
   round10,
 } from './cost';
-import { type DriftScoring, scoreDrift } from './drift';
+import { type DriftScoring, buildDriftProfile } from './drift';
 import { buildEmdMatrix } from './emd';
+import { simulateGateReplay } from './gateReplay';
 import {
-  type ExpansionCandidate,
-  expansionBackstopCandidates,
-  expansionCandidates,
+  type RewriteCandidate,
   parseRewrite,
-} from './expansion';
-import { scoreGateReplay } from './gateReplay';
+  rewriteBackstopCandidates,
+  rewriteCandidates,
+} from './rewrite';
 import {
   type Turn,
   buildProspectiveBlocks,
   buildTurnBlocks,
+  formattedProspectiveTurn,
   pairTurns,
-  prospectiveText,
 } from './turns';
 import {
   type AnalyzeThreadOptions,
   DEFAULT_ANALYZE_OPTIONS,
-  DEFAULT_EXPANSION_MODE,
   DEFAULT_GATE_REPLAY_OPTIONS,
-  type ExpansionMode,
+  DEFAULT_REWRITE_MODE,
   type GateReplayParams,
   type GateReplaySection,
+  type RewriteMode,
   type ThreadReport,
 } from './types';
 import type { JudgingParams } from './verdict';
@@ -68,7 +67,7 @@ export async function analyzeThread(
 ): Promise<Result<ThreadReport>> {
   const opts = resolveJudgingParams(options);
   const gateParams = resolveGateParams(options?.gateReplay);
-  const expansionMode: ExpansionMode = options?.expansion ?? DEFAULT_EXPANSION_MODE;
+  const rewriteMode: RewriteMode = options?.rewrite ?? DEFAULT_REWRITE_MODE;
 
   // Local single-user app: the analyzer operates under the same
   // placeholder user as every route (REQUEST_USER_ID pattern).
@@ -124,7 +123,7 @@ export async function analyzeThread(
     messages.map((message, index) => [message.id, index + 1]),
   );
 
-  const drift = scoreDrift({
+  const drift = buildDriftProfile({
     blocks,
     turns,
     vectorByMessageId,
@@ -172,15 +171,15 @@ export async function analyzeThread(
     vectorByMessageId,
     messageIndexByMessageId: messageIndexByMessageId,
     gateParams,
-    expansionMode,
+    rewriteMode,
     judging: opts,
     onProspectiveEmbedded: options?.onProspectiveEmbedded,
-    onExpansionEmbedded: options?.onExpansionEmbedded,
+    onRewriteEmbedded: options?.onRewriteEmbedded,
   });
   if (gateSection.type === 'error') return gateSection;
 
   report.params.gateReplay = gateParams;
-  recordGateSection(report, gateParams, expansionMode, embeddingCostUsd, gateSection.data);
+  recordGateSection(report, gateParams, rewriteMode, embeddingCostUsd, gateSection.data);
   return ok(report);
 }
 
@@ -188,7 +187,7 @@ export async function analyzeThread(
 function recordGateSection(
   report: ThreadReport,
   gateParams: GateReplayParams,
-  expansionMode: ExpansionMode,
+  rewriteMode: RewriteMode,
   embeddingCostUsd: number,
   data: {
     section: GateReplaySection;
@@ -198,11 +197,11 @@ function recordGateSection(
     judgeConsulted: boolean;
   },
 ): void {
-  if (expansionMode !== 'off') {
-    report.params.expansion = { mode: expansionMode, modelId: REWRITE_MODEL_ID };
+  if (rewriteMode !== 'off') {
+    report.params.rewrite = { mode: rewriteMode, modelId: REWRITE_MODEL_ID };
     // The backstop only consults in `heuristic` mode; record its model
     // only when it actually ran.
-    if (data.judgeConsulted) report.params.expansion.judgeModelId = JUDGE_MODEL_ID;
+    if (data.judgeConsulted) report.params.rewrite.judgeModelId = JUDGE_MODEL_ID;
   }
   report.gateReplay = data.section;
   report.totals.embeddingCostUsd = round10(embeddingCostUsd + data.prospectiveCostUsd);
@@ -240,11 +239,11 @@ interface BuildGateReplaySectionProps {
   vectorByMessageId: Map<string, number[]>;
   messageIndexByMessageId: Map<string, number>;
   gateParams: GateReplayParams;
-  expansionMode: ExpansionMode;
+  rewriteMode: RewriteMode;
   /** The flat judging params — the shared two-channel verdict's full set. */
   judging: JudgingParams;
   onProspectiveEmbedded?: ((turnNumber: number, totalTurns: number) => void) | undefined;
-  onExpansionEmbedded?: ((position: number, totalCandidates: number) => void) | undefined;
+  onRewriteEmbedded?: ((position: number, totalCandidates: number) => void) | undefined;
 }
 
 /**
@@ -264,7 +263,7 @@ type RewriteAttempt =
  * and explain either class of gap. Embedding stays with the caller, next
  * to the other transient prospective embeds.
  */
-async function attemptRewrite(candidate: ExpansionCandidate): Promise<RewriteAttempt> {
+async function generateRewrite(candidate: RewriteCandidate): Promise<RewriteAttempt> {
   const rewritten = await rewriteFollowUp({
     contextUserText: candidate.contextUserText,
     contextAssistantText: candidate.contextAssistantText,
@@ -273,7 +272,8 @@ async function attemptRewrite(candidate: ExpansionCandidate): Promise<RewriteAtt
   if (rewritten.type === 'error') {
     return { kind: 'skip_rewrite_failed', costUsd: 0 };
   }
-  const costUsd = await computeRewriteCostUsd(
+  const costUsd = await computeInferenceCostUsd(
+    REWRITE_MODEL_ID,
     rewritten.data.usage.promptTokens,
     rewritten.data.usage.completionTokens,
   );
@@ -285,7 +285,7 @@ async function attemptRewrite(candidate: ExpansionCandidate): Promise<RewriteAtt
 /** The judge backstop's outcome: extra candidates + this run's spend. */
 interface JudgeBackstopOutcome {
   /** CONTEXT_DEPENDENT verdicts — shortlisted candidates that join the rewrite list. */
-  addedCandidates: ExpansionCandidate[];
+  addedCandidates: RewriteCandidate[];
   judgeCostUsd: number;
   judgeConsulted: boolean;
 }
@@ -297,11 +297,11 @@ interface JudgeBackstopOutcome {
  * construction — a broken judge behaves exactly like the heuristic's no,
  * and verdicts only ever ADD rewrite candidates.
  */
-async function consultJudgeBackstop(
-  shortlist: ExpansionCandidate[],
-  expansionNoteByTurn: Record<number, string>,
+async function evaluateCandidatesForRewrite(
+  shortlist: RewriteCandidate[],
+  rewriteNoteByTurn: Record<number, string>,
 ): Promise<JudgeBackstopOutcome> {
-  const addedCandidates: ExpansionCandidate[] = [];
+  const addedCandidates: RewriteCandidate[] = [];
   let judgeCostUsd = 0;
   let judgeConsulted = false;
   for (const backstop of shortlist) {
@@ -314,13 +314,14 @@ async function consultJudgeBackstop(
     const judged = await judgeContextDependence(judgeInput);
     if (judged.type === 'error') {
       // Fail open: no readable verdict behaves like the heuristic's no.
-      expansionNoteByTurn[backstop.turnNumber] = 'skip_judge_failed';
+      rewriteNoteByTurn[backstop.turnNumber] = 'skip_judge_failed';
       continue;
     }
     const verdict: ContextDependenceVerdict = judged.data.verdict;
     judgeCostUsd = round10(
       judgeCostUsd +
-        (await computeJudgeCostUsd(
+        (await computeInferenceCostUsd(
+          JUDGE_MODEL_ID,
           judged.data.usage.promptTokens,
           judged.data.usage.completionTokens,
         )),
@@ -328,7 +329,7 @@ async function consultJudgeBackstop(
     if (verdict === 'context-dependent') {
       addedCandidates.push(backstop);
     } else {
-      expansionNoteByTurn[backstop.turnNumber] = 'skip_judge_self_contained';
+      rewriteNoteByTurn[backstop.turnNumber] = 'skip_judge_self_contained';
     }
   }
   return { addedCandidates, judgeCostUsd, judgeConsulted };
@@ -348,28 +349,28 @@ interface RewriteEmbedOutcome {
  * Mutates the two expanded maps in place.
  */
 async function embedRewriteCandidates(
-  candidates: ExpansionCandidate[],
-  expandedVectorByTurn: Map<number, number[]>,
-  expandedTextByTurn: Map<number, string>,
-  expansionNoteByTurn: Record<number, string> | undefined,
-  onExpansionEmbedded?: ((position: number, totalCandidates: number) => void) | undefined,
+  candidates: RewriteCandidate[],
+  rewrittenVectorByTurn: Map<number, number[]>,
+  rewrittenTextByTurn: Map<number, string>,
+  rewriteNoteByTurn: Record<number, string> | undefined,
+  onRewriteEmbedded?: ((position: number, totalCandidates: number) => void) | undefined,
 ): Promise<Result<RewriteEmbedOutcome>> {
   let rewriteCostUsd = 0;
   let prospectiveCostUsd = 0;
   for (let position = 0; position < candidates.length; position += 1) {
     const candidate = candidates[position];
     if (!candidate) continue;
-    onExpansionEmbedded?.(position + 1, candidates.length);
-    const attempted = await attemptRewrite(candidate);
+    onRewriteEmbedded?.(position + 1, candidates.length);
+    const attempted = await generateRewrite(candidate);
     if (attempted.kind !== 'rewrite') {
-      if (expansionNoteByTurn) expansionNoteByTurn[candidate.turnNumber] = attempted.kind;
+      if (rewriteNoteByTurn) rewriteNoteByTurn[candidate.turnNumber] = attempted.kind;
       continue;
     }
     rewriteCostUsd = round10(rewriteCostUsd + attempted.costUsd);
-    const embedded = await embedText(prospectiveText(attempted.text));
+    const embedded = await embedText(formattedProspectiveTurn(attempted.text));
     if (embedded.type === 'error') return embedded;
-    expandedVectorByTurn.set(candidate.turnNumber, embedded.data.embedding);
-    expandedTextByTurn.set(candidate.turnNumber, attempted.text);
+    rewrittenVectorByTurn.set(candidate.turnNumber, embedded.data.embedding);
+    rewrittenTextByTurn.set(candidate.turnNumber, attempted.text);
     prospectiveCostUsd = round10(
       prospectiveCostUsd + (await computeEmbeddingCostUsd(embedded.data.promptTokens)),
     );
@@ -384,10 +385,10 @@ async function buildGateReplaySection({
   vectorByMessageId,
   messageIndexByMessageId,
   gateParams,
-  expansionMode,
+  rewriteMode,
   judging,
   onProspectiveEmbedded,
-  onExpansionEmbedded,
+  onRewriteEmbedded,
 }: BuildGateReplaySectionProps): Promise<
   Result<{
     section: GateReplaySection;
@@ -413,24 +414,24 @@ async function buildGateReplaySection({
   // The expanded signal: ambiguous incoming messages get a
   // detached decontextualising rewrite, embedded as a second Prospective
   // block — transient, never persisted, like the raw blocks.
-  const expandedVectorByTurn = new Map<number, number[]>();
-  const expandedTextByTurn = new Map<number, string>();
+  const rewrittenVectorByTurn = new Map<number, number[]>();
+  const rewrittenTextByTurn = new Map<number, string>();
   // Gate points must explain every missing rewritten reading.
   // 'off' mode explains itself downstream; other modes annotate each Turn.
-  const expansionNoteByTurn =
-    expansionMode === 'off'
+  const rewriteNoteByTurn =
+    rewriteMode === 'off'
       ? undefined
       : Object.fromEntries(turns.map((turn) => [turn.turnNumber, 'skip_no_candidate']));
-  const candidates = expansionCandidates(turns, expansionMode);
+  const candidates = rewriteCandidates(turns, rewriteMode);
   // The judge backstop (heuristic mode only): short messages the anaphora
   // trigger let through ask a small classifier whether they dangle a
   // referent into the prior Turn.
   let judgeCostUsd = 0;
   let judgeConsulted = false;
-  if (expansionMode === 'heuristic' && expansionNoteByTurn) {
-    const backstop = await consultJudgeBackstop(
-      expansionBackstopCandidates(turns),
-      expansionNoteByTurn,
+  if (rewriteMode === 'heuristic' && rewriteNoteByTurn) {
+    const backstop = await evaluateCandidatesForRewrite(
+      rewriteBackstopCandidates(turns),
+      rewriteNoteByTurn,
     );
     candidates.push(...backstop.addedCandidates);
     judgeCostUsd = backstop.judgeCostUsd;
@@ -439,10 +440,10 @@ async function buildGateReplaySection({
   let prospectiveCostUsd = prospectiveEmbedCostUsd;
   const rewritten = await embedRewriteCandidates(
     candidates,
-    expandedVectorByTurn,
-    expandedTextByTurn,
-    expansionNoteByTurn,
-    onExpansionEmbedded,
+    rewrittenVectorByTurn,
+    rewrittenTextByTurn,
+    rewriteNoteByTurn,
+    onRewriteEmbedded,
   );
   if (rewritten.type === 'error') return rewritten;
   const rewriteCostUsd = rewritten.data.rewriteCostUsd;
@@ -454,14 +455,14 @@ async function buildGateReplaySection({
       vectorByMessageId.get(block.assistantMessage.id) ?? [],
     ]),
   );
-  const scoring = scoreGateReplay({
+  const scoring = simulateGateReplay({
     turnNumbers: turns.map((turn) => turn.turnNumber),
     prospectiveVectorByTurn,
     // Off mode: no expansion props at all — the gate replays raw-only and
     // stays byte-stable with the task reports.
-    ...(expansionMode === 'off'
+    ...(rewriteMode === 'off'
       ? {}
-      : { expandedVectorByTurn, expandedTextByTurn, expansionNoteByTurn }),
+      : { rewrittenVectorByTurn, rewrittenTextByTurn, rewriteNoteByTurn }),
     turnVectorByTurn,
     preGravityByTurn: drift.preGravityByTurn,
     foldBoundaryTurns: new Set(

@@ -186,7 +186,7 @@ export const env: EnvConfig = {
 
   // Thread analysis (live drift gate):
   // off = surface gone (pipeline skipped, Analysis tab hidden, bubbles
-  // untinted); heuristic/always = live lane runs with that expansion tier.
+  // untinted); heuristic/always = live lane runs with that rewrite tier.
   // Stored signals survive an `off` period and reappear when flipped back.
   get THREAD_ANALYSIS_MODE() {
     return getThreadAnalysisMode('THREAD_ANALYSIS_MODE', 'heuristic');

@@ -1,5 +1,5 @@
 /**
- * One segment's noise ledger for the live gate: O(1) Welford running mean and SAMPLE standard
+ * One segment's noise baseline for the live gate: O(1) Welford running mean and SAMPLE standard
  * deviation over the fold-time readings of the segment's accepted
  * members only. Judge first, fold second — callers read `mean`/`std`
  * BEFORE `add`, so an arriving reading can never enter its own
@@ -7,11 +7,11 @@
  * ACCEPTED it: ratchet guard — nothing the verdict rejected ever enters
  * the moments, so a segment's tolerance can widen with its topic but can
  * never be infected by the arrivals it turned away. The sample σ
- * (dividing by n−1) is the deliberately conservative choice for ledgers
- * of a handful of readings; a verdict shreds the ledger wholesale.
+ * (dividing by n−1) is the deliberately conservative choice for baselines
+ * of a handful of readings; a verdict shreds the baseline wholesale.
  */
 
-export interface RollingStats {
+export interface SegmentRollingStats {
   /** Fold one accepted sample into the running moments. */
   add(sample: number): void;
   /** Accepted samples folded so far. */
@@ -22,7 +22,7 @@ export interface RollingStats {
   readonly std: number | null;
 }
 
-export function createRollingStats(): RollingStats {
+export function createSegmentRollingStats(): SegmentRollingStats {
   let count = 0;
   let mean = 0;
   let m2 = 0;

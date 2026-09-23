@@ -6,24 +6,24 @@
  */
 
 /**
- * The expansion tier of the gate replay: `off` keeps the
+ * The rewrite tier of the gate replay: `off` keeps the
  * raw-only Prospective signal byte-compatible with previous versions runs;
  * `heuristic` rewrites only short anaphoric follow-ups; `always` rewrites
  * every Turn with a prior exchange (corpus-benchmark mode only).
  */
-export type ExpansionMode = 'off' | 'heuristic' | 'always';
+export type RewriteMode = 'off' | 'heuristic' | 'always';
 
 /**
  * Expansion default (calibration stance): `off` until the corpus proves a
  * tier — stance that defaults only move with recorded
  * evidence applies to the expansion mode exactly like K and T_segment.
  */
-export const DEFAULT_EXPANSION_MODE: ExpansionMode = 'heuristic';
+export const DEFAULT_REWRITE_MODE: RewriteMode = 'heuristic';
 
 export interface ThreadReportParams {
   /**
    * T_segment: the two-channel verdict's bootstrap prior. While a
-   * segment's noise ledger holds fewer than 2 accepted members, the flat
+   * segment's noise baseline holds fewer than 2 accepted members, the flat
    * constant adjudicates arrivals; judged arrivals otherwise clear the
    * segment's own learned level (μ + k·max(σ, σ_floor)). Both flows —
    * the offline fold and the gate replay — judge with it identically.
@@ -31,16 +31,16 @@ export interface ThreadReportParams {
   segmentThreshold: number;
   /**
    * k_immediate: the per-message verdict fires at z ≥ k — the arrival
-   * reading's distance from the CURRENT SEGMENT'S ledger mean, in units
+   * reading's distance from the CURRENT SEGMENT'S baseline mean, in units
    * of max(σ, σ_floor). Algebraically the same call as exceeding
    * μ + k·max(σ, σ_floor), calibrated so that two standard deviations
    * means the same thing on any well-behaved segment. Bootstraps to the
-   * constant T_segment while the ledger holds fewer than 2 accepted
+   * constant T_segment while the baseline holds fewer than 2 accepted
    * members.
    */
   immediateK: number;
   /**
-   * σ_floor: the divisor floor under the ledger's sample σ — a perfectly
+   * σ_floor: the divisor floor under the baseline's sample σ — a perfectly
    * calm segment (spread near zero) must not read every wobble as a
    * breakout. Set from the corpus continuation-noise magnitude (~0.02),
    * not guesswork.
@@ -64,7 +64,7 @@ export interface ThreadReportParams {
   /**
    * Minimum PageHinkley (slow-channel) samples before any fire is
    * admitted. The immediate channel's floor is separate: the z criterion
-   * exists only once the segment ledger holds 2 accepted members; the
+   * exists only once the segment baseline holds 2 accepted members; the
    * constant T_segment bootstraps below that.
    */
   minSamples: number;
@@ -72,7 +72,7 @@ export interface ThreadReportParams {
    * K_gate: completed Turns during which the analyzer mutes (no
    * verdicts), pinning the fold's first Turn as inherently unjudgeable
    * — no Gravity point exists to measure against yet. Turn 2 onward is
-   * judged, with the segment ledger bootstrapping on the flat constant
+   * judged, with the segment baseline bootstrapping on the flat constant
    * until two accepted members exist. The knob survives for calibration
    * runs that want to mute further into the opening segment.
    */
@@ -82,8 +82,8 @@ export interface ThreadReportParams {
   /** Gate-replay section params; present only on gate-replay runs. */
   gateReplay?: GateReplayParams;
   /** Expansion tier provenance; present only when expansion ran. */
-  expansion?: {
-    mode: Exclude<ExpansionMode, 'off'>;
+  rewrite?: {
+    mode: Exclude<RewriteMode, 'off'>;
     modelId: string;
     /**
      * Trigger-judge model; present only in `heuristic` mode — the
@@ -150,7 +150,7 @@ export interface DriftPoint {
   boundaryReason: 'segment' | 'slow' | null;
   /**
    * The immediate criterion this Turn was judged against — the segment
-   * ledger's μ + k·max(σ, σ_floor) once the ledger holds 2 accepted
+   * baseline's μ + k·max(σ, σ_floor) once the baseline holds 2 accepted
    * members, the constant T_segment below that (the constant survives
    * ONLY as this bootstrap prior). The z ≥ k verdict is algebraically
    * identical to exceeding this level. Judge first, fold second — the
@@ -159,15 +159,15 @@ export interface DriftPoint {
   immediateThreshold?: number;
   /**
    * The immediate channel's z score at this judgment: (reading − μ) /
-   * max(σ, σ_floor) against the segment ledger as it stood BEFORE this
+   * max(σ, σ_floor) against the segment baseline as it stood BEFORE this
    * reading. Absent while the criterion bootstraps to the constant:
-   * there is no ledger to standardize against yet. Pairs with
+   * there is no baseline to standardize against yet. Pairs with
    * `immediateThreshold`.
    */
   immediateZ?: number;
   /**
-   * The segment ledger's mean (μ) and standard deviation (σ) as it stood
-   * at this judgment. Absent on muted Turns; σ null while the ledger
+   * The segment baseline's mean (μ) and standard deviation (σ) as it stood
+   * at this judgment. Absent on muted Turns; σ null while the baseline
    * holds fewer than 2 accepted members.
    */
   segmentMu?: number;
@@ -226,9 +226,9 @@ export interface GateReplayPoint {
   /**
    * The composite verdict signal: drift_p computed
    * on the rewritten, decontextualised Prospective block when the
-   * expansion tier produced one, else on the raw reading — this is the
+   * rewrite tier produced one, else on the raw reading — this is the
    * stream the gate's PageHinkley channel accumulates and decides on.
-   * Equal to driftP whenever the expansion tier did not run.
+   * Equal to driftP whenever the rewrite tier did not run.
    */
   driftPGated: number | null;
   /** Which reading fed the verdict (absent when expansion ran not). */
@@ -236,7 +236,7 @@ export interface GateReplayPoint {
   /** Prospective wander-from-opening gauge (advisory series only). */
   anchorDistance: number;
   /** The rewrite the verdict signal embeds (audit trail). */
-  expandedText?: string;
+  rewrittenText?: string;
   /**
    * Expansion outcome for this Turn: 'muted' |
    * 'rewrite' | 'skip_no_candidate' | 'skip_rewrite_failed' |
@@ -245,7 +245,7 @@ export interface GateReplayPoint {
    * legacy report replays — the expansion param itself is the
    * explanation there.
    */
-  expansionNote?: string;
+  rewriteNote?: string;
   /**
    * The slow channel's own baseline at this sample, in drift units
    * The patrol consumes the RAW drift readings
@@ -269,18 +269,18 @@ export interface GateReplayPoint {
   gateRise?: number;
   /**
    * The immediate channel's z score at this judgment:
-   * (reading − μ) / max(σ, σ_floor) against the segment ledger as it
+   * (reading − μ) / max(σ, σ_floor) against the segment baseline as it
    * stood BEFORE this reading — the relative question "how far is this
    * arrival from what THIS segment calls a normal step?". Absent while
-   * the criterion bootstraps to the constant (ledger < 2 accepted
-   * members): there is no ledger to standardize against yet. Every
+   * the criterion bootstraps to the constant (baseline < 2 accepted
+   * members): there is no baseline to standardize against yet. Every
    * judgment is judge-first-fold-second, so the reading never enters its
    * own z. Audit provenance; pairs with `immediateThreshold`.
    */
   immediateZ?: number;
   /**
    * The immediate criterion this sample was judged against — the
-   * segment ledger's μ + k·max(σ, σ_floor) once the ledger holds 2
+   * segment baseline's μ + k·max(σ, σ_floor) once the baseline holds 2
    * accepted members, the constant T_segment below that (the constant
    * survives ONLY as this bootstrap prior). The z ≥ k verdict is
    * algebraically identical to exceeding this level. Every judgment is
@@ -289,7 +289,7 @@ export interface GateReplayPoint {
    */
   immediateThreshold?: number;
   /**
-   * The segment ledger's mean (μ) and standard deviation (σ) as it stood
+   * The segment baseline's mean (μ) and standard deviation (σ) as it stood
    * at this judgment. Absent on muted Turns and legacy reports; the z
    * panel's tooltip carries them.
    */
@@ -427,11 +427,11 @@ export interface AnalyzeThreadOptions {
    */
   gateReplay?: boolean | GateReplayOptionOverrides;
   /**
-   * Enables the expansion tier to rewrite ambiguous incoming messages
+   * Enables the rewrite tier to rewrite ambiguous incoming messages
    * before scoring. `off` keeps the replay byte-compatible with previous versions.
    * Ignored without `gateReplay`: the expanded signal is a gate feature.
    */
-  expansion?: ExpansionMode;
+  rewrite?: RewriteMode;
   /**
    * Progress hook for the gate replay's transient Prospective embedding
    * phase: fires immediately before each embed call (progress tracking).
@@ -441,7 +441,7 @@ export interface AnalyzeThreadOptions {
    * Progress hook for the expansion path: fires immediately before each
    * rewrite+embed with the candidate's position in the candidate list.
    */
-  onExpansionEmbedded?: (position: number, totalCandidates: number) => void;
+  onRewriteEmbedded?: (position: number, totalCandidates: number) => void;
 }
 
 /** Per-run overrides over `DEFAULT_GATE_REPLAY_OPTIONS`. */
@@ -451,7 +451,7 @@ export type GateReplayOptionOverrides = Partial<Pick<GateReplayParams, 'sinkhorn
  * The flat judging defaults — deliberately overridable per run; the
  * analyzer exists to calibrate them. Both drift flows judge with these:
  * the immediate channel fires at z ≥ 2 against the current segment's
- * μ/max(σ, σ_floor) (the constant T_segment bootstraps while the ledger
+ * μ/max(σ, σ_floor) (the constant T_segment bootstraps while the baseline
  * holds < 2 accepted members); the slow patrol rides the RAW drift
  * readings with λ/δ in drift units (λ pinned at 0.5 against the
  * purpose-built slow-drift corpus).

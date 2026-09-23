@@ -23,5 +23,9 @@ export async function listMessageEmbeddingsByMessageIds({
     .selectAll()
     .where('messageId', 'in', messageIds)
     .execute();
-  return rows.map((row) => ({ ...row, embedding: parseVector(row.embedding) }));
+  return rows.map(({ expandedText, ...row }) => ({
+    ...row,
+    rewrittenText: expandedText,
+    embedding: parseVector(row.embedding),
+  }));
 }

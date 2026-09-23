@@ -11,23 +11,25 @@ import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSe
 import { type Result, err, ok } from '../../types/result';
 import {
   EMBEDDING_MODEL_ID,
+  JUDGE_MODEL_ID,
   type JudgeContextDependenceInput,
+  REWRITE_MODEL_ID,
   embedText,
   judgeContextDependence,
   rewriteFollowUp,
 } from '../aiService';
-import { computeEmbeddingCostUsd, computeJudgeCostUsd, computeRewriteCostUsd } from './cost';
+import { computeEmbeddingCostUsd, computeInferenceCostUsd } from './cost';
 import { cosineDistance } from './drift';
 import {
-  EXPANSION_CONTEXT_LIMITS,
-  EXPANSION_MAX_TRIGGER_LENGTH,
+  REWRITE_CONTEXT_LIMITS,
+  REWRITE_MAX_TRIGGER_LENGTH,
   capContext,
   needsRewriteHeuristic,
   parseRewrite,
-} from './expansion';
-import { type Turn, prospectiveText, turnText } from './turns';
+} from './rewrite';
+import { type Turn, formattedProspectiveTurn, formattedTurn } from './turns';
 import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from './types';
-import { type JudgingParams, createVerdictState, judgeAndFold, mutedArrival } from './verdict';
+import { type JudgingParams, createVerdictState, evaluateAndRecord, isColdStart } from './verdict';
 
 /**
  * The live lane of the thread-health gate. Every arriving user message is
@@ -45,8 +47,8 @@ import { type JudgingParams, createVerdictState, judgeAndFold, mutedArrival } fr
  * chain stops — stored rows are replayed, never re-embedded or re-judged.
  */
 
-/** The live lane's expansion tier follows the feature flag. */
-type LiveExpansionMode = 'heuristic' | 'always';
+/** The live lane's rewrite tier follows the feature flag. */
+type LiveRewriteMode = 'heuristic' | 'always';
 
 export interface LiveArrivalOutcome {
   /** Verdict on the walk's last processed arrival; null when nothing arrived. */
@@ -91,26 +93,26 @@ function buildLiveTurns(messages: Message[]): LiveTurnRow[] {
 }
 
 /** The complete-Turn text block a fold embeds; null while the Turn is open. */
-function completeTurnText(row: LiveTurnRow): { text: string; assistantMessage: Message } | null {
+function completeTurnOrNull(row: LiveTurnRow): { text: string; assistantMessage: Message } | null {
   if (!row.assistantReply) return null;
   const turn: Turn = {
     turnNumber: row.turnNumber,
     userMessage: row.userMessage,
     assistantMessage: row.assistantReply,
   };
-  return { text: turnText(turn), assistantMessage: row.assistantReply };
+  return { text: formattedTurn(turn), assistantMessage: row.assistantReply };
 }
 
 /** The vector + audit trail of one arrival's judged signal. */
 interface ArrivalSignal {
   vector: number[];
   /** The self-contained rewrite the vector came from; null on the raw path. */
-  expandedText: string | null;
+  rewrittenText: string | null;
 }
 
 /** The expansion outcome for one arrival: its text and this arrival's spend. */
 interface ExpansionOutcome {
-  expandedText: string | null;
+  rewrittenText: string | null;
   rewriteCostUsd: number | null;
   judgeCostUsd: number | null;
 }
@@ -121,28 +123,26 @@ interface ExpansionOutcome {
  * is NOT a pipeline failure — the arrival keeps its raw reading and the
  * raw fast path explains itself; only a failed EMBED stops the pipeline.
  */
-async function expandArrival(input: {
+async function rewriteUserMessage(input: {
   incomingText: string;
   contextUserText: string;
   contextAssistantText: string;
 }): Promise<ExpansionOutcome> {
   const rewritten = await rewriteFollowUp({
-    contextUserText: capContext(input.contextUserText, EXPANSION_CONTEXT_LIMITS.user),
-    contextAssistantText: capContext(
-      input.contextAssistantText,
-      EXPANSION_CONTEXT_LIMITS.assistant,
-    ),
+    contextUserText: capContext(input.contextUserText, REWRITE_CONTEXT_LIMITS.user),
+    contextAssistantText: capContext(input.contextAssistantText, REWRITE_CONTEXT_LIMITS.assistant),
     followUpText: input.incomingText,
   });
   if (rewritten.type === 'error') {
-    return { expandedText: null, rewriteCostUsd: null, judgeCostUsd: null };
+    return { rewrittenText: null, rewriteCostUsd: null, judgeCostUsd: null };
   }
-  const rewriteCostUsd = await computeRewriteCostUsd(
+  const rewriteCostUsd = await computeInferenceCostUsd(
+    REWRITE_MODEL_ID,
     rewritten.data.usage.promptTokens,
     rewritten.data.usage.completionTokens,
   );
   return {
-    expandedText: parseRewrite(rewritten.data.text, input.incomingText),
+    rewrittenText: parseRewrite(rewritten.data.text, input.incomingText),
     rewriteCostUsd,
     judgeCostUsd: null,
   };
@@ -158,16 +158,14 @@ async function needsRewrite(input: {
   contextAssistantText: string;
 }): Promise<{ rewrite: boolean; judgeCostUsd: number | null }> {
   const judgeInput: JudgeContextDependenceInput = {
-    contextUserText: capContext(input.contextUserText, EXPANSION_CONTEXT_LIMITS.user),
-    contextAssistantText: capContext(
-      input.contextAssistantText,
-      EXPANSION_CONTEXT_LIMITS.assistant,
-    ),
+    contextUserText: capContext(input.contextUserText, REWRITE_CONTEXT_LIMITS.user),
+    contextAssistantText: capContext(input.contextAssistantText, REWRITE_CONTEXT_LIMITS.assistant),
     followUpText: input.incomingText,
   };
   const judged = await judgeContextDependence(judgeInput);
   if (judged.type === 'error') return { rewrite: false, judgeCostUsd: null };
-  const judgeCostUsd = await computeJudgeCostUsd(
+  const judgeCostUsd = await computeInferenceCostUsd(
+    JUDGE_MODEL_ID,
     judged.data.usage.promptTokens,
     judged.data.usage.completionTokens,
   );
@@ -180,13 +178,13 @@ async function needsRewrite(input: {
  * audited fallback. Fail-open is always the fallback — a failed rewrite or
  * judge never blocks the reading, they just leave the raw fast path as it.
  */
-async function decideExpansion(input: {
+async function decideRewrite(input: {
   incomingText: string;
   prior: LiveTurnRow | null;
-  mode: LiveExpansionMode;
+  mode: LiveRewriteMode;
 }): Promise<ExpansionOutcome> {
   const rawOutcome: ExpansionOutcome = {
-    expandedText: null,
+    rewrittenText: null,
     rewriteCostUsd: null,
     judgeCostUsd: null,
   };
@@ -199,22 +197,22 @@ async function decideExpansion(input: {
     contextAssistantText: input.prior.assistantReply?.content ?? '',
   };
   if (input.mode === 'always' || needsRewriteHeuristic(input.incomingText)) {
-    return expandArrival(context);
+    return rewriteUserMessage(context);
   }
   const trimmed = input.incomingText.trim();
-  const shortEnough = trimmed.length > 0 && trimmed.length <= EXPANSION_MAX_TRIGGER_LENGTH;
+  const shortEnough = trimmed.length > 0 && trimmed.length <= REWRITE_MAX_TRIGGER_LENGTH;
   if (input.mode !== 'heuristic' || !shortEnough) return rawOutcome;
   // Second chance for short messages the heuristic missed.
   const checked = await needsRewrite(context);
   if (!checked.rewrite) {
     return { ...rawOutcome, judgeCostUsd: checked.judgeCostUsd };
   }
-  const expanded = await expandArrival(context);
+  const expanded = await rewriteUserMessage(context);
   return { ...expanded, judgeCostUsd: checked.judgeCostUsd };
 }
 
 /**
- * The arrival's judged signal: the expansion tier decides the text (the
+ * The arrival's judged signal: the rewrite tier decides the text (the
  * rewrite when one landed, the raw message as audited fallback), that
  * text embeds once as a Prospective block, and the row persists keyed to
  * the user Message — per-step spend rides the embedding row, never
@@ -226,21 +224,21 @@ async function resolveArrivalSignal(input: {
   row: LiveTurnRow;
   prior: LiveTurnRow | null;
   stored: MessageEmbedding | undefined;
-  mode: LiveExpansionMode;
+  mode: LiveRewriteMode;
 }): Promise<Result<ArrivalSignal>> {
   const stored = input.stored;
   if (stored && stored.modelId === EMBEDDING_MODEL_ID) {
-    return ok({ vector: stored.embedding, expandedText: stored.expandedText });
+    return ok({ vector: stored.embedding, rewrittenText: stored.rewrittenText });
   }
 
-  const outcome = await decideExpansion({
+  const outcome = await decideRewrite({
     incomingText: input.row.userMessage.content,
     prior: input.prior,
     mode: input.mode,
   });
 
   const embedded = await embedText(
-    prospectiveText(outcome.expandedText ?? input.row.userMessage.content),
+    formattedProspectiveTurn(outcome.rewrittenText ?? input.row.userMessage.content),
   );
   if (embedded.type === 'error') return embedded;
   const embeddingCostUsd = await computeEmbeddingCostUsd(embedded.data.promptTokens);
@@ -249,13 +247,13 @@ async function resolveArrivalSignal(input: {
     messageId: input.row.userMessage.id,
     embedding: embedded.data.embedding,
     modelId: EMBEDDING_MODEL_ID,
-    expandedText: outcome.expandedText,
+    rewrittenText: outcome.rewrittenText,
     embeddingCostUsd,
     rewriteCostUsd: outcome.rewriteCostUsd,
     judgeCostUsd: outcome.judgeCostUsd,
   });
 
-  return ok({ vector: embedded.data.embedding, expandedText: outcome.expandedText });
+  return ok({ vector: embedded.data.embedding, rewrittenText: outcome.rewrittenText });
 }
 
 /**
@@ -283,7 +281,7 @@ async function resolveTurnVector(input: {
 /** The walk's mutable state: geometry, verdict, and persistence position. */
 interface LiveWalkState {
   judging: JudgingParams;
-  /** The shared two-channel verdict state (segment ledger + slow patrol). */
+  /** The shared two-channel verdict state (segment baseline + slow patrol). */
   verdictState: ReturnType<typeof createVerdictState>;
   /**
    * Element-wise sum of the CURRENT live segment's folded Turn vectors;
@@ -311,7 +309,7 @@ interface LiveWalkState {
  * row the moment the walk outruns it. Calling this with the message id
  * the segment starts at keeps the replay and fresh paths identical.
  */
-async function claimSegment(state: LiveWalkState, threadId: string, startMessageId: string) {
+async function allocateSegment(state: LiveWalkState, threadId: string, startMessageId: string) {
   const stored = state.storedSegments.shift();
   if (stored) state.currentSegmentId = stored.id;
   else {
@@ -329,7 +327,7 @@ async function claimSegment(state: LiveWalkState, threadId: string, startMessage
  * the target Message, or fill the whole thread when no target is given.
  * Off means the walk never queues and the caller sees the empty outcome.
  * Every walk runs the fill-forward walk under per-thread serialization
- * (see `serializedWalk`).
+ * (see `runSequentially`).
  */
 export async function runLiveGate({
   threadId,
@@ -337,8 +335,8 @@ export async function runLiveGate({
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
   if (env.THREAD_ANALYSIS_MODE === 'off')
     return ok({ verdict: null, fireChannel: null, messageId: null });
-  return serializedWalk(threadId, () =>
-    walkLiveChain(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
+  return runSequentially(threadId, () =>
+    processLiveChain(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
   );
 }
 
@@ -353,7 +351,7 @@ export async function runLiveGate({
  */
 const walksByThread = new Map<string, Promise<unknown>>();
 
-function serializedWalk<T>(threadId: string, walk: () => Promise<T>): Promise<T> {
+function runSequentially<T>(threadId: string, walk: () => Promise<T>): Promise<T> {
   const previous = walksByThread.get(threadId) ?? Promise.resolve();
   let release!: () => void;
   const holding = new Promise<void>((resolve) => {
@@ -380,7 +378,7 @@ function serializedWalk<T>(threadId: string, walk: () => Promise<T>): Promise<T>
  * provider failure (`provider_not_configured`, `embed_failed`) which the
  * chat route surfaces as a failed exchange.
  */
-async function walkLiveChain({
+async function processLiveChain({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
@@ -407,7 +405,7 @@ async function walkLiveChain({
   }
 
   const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
-  const expansionMode: LiveExpansionMode = mode === 'always' ? 'always' : 'heuristic';
+  const rewriteMode: LiveRewriteMode = mode === 'always' ? 'always' : 'heuristic';
 
   const storedSegments = await listThreadSegmentsByThread({
     threadId,
@@ -446,22 +444,22 @@ async function walkLiveChain({
   for (let i = 0; i < endIndex; i += 1) {
     const row = turns[i];
     if (!row) continue;
-    const staged = await stageArrival({
+    const processed = await processUserMessage({
       state,
       threadId,
       row,
       prior: turns[i - 1] ?? null,
       storedVectors: storedByMessageId,
-      mode: expansionMode,
+      mode: rewriteMode,
     });
-    if (staged.type === 'error') return staged;
-    outcome = staged.data;
+    if (processed.type === 'error') return processed;
+    outcome = processed.data;
   }
 
   return ok(outcome);
 }
 
-/** The arrival's judgment against the segment's ledger. */
+/** The arrival's judgment against the segment's baseline. */
 interface ArrivedJudgment {
   muted: boolean;
   fired: boolean;
@@ -479,14 +477,14 @@ interface ArrivedJudgment {
  * the arrival's own Turn contributes nothing to the reading it is
  * measured with.
  */
-function judgeArrivalAgainstLedger(state: LiveWalkState, vector: number[]): ArrivedJudgment {
+function evaluateArrivalAgainstLedger(state: LiveWalkState, vector: number[]): ArrivedJudgment {
   const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
   const driftP = gravity === null ? null : cosineDistance(vector, gravity);
-  const muted = mutedArrival(state.completedTurns, state.judging, driftP);
+  const muted = isColdStart(state.completedTurns, state.judging, driftP);
   let fired = false;
-  let judgment: ReturnType<typeof judgeAndFold>['judgment'] | null = null;
+  let judgment: ReturnType<typeof evaluateAndRecord>['judgment'] | null = null;
   if (!muted && driftP !== null) {
-    ({ judgment, fired } = judgeAndFold(state.verdictState, state.judging, driftP));
+    ({ judgment, fired } = evaluateAndRecord(state.verdictState, state.judging, driftP));
   }
   let arrivedVerdict: GateVerdict = 'pass';
   if (muted) arrivedVerdict = 'muted';
@@ -529,17 +527,17 @@ async function logArrivalIfNeeded(
  * reseeding, after a burn) the current segment's Gravity point, exactly
  * as the offline fold does with its Boundary turns.
  */
-async function foldCompletedTurn(input: {
+async function completeTurn(input: {
   state: LiveWalkState;
   row: LiveTurnRow;
   assistantStored: MessageEmbedding | undefined;
   reseed: boolean;
 }): Promise<Result<undefined>> {
-  const complete = completeTurnText(input.row);
-  if (complete === null) return ok(undefined);
+  const completion = completeTurnOrNull(input.row);
+  if (completion === null) return ok(undefined);
   const folded = await resolveTurnVector({
-    text: complete.text,
-    assistantMessage: complete.assistantMessage,
+    text: completion.text,
+    assistantMessage: completion.assistantMessage,
     stored: input.assistantStored,
   });
   if (folded.type === 'error') return folded;
@@ -560,13 +558,13 @@ async function foldCompletedTurn(input: {
  * This is the walk's only mutating step, so it is also the only place
  * signals persist.
  */
-async function stageArrival(input: {
+async function processUserMessage(input: {
   state: LiveWalkState;
   threadId: string;
   row: LiveTurnRow;
   prior: LiveTurnRow | null;
   storedVectors: Map<string, MessageEmbedding>;
-  mode: LiveExpansionMode;
+  mode: LiveRewriteMode;
 }): Promise<Result<LiveArrivalOutcome>> {
   const { state, threadId, row } = input;
   const userMessageId = row.userMessage.id;
@@ -574,7 +572,7 @@ async function stageArrival(input: {
   // The live chain opens its first segment with the thread's own opening
   // arrival; a replayed chain already holds it in the queue.
   if (state.currentSegmentId === null) {
-    await claimSegment(state, threadId, userMessageId);
+    await allocateSegment(state, threadId, userMessageId);
   }
 
   const signal = await resolveArrivalSignal({
@@ -585,7 +583,7 @@ async function stageArrival(input: {
   });
   if (signal.type === 'error') return signal;
 
-  const judged = judgeArrivalAgainstLedger(state, signal.data.vector);
+  const judged = evaluateArrivalAgainstLedger(state, signal.data.vector);
   await logArrivalIfNeeded(state, userMessageId, judged);
 
   if (judged.fired) {
@@ -593,10 +591,10 @@ async function stageArrival(input: {
     // segment starts at the SAME message and its Gravity point reseeds
     // from the fired Turn's own vector once that Turn folds.
     state.memberSum = null;
-    await claimSegment(state, threadId, userMessageId);
+    await allocateSegment(state, threadId, userMessageId);
   }
 
-  const folded = await foldCompletedTurn({
+  const folded = await completeTurn({
     state,
     row,
     assistantStored: row.assistantReply

@@ -6,8 +6,8 @@ import {
   type Judgment,
   type VerdictState,
   createVerdictState,
-  judgeAndFold,
-  mutedArrival,
+  evaluateAndRecord,
+  isColdStart,
   patrolOptions,
 } from './verdict';
 
@@ -137,8 +137,8 @@ function accumulate(sum: number[], vector: number[]): number[] {
   return sum;
 }
 
-/** Mutable fold state threaded through the scoring loop. */
-interface DriftFold {
+/** Mutable state threaded through the scoring loop. */
+interface DriftState {
   driftSeries: DriftPoint[];
   segments: TopicSegment[];
   segmentStart: number;
@@ -151,7 +151,7 @@ interface DriftFold {
   memberSum: number[] | null;
   /** The pre-judge Gravity snapshot per Turn (G_live at arrival time). */
   preGravityByTurn: Map<number, number[] | null>;
-  /** The shared two-channel verdict state (segment ledger + slow patrol). */
+  /** The shared two-channel verdict state (segment baseline + slow patrol). */
   verdict: VerdictState;
   /** Complete turns processed before the current one (the mute counter). */
   completedTurns: number;
@@ -173,23 +173,23 @@ function segmentTurnRows(
 
 /** Closes the current segment through `toTurn`, opening the next at `nextFromTurn`. */
 function closeCurrentSegment(
-  fold: DriftFold,
+  state: DriftState,
   context: ScoreBlockContext,
   toTurn: number,
   nextFromTurn: number,
 ): void {
-  fold.segments.push(
+  state.segments.push(
     buildSegment(
-      fold.segments.length + 1,
-      fold.segmentStart,
+      state.segments.length + 1,
+      state.segmentStart,
       toTurn,
-      fold.openingBoundary,
-      context.labelByTurn.get(fold.segmentStart) ?? '',
-      segmentTurnRows(context.contentByTurn, fold.segmentStart, toTurn),
+      state.openingBoundary,
+      context.labelByTurn.get(state.segmentStart) ?? '',
+      segmentTurnRows(context.contentByTurn, state.segmentStart, toTurn),
     ),
   );
-  fold.segmentStart = nextFromTurn;
-  fold.openingBoundary = nextFromTurn;
+  state.segmentStart = nextFromTurn;
+  state.openingBoundary = nextFromTurn;
 }
 
 interface ScoreBlockContext {
@@ -200,24 +200,24 @@ interface ScoreBlockContext {
 }
 
 /**
- * Judge first, fold second, for one Turn: score it against the current
+ * Judge first, incorporate second, for one Turn: score it against the current
  * Gravity point (Segment drift), then run the shared two-channel verdict
  * on the complete-turn reading — judge against the segment's OWN state:
- * the immediate channel standardizes the arrival against the ledger
+ * the immediate channel standardizes the arrival against the baseline
  * (μ/max(σ, σ_floor), the flat T_segment bootstraps as the prior while
- * the ledger holds fewer than 2 accepted members) and fires at
+ * the baseline holds fewer than 2 accepted members) and fires at
  * z ≥ k_immediate; the slow patrol rides the same raw readings against
  * its own running mean and fires at a λ-budgeted sustained rise. A fire
  * from EITHER channel is a Boundary turn ('segment' — sharp flip,
- * 'slow' — crawling class): it closes the segment, shreds the ledger,
+ * 'slow' — crawling class): it closes the segment, shreds the baseline,
  * hard-resets the patrol without consuming the spike, and reseeds the
  * next Gravity point with the Turn's own vector — which seeds the
- * segment's geometry but never enters any ledger (ratchet guard). A
- * muted arrival (cold start; the opening seed carries no reading) folds
- * into the member sum but into no ledger.
+ * segment's geometry but never enters any baseline (ratchet guard). A
+ * muted arrival (cold start; the opening seed carries no reading) accumulates
+ * into the member sum but into no baseline.
  */
 /**
- * The judgment's audit trail onto the fold's own point — a Boundary turn
+ * The judgment's audit trail onto the state's own point — a Boundary turn
  * also carries the channel that cut.
  */
 function stampJudgment(
@@ -245,23 +245,23 @@ function stampJudgment(
   }
 }
 
-function scoreBlock(
-  fold: DriftFold,
+function measureBlockDrift(
+  state: DriftState,
   context: ScoreBlockContext,
   block: TurnBlock,
   vector: number[],
 ): void {
   // Snapshot the live Gravity point before judging — the gate replay's
   // G_live at the moment this Turn's user Message arrived.
-  const gravity = fold.memberSum === null ? null : unitVector(fold.memberSum);
-  fold.preGravityByTurn.set(block.turnNumber, gravity);
+  const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
+  state.preGravityByTurn.set(block.turnNumber, gravity);
   const segmentDrift = gravity === null ? null : cosineDistance(vector, gravity);
-  const muted = mutedArrival(fold.completedTurns, context.judging, segmentDrift);
+  const muted = isColdStart(state.completedTurns, context.judging, segmentDrift);
 
   const point: DriftPoint = {
     turnNumber: block.turnNumber,
     messageIndex: context.messageIndexByMessageId.get(block.assistantMessage.id) ?? 0,
-    // Filled after the fold: the Anchor is Segment 1, unknown until the
+    // Filled after processing: the Anchor is Segment 1, unknown until the
     // segments exist.
     anchorDistance: 0,
     segmentDrift,
@@ -271,18 +271,20 @@ function scoreBlock(
   };
 
   if (!muted && segmentDrift !== null) {
-    const { judgment, fired } = judgeAndFold(fold.verdict, context.judging, segmentDrift);
-    stampJudgment(point, judgment, fold.verdict, fired);
+    const { judgment, fired } = evaluateAndRecord(state.verdict, context.judging, segmentDrift);
+    stampJudgment(point, judgment, state.verdict, fired);
   }
 
-  fold.driftSeries.push(point);
+  state.driftSeries.push(point);
 
   if (point.isBoundary) {
-    closeCurrentSegment(fold, context, block.turnNumber - 1, block.turnNumber);
+    closeCurrentSegment(state, context, block.turnNumber - 1, block.turnNumber);
   }
-  fold.memberSum =
-    point.isBoundary || fold.memberSum === null ? [...vector] : accumulate(fold.memberSum, vector);
-  fold.completedTurns += 1;
+  state.memberSum =
+    point.isBoundary || state.memberSum === null
+      ? [...vector]
+      : accumulate(state.memberSum, vector);
+  state.completedTurns += 1;
 }
 
 /**
@@ -311,26 +313,26 @@ function buildSegment1Anchor(
 }
 
 /**
- * The fold that scores Segment drift and cuts Topic segments
- *: judge first, fold second. Each Topic segment carries a
+ * The processor that measures Segment drift and cuts Topic segments
+ * : evaluate first, accumulate second. Each Topic segment carries a
  * rolling Gravity point — the equal-weight centroid of its member Turn
  * vectors. A Turn's Segment drift is its cosine distance from the
  * current Gravity point; the SHARED two-channel verdict judges it
  * against the segment's own state — the immediate channel (z ≥
- * k_immediate over the segment ledger, T_segment as bootstrap prior)
+ * k_immediate over the segment baseline, T_segment as bootstrap prior)
  * and the slow patrol (Page–Hinkley over the raw readings at λ) — and a
  * fire from either channel makes it a Boundary turn that closes the
  * segment and reseeds the next Gravity point with the Turn's own
- * vector, otherwise the Turn joins and folds in. The opening
+ * vector, otherwise the Turn joins and accumulates. The opening
  * segment's first Turn seeds the Gravity point and carries no score
  * (null, clamped to 0 in the Drift score). The Anchor IS Segment 1: the
- * fold decides the member set, then the Anchor is built from it — pure
+ * state decides the member set, then the Anchor is built from it — pure
  * opening topic, frozen at Segment 1's cut (or, when nothing cuts, the
  * whole opening theme). It stays demoted: no threshold, no
  * classification role — only the charted wander series and the slow
  * drift counsel.
  */
-export function scoreDrift({
+export function buildDriftProfile({
   blocks,
   turns,
   vectorByMessageId,
@@ -339,7 +341,7 @@ export function scoreDrift({
 }: ScoreDriftProps): DriftScoring {
   const firstBlock = blocks[0];
   const lastBlock = blocks[blocks.length - 1];
-  if (!firstBlock || !lastBlock) throw new Error('drift scoring needs at least one turn');
+  if (!firstBlock || !lastBlock) throw new Error('drift profile needs at least one turn');
 
   const context: ScoreBlockContext = {
     judging,
@@ -357,7 +359,7 @@ export function scoreDrift({
     ),
   };
 
-  const fold: DriftFold = {
+  const state: DriftState = {
     driftSeries: [],
     segments: [],
     segmentStart: firstBlock.turnNumber,
@@ -372,51 +374,51 @@ export function scoreDrift({
   for (const block of blocks) {
     const vector = vectorFor(block, vectorByMessageId);
     vectorByTurn.set(block.turnNumber, vector);
-    scoreBlock(fold, context, block, vector);
+    measureBlockDrift(state, context, block, vector);
   }
-  fold.segments.push(
+  state.segments.push(
     buildSegment(
-      fold.segments.length + 1,
-      fold.segmentStart,
+      state.segments.length + 1,
+      state.segmentStart,
       lastBlock.turnNumber,
-      fold.openingBoundary,
-      context.labelByTurn.get(fold.segmentStart) ?? '',
-      segmentTurnRows(context.contentByTurn, fold.segmentStart, lastBlock.turnNumber),
+      state.openingBoundary,
+      context.labelByTurn.get(state.segmentStart) ?? '',
+      segmentTurnRows(context.contentByTurn, state.segmentStart, lastBlock.turnNumber),
     ),
   );
 
-  // The fold is settled — Segment 1 is known, so the Anchor can be born:
+  // The state is settled — Segment 1 is known, so the Anchor can be born:
   // build it from the opening segment, then stamp every point's wander
   // from it.
-  const segment1 = fold.segments[0];
-  if (!segment1) throw new Error('the fold produced no segments');
+  const segment1 = state.segments[0];
+  if (!segment1) throw new Error('the processor produced no segments');
   const anchor = buildSegment1Anchor(blocks, vectorByMessageId, segment1);
-  for (const point of fold.driftSeries) {
+  for (const point of state.driftSeries) {
     const vector = vectorByTurn.get(point.turnNumber);
     if (!vector) throw new Error(`missing Turn vector for turn ${point.turnNumber}`);
     point.anchorDistance = cosineDistance(vector, anchor.vector);
   }
 
-  // Anchor-wander counsel (fold side): Page–Hinkley over the complete
-  // turns' anchor distances — the Anchor is born after the fold, so the
+  // Anchor-wander counsel (processing side): Page–Hinkley over the complete
+  // turns' anchor distances — the Anchor is born after processing, so the
   // patrol walks the wander series once the distances exist. Advisory
   // only: never a cut, never a classification vote. Cold start does not
   // apply — the Anchor is Segment 1, so the wander reading exists from
   // Turn 1 and the counsel watches every Turn.
   const counselDetector = createPageHinkley(patrolOptions(judging));
   const counselRows: AnchorCounselRow[] = [];
-  for (const point of fold.driftSeries) {
+  for (const point of state.driftSeries) {
     if (counselDetector.update(point.anchorDistance)) {
       counselRows.push({ turnNumber: point.turnNumber, anchorDistance: point.anchorDistance });
     }
   }
 
   return {
-    driftSeries: fold.driftSeries,
+    driftSeries: state.driftSeries,
     anchorBuiltFromTurns: anchor.builtFromTurns,
     anchorVector: anchor.vector,
-    preGravityByTurn: fold.preGravityByTurn,
-    segments: fold.segments,
+    preGravityByTurn: state.preGravityByTurn,
+    segments: state.segments,
     counsel: counselRows,
   };
 }

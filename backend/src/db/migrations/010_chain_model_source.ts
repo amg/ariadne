@@ -1,30 +1,27 @@
 import { type Kysely, sql } from 'kysely';
 
 /**
- * Provenance the live chain by its embedding model — the same identity
- * the embedding rows already carry. Every stored chain row was judged on
- * one model's geometry; keying rows to (arrival, model) means a model
- * change starts a fresh parallel chain from the walk instead of bending
- * around the old model's rows, and retired chains stay intact until
- * pruned deliberately.
+ * Add the source embedding model to the live chain tables.
  *
- * Existing rows backfill the model that produced their reading: the
- * arrival embedding behind each log, the opening arrival's embedding
- * behind each segment. The one-row-per-arrival invariant then holds
- * per (message, model) — the arrival log's identity — so overlapped
- * walks that wrote duplicates of the pre-provenance chain collapse to
- * their earliest judgment too.
+ * Every stored chain row was evaluated using a specific model's embedding.
+ * By keying rows to both the message and the model, changing the model
+ * starts a fresh chain instead of mixing calculations from different models,
+ * and old chains remain intact until intentionally cleaned up.
  *
- * Idempotent (guarded column adds; the backfill narrows `null`s only;
- * the delete is a no-op on a clean chain; the index swap guarded).
+ * Existing rows are updated to point to the model that originally produced
+ * them: we look up the embedding behind each log and segment. This guarantees
+ * there is only one log per (message, model) pair, removing any duplicates
+ * created before we started tracking the model source.
+ *
+ * Idempotent: safe to run multiple times (guarded column adds, safe backfills,
+ * unique index creation).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`alter table segment_drift_logs add column if not exists model_id text`.execute(db);
   await sql`alter table thread_segments add column if not exists model_id text`.execute(db);
 
-  // A correlated self-compare (keep the earliest (created_at, id) per
-  // (message, model)) has no readable builder shape, so the collapse
-  // stays raw like every other storage vacating.
+  // Update existing segment_drift_logs with the model_id from their message_embeddings.
+  // We use the earliest created_at to resolve any duplicates.
   await sql`
     update segment_drift_logs sd
        set model_id = e.model_id
@@ -34,6 +31,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
      where sd.model_id is null
        and e.message_id = sd.message_id
   `.execute(db);
+
+  // Update existing thread_segments with the model_id from their starting message_embeddings.
   await sql`
     update thread_segments ts
        set model_id = e.model_id
@@ -44,9 +43,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
        and e.message_id = ts.start_message_id
   `.execute(db);
 
-  // Strays with no arrival embedding left to testify — their model is the
-  // store's own latest emission. On a fresh schema there is no log and no
-  // embedding, so this and the `not null` below both no-op.
+  // If there are any stray rows with no matching message_embedding,
+  // we fallback to using the most recently used model_id in the database.
   await sql`
     update segment_drift_logs
        set model_id = newest.model_id
@@ -63,6 +61,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`alter table segment_drift_logs alter column model_id set not null`.execute(db);
   await sql`alter table thread_segments alter column model_id set not null`.execute(db);
 
+  // Remove duplicate segment_drift_logs for the same message and model,
+  // keeping only the earliest one.
   await sql`
     delete from segment_drift_logs a
      using segment_drift_logs b
@@ -71,6 +71,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
        and (a.created_at, a.id) > (b.created_at, b.id)
   `.execute(db);
 
+  // Replace the old message_id index with a unique index on (message_id, model_id).
   await db.schema.dropIndex('idx_segment_drift_logs_message_id').ifExists().execute();
   await db.schema
     .createIndex('idx_segment_drift_logs_message_model_uq')

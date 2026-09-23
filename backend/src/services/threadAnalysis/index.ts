@@ -22,7 +22,7 @@ export {
   type EmdBaselineRow,
   type EmdPairRow,
   type EmdRevisitRow,
-  type ExpansionMode,
+  type RewriteMode,
   type GateDivergenceRow,
   type GateReplayPoint,
   type GateReplaySection,

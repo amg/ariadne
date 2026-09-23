@@ -3,7 +3,7 @@ import type { NewSegmentDriftLog, SegmentDriftLog } from '@db/types';
 
 /**
  * Logs one judged arrival into the live chain: the composite reading
- * judged, the segment ledger's µ/σ/z snapshot before the arrival joined
+ * judged, the segment baseline's µ/σ/z snapshot before the arrival joined
  * it, and the verdict. Muted strides keep a row with null numbers.
  * The row's identity is the arrival read BY ITS MODEL — one chain per
  * embedding model runs in parallel, and a duplicate can never land on

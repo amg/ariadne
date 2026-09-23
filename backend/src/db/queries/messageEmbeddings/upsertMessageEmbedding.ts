@@ -34,10 +34,15 @@ export async function upsertMessageEmbedding(row: NewMessageEmbedding): Promise<
       message_id as "messageId",
       embedding,
       model_id as "modelId",
+      expanded_text as "expandedText",
+      embedding_cost_usd as "embeddingCostUsd",
+      rewrite_cost_usd as "rewriteCostUsd",
+      judge_cost_usd as "judgeCostUsd",
       created_at as "createdAt"
   `.execute(db);
 
   const stored = result.rows[0];
   if (!stored) throw new Error('message_embeddings upsert returned no row');
-  return { ...stored, embedding: parseVector(stored.embedding) };
+  const { expandedText, ...rest } = stored;
+  return { ...rest, rewrittenText: expandedText, embedding: parseVector(stored.embedding) };
 }

@@ -261,7 +261,7 @@ function renderOfflineChart(report: ThreadReport): string {
   // The fold judges every completed Turn with the shared two-channel
   // verdict against its segment's OWN state; the flat constant is drawn
   // as the bootstrap prior — the level a segment's arrivals face while
-  // its noise ledger warms (< 2 accepted members). The live gate's
+  // its noise baseline warms (< 2 accepted members). The live gate's
   // trigger steps live in the live chart, never here; the drawn constant
   // is landmark and prior both. Not toggleable.
   parts.push(
@@ -370,13 +370,13 @@ function renderLiveChart(report: ThreadReport): string {
   parts.push(group('fires', fireMarks));
 
   // The live trigger: each live segment's threshold line — flat T_segment
-  // while the segment's ledger warms, the learned μ + k·max(σ, σ_floor)
+  // while the segment's baseline warms, the learned μ + k·max(σ, σ_floor)
   // once it speaks, resetting to T_segment on every fired Turn. Not
   // toggleable: it is the live lane's landmark.
   parts.push(liveTriggerElement(frame, gate.points, params, report.params.segmentThreshold));
 
   // The arrival drift series: drift_p — the non-standardised reading of
-  // the judged signal (the expansion tier's rewritten user message when
+  // the judged signal (the rewrite tier's rewritten user message when
   // one landed, the raw arrival-time text as fallback) — with one
   // verdict-carrying marker per point.
   const verdictPoints = gate.points.filter(
@@ -394,7 +394,7 @@ function renderLiveChart(report: ThreadReport): string {
   parts.push(group('prospective', verdictBody));
 
   // The raw audit series: the arrival-time message exactly
-  // as received, drawn only when the expansion tier ran.
+  // as received, drawn only when the rewrite tier ran.
   const rawSeries = verdictPoints
     .filter((point) => point.driftP !== null)
     .map((point) => ({ turnNumber: point.turnNumber, value: point.driftP as number }));
@@ -449,7 +449,7 @@ function renderLiveGridAndAxes(frame: LiveFrame, immediateK: number): string {
   );
   if (frame.plotRight - frame.plotLeft > 0) {
     parts.push(
-      `<text x="${frame.plotLeft + 6}" y="${mainTop - 10}" text-anchor="start" font-size="10" fill="#6a1b9a">live trigger — each segment's threshold: T_segment while the ledger warms, μ + k·max(σ, σ_floor) once it learns, reset on every fired Turn</text>`,
+      `<text x="${frame.plotLeft + 6}" y="${mainTop - 10}" text-anchor="start" font-size="10" fill="#6a1b9a">live trigger — each segment's threshold: T_segment while the baseline warms, μ + k·max(σ, σ_floor) once it learns, reset on every fired Turn</text>`,
       `<text x="${frame.plotLeft + 6}" y="${zTop - 8}" text-anchor="start" font-size="10" fill="#6a1b9a">same arrivals, z-standardised to their own segment — fires at z ≥ k = ${immediateK}</text>`,
     );
   }
@@ -492,7 +492,7 @@ function triggerPointTooltip(step: TriggerStep, params: ThreadReportParams): str
   const base = `Turn ${step.turnNumber} — arrival judged against ${step.threshold.toFixed(3)}`;
   const tail = ` · live segment ${step.segment}`;
   if (step.mu === null || step.sigma === null) {
-    return `${base} — bootstrap: flat T_segment until the ledger holds 2 accepted members${tail}`;
+    return `${base} — bootstrap: flat T_segment until the baseline holds 2 accepted members${tail}`;
   }
   const { immediateK, sigmaFloor } = params;
   const mu = (step.mu ?? 0).toFixed(3);
@@ -505,7 +505,7 @@ function triggerPointTooltip(step: TriggerStep, params: ThreadReportParams): str
  * the level over [Turn i, Turn i+1) is the state Turn i's fold left
  * behind — the very criterion that judges the next arrival. Consequences
  * the reader can see: a learned adjustment steps up inside its OWN
- * segment, the moment the ledger warms; a fired Turn's reset lands ON
+ * segment, the moment the baseline warms; a fired Turn's reset lands ON
  * the boundary turn (boundary turns belong to the segment they start); and the level reaching into a boundary turn is the
  * closing segment's FINAL criterion — which is why fired readings
  * visibly cross it before the drop.
@@ -572,7 +572,7 @@ function liveTriggerElement(
     );
   }
 
-  // The tail after a final fire: the shredded ledger leaves the standing
+  // The tail after a final fire: the shredded baseline leaves the standing
   // default for whatever arrives next.
   const last = steps[steps.length - 1] as TriggerStep;
   const lastPoint = points.find((point) => point.turnNumber === last.turnNumber);
@@ -580,7 +580,7 @@ function liveTriggerElement(
     const xTail = Math.min(coord(frame.x(last.turnNumber) + spacing * 0.8), frame.plotRight);
     if (xTail > frame.x(last.turnNumber)) {
       parts.push(
-        `<path class="series-live-trigger" d="M ${frame.x(last.turnNumber)} ${constantY} H ${xTail}" fill="none" stroke="#6a1b9a" stroke-width="2"><title>${escapeHtml(`after Turn ${last.turnNumber} (fire): the ledger is shredded — the next arrival judges against T_segment ${constantLabel} · live segment ${last.segment}`)}</title></path>`,
+        `<path class="series-live-trigger" d="M ${frame.x(last.turnNumber)} ${constantY} H ${xTail}" fill="none" stroke="#6a1b9a" stroke-width="2"><title>${escapeHtml(`after Turn ${last.turnNumber} (fire): the baseline is shredded — the next arrival judges against T_segment ${constantLabel} · live segment ${last.segment}`)}</title></path>`,
       );
     }
   }
@@ -754,7 +754,7 @@ const VERDICT_MARKER: Record<GateVerdict, MarkerShape> = {
 /**
  * Drift-point tooltip on the offline fold series: the Turn's recorded
  * Segment drift plus its two-channel judgment trail when one exists —
- * the criterion that judged it (with the z once the ledger could
+ * the criterion that judged it (with the z once the baseline could
  * standardize), the channel that cut a Boundary turn, and the patrol's
  * own reading when it consumed the step.
  */
@@ -771,7 +771,7 @@ function driftPointTooltip(point: DriftPoint & { segmentDrift: number }): string
     : '';
   const z =
     point.immediateZ === undefined
-      ? `${base}${boundary} · criterion ${point.immediateThreshold.toFixed(3)} (bootstrap — the constant stands in until the ledger holds 2 accepted members)`
+      ? `${base}${boundary} · criterion ${point.immediateThreshold.toFixed(3)} (bootstrap — the constant stands in until the baseline holds 2 accepted members)`
       : `${base}${boundary} · criterion ${point.immediateThreshold.toFixed(3)} (z ${point.immediateZ.toFixed(2)})`;
   const patrol =
     point.gateMean === undefined || point.gateRise === undefined
@@ -786,13 +786,13 @@ function driftPointTooltip(point: DriftPoint & { segmentDrift: number }): string
  * its skip reason. It is empty when expansion ran not.
  */
 function sourceSuffix(point: GateReplayPoint): string {
-  if (point.driftPSource === 'rewritten' && point.expandedText) {
-    const short = point.expandedText.slice(0, 90);
-    const ellipsis = point.expandedText.length > 90 ? '…' : '';
+  if (point.driftPSource === 'rewritten' && point.rewrittenText) {
+    const short = point.rewrittenText.slice(0, 90);
+    const ellipsis = point.rewrittenText.length > 90 ? '…' : '';
     return ` · reading: rewritten user message “${short}${ellipsis}”`;
   }
   if (point.driftPSource === 'raw-fallback') {
-    const note = point.expansionNote ? ` — ${point.expansionNote}` : '';
+    const note = point.rewriteNote ? ` — ${point.rewriteNote}` : '';
     return ` · reading: raw message (fallback${note})`;
   }
   return '';
@@ -811,13 +811,13 @@ function patrolSuffix(point: GateReplayPoint, lambda?: number): string {
 
 /**
  * The immediate criterion the reading was judged against — with its z
- * score once the segment ledger is warm enough to standardize; below
+ * score once the segment baseline is warm enough to standardize; below
  * that the constant T_segment stands in alone.
  */
 function criterionSuffix(point: GateReplayPoint): string {
   if (point.immediateThreshold === undefined) return '';
   if (point.immediateZ === undefined) {
-    return ` · criterion ${point.immediateThreshold.toFixed(3)} (bootstrap — the constant stands in until the ledger holds 2 accepted members)`;
+    return ` · criterion ${point.immediateThreshold.toFixed(3)} (bootstrap — the constant stands in until the baseline holds 2 accepted members)`;
   }
   return ` · criterion ${point.immediateThreshold.toFixed(3)} (z ${point.immediateZ.toFixed(2)})`;
 }
@@ -1067,14 +1067,15 @@ function renderOfflineLegend(report: ThreadReport, hasLiveChart: boolean): strin
     { color: '#c62828', label: 'Boundary turn' },
     {
       color: '#ef6c00',
-      label: 'segment threshold — the bootstrap prior T_segment (flat only while the ledger warms)',
+      label:
+        'segment threshold — the bootstrap prior T_segment (flat only while the baseline warms)',
     },
   ];
   const followUp = hasLiveChart
     ? ' The live gate’s view of the same thread — arrivals on the prospective reading against the same per-segment trigger — lives in its own chart below.'
     : '';
   const laneNote = hasDrift
-    ? `<p class="lane-note"><strong>Offline fold.</strong> Every Turn is scored once, after it completes, on the full Turn vector including the assistant reply — the SAME two-channel verdict the live gate runs, just on the complete-turn reading. A Turn is judged against its segment's OWN state: the arrival's distance from the rolling Gravity point, standardized against the segment's noise ledger (μ, σ with the σ_floor) — the flat orange line drawn here is only the bootstrap prior, in force while the ledger holds fewer than 2 accepted members. A fire from either channel is a Boundary Turn: immediate (the reading cleared the segment's level) or slow (the Page–Hinkley patrol accumulated a λ-budgeted sustained rise); the cut shreds the ledger and the rejected Turn seeds the next segment but joins no ledger. The Anchor IS Segment 1 — the opening segment's own members, frozen at its cut — so Anchor wander measures the thread's flight from its pure opening topic; it replays from Turn 1 and stays advisory: no threshold, no vote. The fold's own counsel rows (sustained rise in this wander series) are the rings on the blue series.${followUp}</p>`
+    ? `<p class="lane-note"><strong>Offline fold.</strong> Every Turn is scored once, after it completes, on the full Turn vector including the assistant reply — the SAME two-channel verdict the live gate runs, just on the complete-turn reading. A Turn is judged against its segment's OWN state: the arrival's distance from the rolling Gravity point, standardized against the segment's noise baseline (μ, σ with the σ_floor) — the flat orange line drawn here is only the bootstrap prior, in force while the baseline holds fewer than 2 accepted members. A fire from either channel is a Boundary Turn: immediate (the reading cleared the segment's level) or slow (the Page–Hinkley patrol accumulated a λ-budgeted sustained rise); the cut shreds the baseline and the rejected Turn seeds the next segment but joins no baseline. The Anchor IS Segment 1 — the opening segment's own members, frozen at its cut — so Anchor wander measures the thread's flight from its pure opening topic; it replays from Turn 1 and stays advisory: no threshold, no vote. The fold's own counsel rows (sustained rise in this wander series) are the rings on the blue series.${followUp}</p>`
     : '';
   return `<ul class="legend">${legendItems(entries)}</ul>${laneNote}`;
 }
@@ -1093,7 +1094,7 @@ function renderLiveLegend(report: ThreadReport): string {
     {
       color: '#6a1b9a',
       label:
-        "live trigger — each live segment's threshold: flat T_segment while the ledger warms (dashed lead-in = standing default during the cold-start mute), learned μ + k·max(σ, σ_floor) once it speaks, reset to T_segment on every fired Turn (the fired Turn opens the next segment)",
+        "live trigger — each live segment's threshold: flat T_segment while the baseline warms (dashed lead-in = standing default during the cold-start mute), learned μ + k·max(σ, σ_floor) once it speaks, reset to T_segment on every fired Turn (the fired Turn opens the next segment)",
       style: 'width:18px;height:3.5px',
     },
     {
@@ -1114,8 +1115,8 @@ function renderLiveLegend(report: ThreadReport): string {
   ];
   const laneNote =
     `<p class="lane-note"><strong>Live gate — two scales of the same arrivals.</strong> ` +
-    `<em>Top panel (drift units).</em> The thin purple line is drift_p: the arriving message's drift exactly as measured, before any standardisation — the expansion tier's decontextualised rewrite when one landed, else the raw message. The bold solid line is the <em>live trigger</em>: each live segment's threshold, drawn as the segment's <em>state</em> — flat at T_segment while its ledger warms (fewer than 2 accepted members), stepping up to μ + k·max(σ, σ_floor) <em>inside its own segment</em> the moment the ledger learns. When a fired Turn shreds the ledger, the reset to T_segment lands on the boundary Turn itself (boundary turns belong to the segment they start); the level reaching into a boundary Turn is the CLOSING segment's final criterion, which is exactly why a fired reading is seen to cross it before the drop. Hover the dashed lead-in (the standing default through the cold-start mute), any slab or marker for the exact state; markers carry their live segment number. ` +
-    `<em>Bottom panel (z units).</em> The same arrivals re-expressed as z = (reading − μ) / max(σ, σ_floor) against their own segment's ledger: the segment-local trigger is the flat line at z = k, and the dashed z = 0 line is the segment mean. Arrivals judged during bootstrap have no μ/σ yet and therefore no z point — the flat T_segment judged them raw on top. Purple bands mark fired Turns; each point's tooltip names the channel that fired it (immediate: the reading cleared the segment's criterion; slow: the accumulated Page–Hinkley rise reached λ in drift units).</p>`;
+    `<em>Top panel (drift units).</em> The thin purple line is drift_p: the arriving message's drift exactly as measured, before any standardisation — the rewrite tier's decontextualised rewrite when one landed, else the raw message. The bold solid line is the <em>live trigger</em>: each live segment's threshold, drawn as the segment's <em>state</em> — flat at T_segment while its baseline warms (fewer than 2 accepted members), stepping up to μ + k·max(σ, σ_floor) <em>inside its own segment</em> the moment the baseline learns. When a fired Turn shreds the baseline, the reset to T_segment lands on the boundary Turn itself (boundary turns belong to the segment they start); the level reaching into a boundary Turn is the CLOSING segment's final criterion, which is exactly why a fired reading is seen to cross it before the drop. Hover the dashed lead-in (the standing default through the cold-start mute), any slab or marker for the exact state; markers carry their live segment number. ` +
+    `<em>Bottom panel (z units).</em> The same arrivals re-expressed as z = (reading − μ) / max(σ, σ_floor) against their own segment's baseline: the segment-local trigger is the flat line at z = k, and the dashed z = 0 line is the segment mean. Arrivals judged during bootstrap have no μ/σ yet and therefore no z point — the flat T_segment judged them raw on top. Purple bands mark fired Turns; each point's tooltip names the channel that fired it (immediate: the reading cleared the segment's criterion; slow: the accumulated Page–Hinkley rise reached λ in drift units).</p>`;
   return `<ul class="legend">${legendItems(entries)}</ul>${laneNote}`;
 }
 
@@ -1204,7 +1205,7 @@ const VERDICT_LABEL: Record<GateVerdict, string> = {
 
 /**
  * The gate table's verdict-signal cell: drift_p as the gate
- * actually sees it — the rewritten Prospective when the expansion tier
+ * actually sees it — the rewritten Prospective when the rewrite tier
  * landed one, the raw reading as fallback — with its audit-trail tooltip
  * (source + rewritten text, or the skip reason). Empty when the column
  * is absent (off replays stay byte-identical to the task).
@@ -1213,8 +1214,8 @@ function gatedCell(point: GateReplayPoint, hasExpanded: boolean): string {
   if (!hasExpanded) return '';
   const cellTitle =
     point.driftPSource === 'rewritten'
-      ? `verdict signal: rewritten user message${point.expandedText ? ` — “${point.expandedText}”` : ''}`
-      : `verdict signal: raw message fallback${point.expansionNote ? ` (${point.expansionNote})` : ''}`;
+      ? `verdict signal: rewritten user message${point.rewrittenText ? ` — “${point.rewrittenText}”` : ''}`
+      : `verdict signal: raw message fallback${point.rewriteNote ? ` (${point.rewriteNote})` : ''}`;
   return `<td title="${escapeHtml(cellTitle)}">${point.driftPGated === null ? '—' : point.driftPGated.toFixed(3)}</td>`;
 }
 
@@ -1225,10 +1226,10 @@ function gatedCell(point: GateReplayPoint, hasExpanded: boolean): string {
  */
 function expandedRewriteCell(point: GateReplayPoint, hasExpanded: boolean): string {
   if (!hasExpanded) return '';
-  if (point.expandedText === undefined) return '<td>—</td>';
+  if (point.rewrittenText === undefined) return '<td>—</td>';
   const short =
-    point.expandedText.length > 48 ? `${point.expandedText.slice(0, 48)}…` : point.expandedText;
-  return `<td title="${escapeHtml(point.expandedText)}">${escapeHtml(short)}</td>`;
+    point.rewrittenText.length > 48 ? `${point.rewrittenText.slice(0, 48)}…` : point.rewrittenText;
+  return `<td title="${escapeHtml(point.rewrittenText)}">${escapeHtml(short)}</td>`;
 }
 
 /** One Turn's messages carried by the gate replay table — mirrors TopicSegmentTurn. */
@@ -1316,14 +1317,14 @@ function renderDivergenceRows(report: ThreadReport): string {
           )
           .join('')}</ul>`;
   const hasExpanded = gate.points.some((point) => point.driftPSource !== undefined);
-  const expansionNote = hasExpanded
+  const rewriteNote = hasExpanded
     ? '<p class="gate-note">Expansion pipeline active: the drift_p (verdict) column is the live signal — the recomposed user message for ambiguous Turns, the raw message where no rewrite landed (falls back explained via expansion note); the drift_p (raw) column keeps the arrival-time reading for inspection.</p>\n'
     : '';
   const readingGuide = hasExpanded
     ? '<p class="gate-note"><strong>Reading the table.</strong> Each row is one Turn&#39;s arrival-time measurement, not its history. <em>drift_p (raw)</em> is how the message looked as it arrived — a measurement; it never fires the gate by itself. <em>drift_p (verdict)</em> is what the gate judges: drift on the rewritten (decontextualised) message when a rewrite landed, on the raw message otherwise. <em>Anchor distance</em> is distance from the thread&#39;s opening topic — advisory only. The outcome in <em>Gate verdict</em> comes from the segment-local criterion in the chart (the live trigger line), not from the raw drift alone: a large raw drift can pass when its segment accepts large steps, and a modest one can fire when the segment has learned a tight band.</p>\n'
     : '';
   return `<p class="gate-note">Pretend replay: every stored user message scored as a Prospective Turn through the live-gate logic — the SAME two-channel verdict the offline fold runs; only the reading differs (user-only message vs the complete exchange). Advisory only — the fold stays authoritative, and with identical judging logic a divergence row can only come from that reading difference: calibration data, not failures. The fold's own Anchor-wander counsel carries this report's slow signal on the offline chart; the rows below are the prospective side's.</p>
-${expansionNote}${readingGuide}${renderGateTable(gate.points, allTurns)}
+${rewriteNote}${readingGuide}${renderGateTable(gate.points, allTurns)}
 <h3>Gate/fold divergences</h3>
 ${divergenceSection}
 <h3>Anchor-wander counsel</h3>

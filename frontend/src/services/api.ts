@@ -54,7 +54,7 @@ export interface LiveAnalysisPoint {
   sigma: number | null;
   zScore: number | null;
   immediateThreshold: number | null;
-  expandedText: string | null;
+  rewrittenText: string | null;
 }
 
 export interface LiveAnalysisView {

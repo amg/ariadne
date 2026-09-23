@@ -95,7 +95,7 @@ export interface ThreadSegmentsTable {
 /**
  * One row per judged arrival in the live lane: the composite reading
  * judged against the segment it entered, plus the µ/σ/z snapshot of that
- * segment's ledger exactly as it stood BEFORE the arrival joined it. Muted
+ * segment's baseline exactly as it stood BEFORE the arrival joined it. Muted
  * strides keep a row with null numbers.
  */
 export interface SegmentDriftLogsTable {
@@ -143,7 +143,9 @@ export type NewModelConfig = Insertable<ModelConfigsTable>;
 export type MessageEmbeddingStored = Selectable<MessageEmbeddingsTable>;
 
 /** Turn embedding row as returned by `queries/messageEmbeddings` (vector parsed to numbers). */
-export type MessageEmbedding = Omit<MessageEmbeddingStored, 'embedding'> & {
+export type MessageEmbedding = Omit<MessageEmbeddingStored, 'embedding' | 'expandedText'> & {
+  rewrittenText: string | null;
+} & {
   embedding: number[];
 };
 
@@ -160,7 +162,7 @@ export type NewArrivalEmbedding = {
   embedding: number[];
   modelId: string;
   /** The self-contained rewrite the embedding came from; null when the raw message was embedded. */
-  expandedText?: string | null;
+  rewrittenText?: string | null;
   embeddingCostUsd?: number | null;
   rewriteCostUsd?: number | null;
   judgeCostUsd?: number | null;

@@ -107,9 +107,9 @@ function unitVector(vector: number[]): number[] {
 }
 
 interface MirrorState {
-  ledgerCount: number;
-  ledgerMean: number;
-  ledgerM2: number;
+  baselineCount: number;
+  baselineMean: number;
+  baselineM2: number;
   phCount: number;
   phSum: number;
   phCumulative: number;
@@ -118,9 +118,9 @@ interface MirrorState {
 
 function freshMirror(): MirrorState {
   return {
-    ledgerCount: 0,
-    ledgerMean: 0,
-    ledgerM2: 0,
+    baselineCount: 0,
+    baselineMean: 0,
+    baselineM2: 0,
     phCount: 0,
     phSum: 0,
     phCumulative: 0,
@@ -129,9 +129,9 @@ function freshMirror(): MirrorState {
 }
 
 function resetLedger(state: MirrorState) {
-  state.ledgerCount = 0;
-  state.ledgerMean = 0;
-  state.ledgerM2 = 0;
+  state.baselineCount = 0;
+  state.baselineMean = 0;
+  state.baselineM2 = 0;
 }
 
 function resetPatrol(state: MirrorState) {
@@ -144,16 +144,17 @@ function resetPatrol(state: MirrorState) {
 /**
  * Mirror of the shared two-channel judge (verdict.ts), private internals
  * reimplemented for test independence. Returns the channel that fired and
- * the ledger snapshot at judgment — the exact shape the drift log stores.
+ * the baseline snapshot at judgment — the exact shape the drift log stores.
  */
 function mirrorJudge(
   state: MirrorState,
   reading: number,
 ): { fire: 'immediate' | 'slow' | null; mu: number | null; sigma: number | null } {
-  const mu = state.ledgerCount === 0 ? null : state.ledgerMean;
-  const sigma = state.ledgerCount < 2 ? null : Math.sqrt(state.ledgerM2 / (state.ledgerCount - 1));
-  const ledgerWarm = mu !== null && sigma !== null && state.ledgerCount >= 2;
-  const threshold = ledgerWarm
+  const mu = state.baselineCount === 0 ? null : state.baselineMean;
+  const sigma =
+    state.baselineCount < 2 ? null : Math.sqrt(state.baselineM2 / (state.baselineCount - 1));
+  const baselineWarm = mu !== null && sigma !== null && state.baselineCount >= 2;
+  const threshold = baselineWarm
     ? mu + PARAMS.immediateK * Math.max(sigma, PARAMS.sigmaFloor)
     : PARAMS.segmentThreshold;
 
@@ -176,11 +177,11 @@ function mirrorJudge(
     return { fire: 'slow', mu, sigma };
   }
 
-  // Accepted: fold into the segment ledger (Welford).
-  state.ledgerCount += 1;
-  const delta = reading - state.ledgerMean;
-  state.ledgerMean += delta / state.ledgerCount;
-  state.ledgerM2 += delta * (reading - state.ledgerMean);
+  // Accepted: fold into the segment baseline (Welford).
+  state.baselineCount += 1;
+  const delta = reading - state.baselineMean;
+  state.baselineMean += delta / state.baselineCount;
+  state.baselineM2 += delta * (reading - state.baselineMean);
   return { fire: null, mu, sigma };
 }
 
@@ -379,7 +380,7 @@ describe('runLiveGate — the fill-forward walk', () => {
 
     // The mirror's chain, row for row: verdict, channel, and the judged
     // numbers, against the segment each arrival was judged in. For
-    // hash-random topic pivots the ledger never accepts twice, so every
+    // hash-random topic pivots the baseline never accepts twice, so every
     // judged arrival bootstraps on the flat T_segment (mu/sigma stay null).
     for (let index = 0; index < logs.length; index += 1) {
       const log = logs[index];
@@ -467,7 +468,7 @@ describe('runLiveGate — the fill-forward walk', () => {
       expect(row?.embeddingCostUsd).not.toBeNull();
       // Raw fast paths: the raw message itself was embedded (no rewrite
       // text) and neither the judge nor the rewriter billed anything.
-      expect(row?.expandedText).toBeNull();
+      expect(row?.rewrittenText).toBeNull();
       expect(row?.rewriteCostUsd).toBeNull();
       expect(row?.judgeCostUsd).toBeNull();
     }
@@ -699,7 +700,7 @@ describe('the analysis surface reads the persisted chain', () => {
     // current Topic segment and seeds the next, so the fired arrival
     // belongs to the segment it opens — the one whose start Message it
     // is. The drift log keeps the judged-in segment; that is the previous
-    // ledger's story, not the membership one.
+    // baseline's story, not the membership one.
     for (const segment of view.data.segments) {
       const opening = view.data.points.find((point) => point.messageId === segment.startMessageId);
       expect(opening).toBeDefined();

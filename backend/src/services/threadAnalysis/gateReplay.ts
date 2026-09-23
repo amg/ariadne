@@ -6,8 +6,8 @@ import {
   type Judgment,
   type VerdictState,
   createVerdictState,
-  judgeAndFold,
-  mutedArrival,
+  evaluateAndRecord,
+  isColdStart,
   patrolOptions,
 } from './verdict';
 
@@ -22,13 +22,13 @@ import {
  *
  * The judging itself is the SHARED verdict core (`verdict.ts`) — the
  * same code the offline fold runs. The only replay-specific input is the
- * reading: the COMPOSITE PROSPECTIVE reading (the expansion tier's
+ * reading: the COMPOSITE PROSPECTIVE reading (the rewrite tier's
  * rewritten user message when one landed, the raw arrival-time text as
- * fallback). The core's mechanics live there: per-segment ledger, z ≥
+ * fallback). The core's mechanics live there: per-segment baseline, z ≥
  * k_immediate with T_segment as bootstrap prior, Page–Hinkley over the
- * raw readings, verdict shreds the ledger, immediate fires reset the
+ * raw readings, verdict shreds the baseline, immediate fires reset the
  * patrol without consuming the spike, rejected arrivals never enter any
- * ledger. Advisory only: the fold stays authoritative on cuts, and
+ * baseline. Advisory only: the fold stays authoritative on cuts, and
  * divergence rows ("gate fired / fold found nothing" and the reverse)
  * are expected output — with identical judging logic on both sides they
  * can only come from the reading difference (user-only vs complete
@@ -41,20 +41,20 @@ export interface ScoreGateReplayProps {
   /** Transient Prospective vectors (never persisted), by Turn. */
   prospectiveVectorByTurn: Map<number, number[]>;
   /**
-   * The expansion tier's vectors: rewritten Prospective
+   * The rewrite tier's vectors: rewritten Prospective
    * blocks embedded transiently. Sparse by construction — only the Turns
    * the tier rewrote carry one; every other Turn falls back to its raw
    * Prospective for the verdict signal.
    */
-  expandedVectorByTurn?: Map<number, number[]>;
-  /** The audit-trail texts behind `expandedVectorByTurn`, by Turn. */
-  expandedTextByTurn?: Map<number, string>;
+  rewrittenVectorByTurn?: Map<number, number[]>;
+  /** The audit-trail texts behind `rewrittenVectorByTurn`, by Turn. */
+  rewrittenTextByTurn?: Map<number, string>;
   /**
    * Expansion outcomes for Turns without an expanded vector: 'skip_no_candidate' | 'skip_rewrite_failed' |
    * 'skip_unusable_rewrite'. Absent entries stay unannotated ('off' mode:
    * the explanation is the mode itself — JSON stays byte-stable).
    */
-  expansionNoteByTurn?: Partial<Record<number, string>> | undefined;
+  rewriteNoteByTurn?: Partial<Record<number, string>> | undefined;
   /** Stored Turn vectors by Turn (keyed via the assistant Message). */
   turnVectorByTurn: Map<number, number[]>;
   /** The fold's live Gravity point each Turn was judged against. */
@@ -69,7 +69,7 @@ export interface ScoreGateReplayProps {
    * The flat judging params — the shared two-channel verdict's full set,
    * identical to the fold's. T_segment survives in here ONLY as the
    * immediate channel's bootstrap prior while the current segment's
-   * ledger warms up (fewer than 2 accepted members).
+   * baseline warms up (fewer than 2 accepted members).
    */
   judging: JudgingParams;
 }
@@ -95,7 +95,7 @@ function divergenceFor(turnNumber: number, verdict: GateVerdict, foldCut: boolea
 
 /** Mutable replay state threaded through the loop, one Turn at a time. */
 interface ReplayState {
-  /** The shared two-channel verdict state (ledger + slow patrol). */
+  /** The shared two-channel verdict state (baseline + slow patrol). */
   verdict: VerdictState;
   /**
    * The Anchor-wander counsel detector: the same PageHinkley shape over
@@ -111,7 +111,7 @@ interface ReplayState {
 
 /**
  * The verdict signal's vector for one Turn: the
- * rewritten Prospective when the expansion tier produced one, the raw
+ * rewritten Prospective when the rewrite tier produced one, the raw
  * Prospective as fallback. Source is null when the tier did not run at
  * all — no annotation then (byte-stable 'off' JSON).
  */
@@ -119,22 +119,22 @@ function compositeVector(
   args: ScoreGateReplayProps,
   turnNumber: number,
 ): { vector: number[]; source: 'rewritten' | 'raw-fallback' | null } {
-  const rewritten = args.expandedVectorByTurn?.get(turnNumber);
+  const rewritten = args.rewrittenVectorByTurn?.get(turnNumber);
   if (rewritten) return { vector: rewritten, source: 'rewritten' };
   return {
     vector: args.prospectiveVectorByTurn.get(turnNumber) as number[],
-    source: args.expandedVectorByTurn === undefined ? null : 'raw-fallback',
+    source: args.rewrittenVectorByTurn === undefined ? null : 'raw-fallback',
   };
 }
 
 /** Carries the rewritten text onto a scored point as its audit trail. */
-function attachExpandedText(
+function attachRewrittenText(
   point: GateReplayPoint,
   args: ScoreGateReplayProps,
   turnNumber: number,
 ): void {
-  const text = args.expandedTextByTurn?.get(turnNumber);
-  if (text !== undefined) point.expandedText = text;
+  const text = args.rewrittenTextByTurn?.get(turnNumber);
+  if (text !== undefined) point.rewrittenText = text;
 }
 
 /**
@@ -177,10 +177,10 @@ function buildPoint(params: {
 /**
  * Names which reading fed the verdict signal and annotates
  * any gap: the rewritten Prospective carries its audit text; the raw
- * fallback carries its skip reason. Runs without an expansion tier keep
+ * fallback carries its skip reason. Runs without an rewrite tier keep
  * their byte-stable JSON — no annotation at all.
  */
-function annotateProvenance(
+function recordSignalSource(
   point: GateReplayPoint,
   args: ScoreGateReplayProps,
   source: 'rewritten' | 'raw-fallback' | null,
@@ -189,11 +189,11 @@ function annotateProvenance(
 ): void {
   if (source === 'rewritten') {
     point.driftPSource = source;
-    attachExpandedText(point, args, turnNumber);
+    attachRewrittenText(point, args, turnNumber);
   } else if (source === 'raw-fallback') {
     point.driftPSource = source;
   }
-  annotateExpansion(point, args.expansionNoteByTurn, muted);
+  annotateExpansion(point, args.rewriteNoteByTurn, muted);
 }
 
 /**
@@ -204,16 +204,16 @@ function annotateProvenance(
  */
 function annotateExpansion(
   point: GateReplayPoint,
-  expansionNoteByTurn: Partial<Record<number, string>> | undefined,
+  rewriteNoteByTurn: Partial<Record<number, string>> | undefined,
   muted: boolean,
 ): void {
-  if (expansionNoteByTurn === undefined) return;
+  if (rewriteNoteByTurn === undefined) return;
   const note = muted
     ? 'muted'
     : point.driftPSource === 'rewritten'
       ? 'rewrite'
-      : expansionNoteByTurn[point.turnNumber];
-  if (note !== undefined) point.expansionNote = note;
+      : rewriteNoteByTurn[point.turnNumber];
+  if (note !== undefined) point.rewriteNote = note;
 }
 
 /**
@@ -251,7 +251,7 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   const driftP = preGravity === null ? null : cosineDistance(prospective, preGravity);
   const driftPGated = preGravity === null ? null : cosineDistance(composite.vector, preGravity);
   const anchorDistance = cosineDistance(prospective, args.anchorVector);
-  const muted = mutedArrival(state.completedTurns, args.judging, driftPGated);
+  const muted = isColdStart(state.completedTurns, args.judging, driftPGated);
 
   // The Anchor is Segment 1, so the wander reading exists from Turn 1 —
   // counsel sees every Turn, including the muted cold start; the gate's
@@ -263,7 +263,7 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   let fired = false;
   let judgment: Judgment | null = null;
   if (!muted && driftPGated !== null) {
-    ({ judgment, fired } = judgeAndFold(state.verdict, args.judging, driftPGated));
+    ({ judgment, fired } = evaluateAndRecord(state.verdict, args.judging, driftPGated));
   }
 
   const verdict = verdictFor({ muted, fired });
@@ -283,7 +283,7 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   // consumed this turn as a step — never on muted Turns, never on the
   // firing step of an immediate-channel verdict.
   if (!muted && (judgment as Judgment).patrolConsumed) attachGateReadings(point, state.verdict);
-  annotateProvenance(point, args, composite.source, turnNumber, muted);
+  recordSignalSource(point, args, composite.source, turnNumber, muted);
   state.points.push(point);
 
   const divergence = divergenceFor(turnNumber, verdict, args.foldBoundaryTurns.has(turnNumber));
@@ -292,7 +292,7 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   state.completedTurns += 1;
 }
 
-export function scoreGateReplay(args: ScoreGateReplayProps): GateReplayScoring {
+export function simulateGateReplay(args: ScoreGateReplayProps): GateReplayScoring {
   const state: ReplayState = {
     verdict: createVerdictState(args.judging),
     counsel: createPageHinkley(patrolOptions(args.judging)),

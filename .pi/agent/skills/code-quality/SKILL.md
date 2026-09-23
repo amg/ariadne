@@ -10,9 +10,12 @@ description: Defines code quality standards, complexity limits, testing governan
 *   **Complexity**: Limit branching and function scope.
     - *Business logic*: Strictly limit `if`/`else`/`switch`. Use guard clauses for early returns.
     - *UI components*: Explicit `switch` cases for visual variants and divergent markup. Object maps only for simple scaling attributes (e.g., `size`).
-*   **Naming by Outcome**: Name functions for what the caller gets back — the decision answered or the value returned — never the internal mechanism that runs.
-    - Decision-shaped: `needsRewrite` (returns `{ rewrite: boolean }`), not `consultBackstop` (interaction verb hides the return) nor `needsRewriteJudge` (parses as "a judge that rewrites").
-    - Mechanism nouns (`judge`, `cache`, `query`) are legitimate only on the layer that owns that mechanism (e.g., `judgeContextDependence` in aiService, where the model call IS the contract).
+*   **Naming by Outcome & Result**: Name functions for exactly what the caller gets back (the decision, the value) or the domain action being completed. Never use the internal mechanism, abstract math terms, or clever metaphors.
+    - *Decisions & Values*: Name for the exact shape returned. `needsRewrite` (returns `{ rewrite: boolean }`), not `consultBackstop` (interaction verb hides the return).
+    - *Explicitness*: If a function can return a null state, reflect that explicitly (e.g. `completeTurnOrNull`, never `buildTurnCompletion` or `completeTurnText`).
+    - *Formatting*: Use adjectives to describe constructed results, not properties (e.g. `formattedTurn` instead of `turnText`).
+    - *Actions & Side-Effects*: Use simple, domain-driven verbs for the result achieved, avoiding implementation jargon. Use `processUserMessage` (not `stageArrival`), and `completeTurn` (not `foldCompletedTurn`—the term "fold" is a mechanism that obscures the domain action).
+    - *Mechanism Nouns*: Words like `judge`, `cache`, or `query` are legitimate *only* on the layer that strictly owns that mechanism (e.g., `judgeContextDependence` in `aiService`, where the model call IS the contract).
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 
 ## 2. Testing Governance

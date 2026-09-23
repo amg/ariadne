@@ -7,7 +7,7 @@
  * rewrite landed, the raw fallback otherwise), so λ is the fire budget
  * in DRIFT UNITS and δ the drift-unit allowance (≈ 0 on the corpus).
  * A z-standardized patrol input (λ_z in z-sums) shipped earlier the same
- * day and proved degenerate — the chasing ledger μ erased a gentle wander
+ * day and proved degenerate — the chasing baseline μ erased a gentle wander
  * from the signal and the σ floor amplified reading noise. State is O(1):
  * four scalars, nothing persisted.
  *

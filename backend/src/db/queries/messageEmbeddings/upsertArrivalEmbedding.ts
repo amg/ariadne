@@ -37,7 +37,7 @@ export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<
     )
     values (
       ${row.messageId}, ${toVectorText(row.embedding)}::vector, ${row.modelId},
-      ${row.expandedText ?? null}, ${toNumeric(row.embeddingCostUsd ?? null)},
+      ${row.rewrittenText ?? null}, ${toNumeric(row.embeddingCostUsd ?? null)},
       ${toNumeric(row.rewriteCostUsd ?? null)}, ${toNumeric(row.judgeCostUsd ?? null)}
     )
     on conflict (message_id) do update
@@ -60,5 +60,6 @@ export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<
 
   const stored = result.rows[0];
   if (!stored) throw new Error('message_embeddings arrival upsert returned no row');
-  return { ...stored, embedding: parseVector(stored.embedding) };
+  const { expandedText, ...rest } = stored;
+  return { ...rest, rewrittenText: expandedText, embedding: parseVector(stored.embedding) };
 }

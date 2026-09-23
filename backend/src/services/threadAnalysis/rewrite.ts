@@ -1,8 +1,8 @@
 import type { Turn } from './turns';
-import type { ExpansionMode } from './types';
+import type { RewriteMode } from './types';
 
 /**
- * The expansion tier of the gate replay: which incoming user
+ * The rewrite tier of the gate replay: which incoming user
  * messages get a detached decontextualising rewrite before their
  * Prospective Turn embeds, and how the rewriter's context and output are
  * shaped. Everything here is pure policy — the rewrite and judge calls
@@ -24,7 +24,7 @@ import type { ExpansionMode } from './types';
  */
 
 /** Messages longer than this carry enough content to stand alone. */
-export const EXPANSION_MAX_TRIGGER_LENGTH = 120;
+export const REWRITE_MAX_TRIGGER_LENGTH = 120;
 
 /** Openers that mark a message as continuing the previous Turn's topic. */
 const ANAPHORIC_OPENERS = new Set(['so', 'and', 'but', 'also', 'plus', 'then', 'now', 'anyway']);
@@ -40,20 +40,20 @@ const ANAPHORIC_TOKENS =
  */
 export function needsRewriteHeuristic(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed.length === 0 || trimmed.length > EXPANSION_MAX_TRIGGER_LENGTH) return false;
+  if (trimmed.length === 0 || trimmed.length > REWRITE_MAX_TRIGGER_LENGTH) return false;
   const firstWord = (trimmed.split(/\s/, 1)[0] ?? '').toLowerCase().replace(/[^a-z']/g, '');
   return ANAPHORIC_OPENERS.has(firstWord) || ANAPHORIC_TOKENS.test(trimmed);
 }
 
 /** How much of the prior Turn the rewriter sees — keeps the call cheap. */
-export const EXPANSION_CONTEXT_LIMITS = { user: 240, assistant: 480, output: 500 } as const;
+export const REWRITE_CONTEXT_LIMITS = { user: 240, assistant: 480, output: 500 } as const;
 
 /** Caps context text the rewriter receives. */
 export function capContext(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-export interface ExpansionCandidate {
+export interface RewriteCandidate {
   /** The Turn whose incoming user message gets rewritten. */
   turnNumber: number;
   /** Prior Turn content, already capped for the rewrite prompt. */
@@ -69,11 +69,11 @@ export interface ExpansionCandidate {
  * no prior exchange to resolve against); `always` — every Turn with a
  * prior exchange (the corpus-benchmark mode, never a production default).
  * `heuristic` mode's misses have a second chance: see
- * `expansionBackstopCandidates` and the analyzer's judge consultation.
+ * `rewriteBackstopCandidates` and the analyzer's judge consultation.
  */
-export function expansionCandidates(turns: Turn[], mode: ExpansionMode): ExpansionCandidate[] {
+export function rewriteCandidates(turns: Turn[], mode: RewriteMode): RewriteCandidate[] {
   if (mode === 'off') return [];
-  const candidates: ExpansionCandidate[] = [];
+  const candidates: RewriteCandidate[] = [];
   for (let index = 1; index < turns.length; index += 1) {
     const turn = turns[index];
     if (!turn) continue;
@@ -83,10 +83,10 @@ export function expansionCandidates(turns: Turn[], mode: ExpansionMode): Expansi
     if (!prior) continue;
     candidates.push({
       turnNumber: turn.turnNumber,
-      contextUserText: capContext(prior.userMessage.content, EXPANSION_CONTEXT_LIMITS.user),
+      contextUserText: capContext(prior.userMessage.content, REWRITE_CONTEXT_LIMITS.user),
       contextAssistantText: capContext(
         prior.assistantMessage.content,
-        EXPANSION_CONTEXT_LIMITS.assistant,
+        REWRITE_CONTEXT_LIMITS.assistant,
       ),
       incomingText: incoming,
     });
@@ -109,23 +109,23 @@ export function expansionCandidates(turns: Turn[], mode: ExpansionMode): Expansi
  * verdict. Empty in `off`/`always` modes (nothing to backstop on / every
  * Turn already rides a rewrite).
  */
-export function expansionBackstopCandidates(turns: Turn[]): ExpansionCandidate[] {
-  const candidates: ExpansionCandidate[] = [];
+export function rewriteBackstopCandidates(turns: Turn[]): RewriteCandidate[] {
+  const candidates: RewriteCandidate[] = [];
   for (let index = 1; index < turns.length; index += 1) {
     const turn = turns[index];
     if (!turn) continue;
     const incoming = turn.userMessage.content;
     if (needsRewriteHeuristic(incoming)) continue;
     const trimmed = incoming.trim();
-    if (trimmed.length === 0 || trimmed.length > EXPANSION_MAX_TRIGGER_LENGTH) continue;
+    if (trimmed.length === 0 || trimmed.length > REWRITE_MAX_TRIGGER_LENGTH) continue;
     const prior = turns[index - 1];
     if (!prior) continue;
     candidates.push({
       turnNumber: turn.turnNumber,
-      contextUserText: capContext(prior.userMessage.content, EXPANSION_CONTEXT_LIMITS.user),
+      contextUserText: capContext(prior.userMessage.content, REWRITE_CONTEXT_LIMITS.user),
       contextAssistantText: capContext(
         prior.assistantMessage.content,
-        EXPANSION_CONTEXT_LIMITS.assistant,
+        REWRITE_CONTEXT_LIMITS.assistant,
       ),
       incomingText: incoming,
     });
@@ -175,7 +175,7 @@ function rewriteLooksLikeAnAnswer(rewrite: string, incomingText: string): boolea
  * echo of the original — a rewrite that says nothing new would only
  * duplicate the raw signal — or an answer in the assistant's voice, which
  * would corrupt the signal toward the previous segment). Unusable output
- * means the Turn keeps its raw-only verdict; the expansion tier is
+ * means the Turn keeps its raw-only verdict; the rewrite tier is
  * strictly additive.
  */
 export function parseRewrite(raw: string, incomingText: string): string | null {
@@ -183,6 +183,6 @@ export function parseRewrite(raw: string, incomingText: string): string | null {
   if (cleaned.length === 0) return null;
   if (cleaned.toLowerCase() === incomingText.trim().toLowerCase()) return null;
   if (rewriteLooksLikeAnAnswer(cleaned, incomingText)) return null;
-  if (cleaned.length <= EXPANSION_CONTEXT_LIMITS.output) return cleaned;
-  return `${cleaned.slice(0, EXPANSION_CONTEXT_LIMITS.output)}…`;
+  if (cleaned.length <= REWRITE_CONTEXT_LIMITS.output) return cleaned;
+  return `${cleaned.slice(0, REWRITE_CONTEXT_LIMITS.output)}…`;
 }

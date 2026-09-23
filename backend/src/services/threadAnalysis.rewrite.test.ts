@@ -17,21 +17,21 @@ import {
 } from '../../mock/inferenceServer';
 import { JUDGE_MODEL_ID, REWRITE_MODEL_ID } from './aiService';
 import { parseJudgeLabel } from './aiService/judge';
+import { simulateGateReplay } from './threadAnalysis/gateReplay';
 import {
-  EXPANSION_CONTEXT_LIMITS,
-  EXPANSION_MAX_TRIGGER_LENGTH,
+  REWRITE_CONTEXT_LIMITS,
+  REWRITE_MAX_TRIGGER_LENGTH,
   capContext,
-  expansionBackstopCandidates,
-  expansionCandidates,
   needsRewriteHeuristic,
   parseRewrite,
-} from './threadAnalysis/expansion';
-import { scoreGateReplay } from './threadAnalysis/gateReplay';
-import { type Turn, prospectiveText } from './threadAnalysis/turns';
+  rewriteBackstopCandidates,
+  rewriteCandidates,
+} from './threadAnalysis/rewrite';
+import { type Turn, formattedProspectiveTurn } from './threadAnalysis/turns';
 import type { JudgingParams } from './threadAnalysis/verdict';
 
 /**
- * The expansion tier, tested at two levels: the pure policy (anaphora heuristic, candidate
+ * The rewrite tier, tested at two levels: the pure policy (anaphora heuristic, candidate
  * selection, rewrite parsing) and crafted vectors against the verdict
  * layer, then real e2e through `analyzeThread` against the mock provider
  * — the mock's deterministic rewrite (`Rewritten: <follow-up> (refers to:
@@ -45,7 +45,7 @@ const USER_ID = DEFAULT_USER_ID;
 /* Pure policy                                                         */
 /* ------------------------------------------------------------------ */
 
-describe('expansion policy — the anaphora heuristic', () => {
+describe('rewrite policy — the anaphora heuristic', () => {
   it('flags short anaphoric follow-ups', () => {
     expect(needsRewriteHeuristic('what about a motorcycle?')).toBe(true);
     expect(needsRewriteHeuristic('so how heavy was that one?')).toBe(true);
@@ -62,20 +62,20 @@ describe('expansion policy — the anaphora heuristic', () => {
   it('skips empty and over-long messages', () => {
     expect(needsRewriteHeuristic('')).toBe(false);
     expect(needsRewriteHeuristic('   ')).toBe(false);
-    const longAnaphoric = `what about ${'x'.repeat(EXPANSION_MAX_TRIGGER_LENGTH + 10)}`;
+    const longAnaphoric = `what about ${'x'.repeat(REWRITE_MAX_TRIGGER_LENGTH + 10)}`;
     expect(needsRewriteHeuristic(longAnaphoric)).toBe(false);
   });
 
   it('caps context text deterministically', () => {
     expect(capContext('short', 240)).toBe('short');
-    const long = 'a'.repeat(EXPANSION_CONTEXT_LIMITS.user + 40);
-    const capped = capContext(long, EXPANSION_CONTEXT_LIMITS.user);
+    const long = 'a'.repeat(REWRITE_CONTEXT_LIMITS.user + 40);
+    const capped = capContext(long, REWRITE_CONTEXT_LIMITS.user);
     expect(capped.endsWith('…')).toBe(true);
-    expect(capped.length).toBe(EXPANSION_CONTEXT_LIMITS.user + 1);
+    expect(capped.length).toBe(REWRITE_CONTEXT_LIMITS.user + 1);
   });
 });
 
-describe('expansion policy — candidate selection', () => {
+describe('rewrite policy — candidate selection', () => {
   function fakeTurn(turnNumber: number, user: string, assistant = 'reply'): Turn {
     return {
       turnNumber,
@@ -92,11 +92,11 @@ describe('expansion policy — candidate selection', () => {
   ];
 
   it('off yields nothing', () => {
-    expect(expansionCandidates(turns, 'off')).toEqual([]);
+    expect(rewriteCandidates(turns, 'off')).toEqual([]);
   });
 
   it('heuristic keeps only short anaphoric follow-ups, never Turn 1', () => {
-    const candidates = expansionCandidates(turns, 'heuristic');
+    const candidates = rewriteCandidates(turns, 'heuristic');
     expect(candidates.map((c) => c.turnNumber)).toEqual([2, 3]);
     const motorcycle = candidates.find((c) => c.turnNumber === 3);
     expect(motorcycle?.contextUserText).toBe('and what are the records?');
@@ -105,11 +105,11 @@ describe('expansion policy — candidate selection', () => {
   });
 
   it('always rewrites every Turn with a prior exchange', () => {
-    expect(expansionCandidates(turns, 'always').map((c) => c.turnNumber)).toEqual([2, 3, 4]);
+    expect(rewriteCandidates(turns, 'always').map((c) => c.turnNumber)).toEqual([2, 3, 4]);
   });
 });
 
-describe('expansion policy — the judge backstop shortlist', () => {
+describe('rewrite policy — the judge backstop shortlist', () => {
   function fakeTurn(turnNumber: number, user: string, assistant = 'reply'): Turn {
     return {
       turnNumber,
@@ -124,7 +124,7 @@ describe('expansion policy — the judge backstop shortlist', () => {
     fakeTurn(3, 'and what are the records?'),
     fakeTurn(4, 'does it rain often in Melbourne?'),
     fakeTurn(5, 'is there a silver bullet for this?'),
-    fakeTurn(6, `long miss ${'x'.repeat(EXPANSION_MAX_TRIGGER_LENGTH)}`),
+    fakeTurn(6, `long miss ${'x'.repeat(REWRITE_MAX_TRIGGER_LENGTH)}`),
   ];
 
   it('shortlists every short miss of the heuristic — including Turn 1 anchors like the silver-bullet class', () => {
@@ -133,7 +133,7 @@ describe('expansion policy — the judge backstop shortlist', () => {
     // Turn 5 is the motivating class — a dangling "for this" no token
     // list anticipates. The heuristic's own picks (Turn 3) and the
     // over-long Turn 6 never judge.
-    const shortlist = expansionBackstopCandidates(turns);
+    const shortlist = rewriteBackstopCandidates(turns);
     expect(shortlist.map((c) => c.turnNumber)).toEqual([2, 4, 5]);
     const silverBullet = shortlist.find((c) => c.turnNumber === 5);
     expect(silverBullet?.contextUserText).toBe('does it rain often in Melbourne?');
@@ -142,12 +142,12 @@ describe('expansion policy — the judge backstop shortlist', () => {
   });
 
   it('never shortlists Turn 1 (no prior exchange to judge against)', () => {
-    const shortlist = expansionBackstopCandidates([fakeTurn(1, 'records?')]);
+    const shortlist = rewriteBackstopCandidates([fakeTurn(1, 'records?')]);
     expect(shortlist).toEqual([]);
   });
 });
 
-describe('expansion policy — judge label parsing', () => {
+describe('rewrite policy — judge label parsing', () => {
   it('reads both labels through surrounding noise', () => {
     expect(parseJudgeLabel('CONTEXT_DEPENDENT')).toBe('context-dependent');
     expect(parseJudgeLabel(' context_dependent ')).toBe('context-dependent');
@@ -160,7 +160,7 @@ describe('expansion policy — judge label parsing', () => {
   });
 });
 
-describe('expansion policy — rewrite parsing', () => {
+describe('rewrite policy — rewrite parsing', () => {
   const incoming = 'what about a motorcycle?';
 
   it('keeps a genuinely different rewrite, stripping prompt decorations', () => {
@@ -180,9 +180,9 @@ describe('expansion policy — rewrite parsing', () => {
   });
 
   it('caps runaway output', () => {
-    const runaway = `w${'o'.repeat(EXPANSION_CONTEXT_LIMITS.output + 50)}?`;
+    const runaway = `w${'o'.repeat(REWRITE_CONTEXT_LIMITS.output + 50)}?`;
     const capped = parseRewrite(runaway, incoming);
-    expect(capped?.length).toBe(EXPANSION_CONTEXT_LIMITS.output + 1);
+    expect(capped?.length).toBe(REWRITE_CONTEXT_LIMITS.output + 1);
     expect(capped?.endsWith('…')).toBe(true);
   });
 
@@ -236,7 +236,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     const flat = basis(dim, 0);
     const climb = basis(dim, 1);
     const turnNumbers = [1, 2, 3, 4, 5];
-    const scoring = scoreGateReplay({
+    const scoring = simulateGateReplay({
       turnNumbers,
       // Raw stream climbs everywhere — the short-message collapse; the
       // rewrite restores the baseline on continuations and only the pivot
@@ -245,17 +245,17 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       // Turn 1 holds no Gravity point (muted); Turn 2's rewrite resolves
       // back to the baseline, Turn 3's stays on the climb, Turn 4
       // resolves again, Turn 5 has no rewrite → raw fallback.
-      expandedVectorByTurn: new Map([
+      rewrittenVectorByTurn: new Map([
         [2, flat],
         [3, climb],
         [4, flat],
       ]),
-      expandedTextByTurn: new Map([
+      rewrittenTextByTurn: new Map([
         [2, 'rewritten two'],
         [3, 'rewritten three'],
         [4, 'rewritten four'],
       ]),
-      expansionNoteByTurn: { 5: 'skip_unusable_rewrite' },
+      rewriteNoteByTurn: { 5: 'skip_unusable_rewrite' },
       // Stored Turn vectors: flat until the pivot lands — they carry the
       // fold's membership, not the verdict (the replay judges the
       // composite prospective reading alone).
@@ -283,24 +283,24 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     expect(points[1]?.driftPGated).toBeCloseTo(0, 5); // rewrite resolves the baseline
     expect(points[1]?.driftPSource).toBe('rewritten');
     expect(points[2]?.driftPGated).toBeCloseTo(1, 5); // the pivot stays high
-    expect(points[2]?.expandedText).toBe('rewritten three');
+    expect(points[2]?.rewrittenText).toBe('rewritten three');
     expect(points[4]?.driftPSource).toBe('raw-fallback'); // no rewrite → raw
-    expect(points[4]?.expansionNote).toBe('skip_unusable_rewrite');
+    expect(points[4]?.rewriteNote).toBe('skip_unusable_rewrite');
 
     // Verdicts: the rewrite prevents firing on the baseline continuation
     // (Turn 2 stays quiet where the raw stream climbed); the pivot's
     // reading itself clears the segment's criterion — the immediate
     // channel decides at the arrival Turn. The verdict
-    // shreds the ledger, so the replay re-bootstraps on T_segment —
+    // shreds the baseline, so the replay re-bootstraps on T_segment —
     // and Turn 5's raw fallback then reads 1.0 against that constant
     // and fires again: the adjustment class gets no geometric
-    // second-guess — its treatment is uniform (the expansion tier), and
+    // second-guess — its treatment is uniform (the rewrite tier), and
     // an arriving pivot is a pivot whatever it sits near.
     expect(points.map((point) => point.verdict)).toEqual(['muted', 'pass', 'fire', 'pass', 'fire']);
     expect(points[2]?.fireChannel).toBe('immediate');
     expect(points[4]?.fireChannel).toBe('immediate');
     expect(points[4]?.immediateThreshold).toBeCloseTo(0.45, 5); // re-bootstrapped
-    // The Turn-4 continuation folded while the ledger was still warming:
+    // The Turn-4 continuation folded while the baseline was still warming:
     // one accepted member — the constant still stands in (A2's 0–1 rule).
     expect(points[4]?.segmentMu).toBeCloseTo(0, 5);
     expect(points[4]?.segmentSigma).toBeNull();
@@ -319,7 +319,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     const dim = 8;
     const flat = basis(dim, 0);
     const climb = basis(dim, 1);
-    const scoring = scoreGateReplay({
+    const scoring = simulateGateReplay({
       turnNumbers: [1, 2, 3],
       prospectiveVectorByTurn: new Map([
         [1, flat],
@@ -347,9 +347,9 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     });
     for (const point of scoring.points) {
       expect('driftPSource' in point).toBe(false);
-      expect('expansionNote' in point).toBe(false);
-      expect('expandedText' in point).toBe(false);
-      // No expansion tier: the composite IS the raw reading.
+      expect('rewriteNote' in point).toBe(false);
+      expect('rewrittenText' in point).toBe(false);
+      // No rewrite tier: the composite IS the raw reading.
       expect(point.driftPGated).toBe(point.driftP);
     }
   });
@@ -358,11 +358,11 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     const dim = 8;
     const flat = basis(dim, 0);
     const turnNumbers = [1, 2, 3];
-    const scoring = scoreGateReplay({
+    const scoring = simulateGateReplay({
       turnNumbers,
       prospectiveVectorByTurn: new Map(turnNumbers.map((n) => [n, flat])),
-      expandedVectorByTurn: new Map([[2, flat]]),
-      expansionNoteByTurn: {
+      rewrittenVectorByTurn: new Map([[2, flat]]),
+      rewriteNoteByTurn: {
         1: 'skip_no_candidate',
         2: 'skip_no_candidate',
         3: 'skip_unusable_rewrite',
@@ -380,12 +380,12 @@ describe('scoreGateReplay — the composite verdict signal', () => {
     });
 
     // Turn 1 is muted (no Gravity point): the mute explains the gap.
-    expect(scoring.points[0]?.expansionNote).toBe('muted');
+    expect(scoring.points[0]?.rewriteNote).toBe('muted');
     // Turn 2 is unmuted and carries a rewritten vector: 'rewrite' wins
     // over the stale analyzer note for the same Turn.
-    expect(scoring.points[1]?.expansionNote).toBe('rewrite');
+    expect(scoring.points[1]?.rewriteNote).toBe('rewrite');
     // Turn 3 is unmuted with no rewrite: the analyzer's reason carries.
-    expect(scoring.points[2]?.expansionNote).toBe('skip_unusable_rewrite');
+    expect(scoring.points[2]?.rewriteNote).toBe('skip_unusable_rewrite');
   });
 });
 
@@ -450,19 +450,19 @@ afterAll(async () => {
   await mock.stop();
 });
 
-describe('analyzeThread — expansion e2e', () => {
+describe('analyzeThread — rewrite e2e', () => {
   it('heuristic mode: dual signal on triggered Turns, raw fast path elsewhere', async () => {
     const threadId = await seedThread('expansion-corpus', CORPUS);
     const before = mock.embeddings.requestCount();
 
-    const result = await analyzeThread(threadId, { gateReplay: true, expansion: 'heuristic' });
+    const result = await analyzeThread(threadId, { gateReplay: true, rewrite: 'heuristic' });
     expect(result.type).toBe('success');
     if (result.type !== 'success') return;
     const report = result.data;
 
     // Provenance block carries mode + both models: the rewriter (always)
     // and the judge (consulted in heuristic mode), exactly once.
-    expect(report.params.expansion).toEqual({
+    expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
       modelId: REWRITE_MODEL_ID,
       judgeModelId: JUDGE_MODEL_ID,
@@ -482,13 +482,13 @@ describe('analyzeThread — expansion e2e', () => {
     // The judge-driven rewrite lands exactly like a heuristic one:
     // same expanded embed, same composite verdict signal.
     const turnTwo = report.gateReplay?.points[1];
-    expect(turnTwo?.expandedText).toContain('keep it short. records? (refers to:');
+    expect(turnTwo?.rewrittenText).toContain('keep it short. records? (refers to:');
     expect(turnTwo?.driftPSource).toBe('rewritten');
     expect(turnTwo?.driftPGated).toBeGreaterThanOrEqual(0);
     expect(turnTwo?.driftPGated).toBeLessThanOrEqual(2);
 
     const turnThree = report.gateReplay?.points[2];
-    expect(turnThree?.expandedText).toBe(
+    expect(turnThree?.rewrittenText).toBe(
       'what about a motorcycle? (refers to: keep it short. records?)',
     );
     // The verdict signal is drift_p on the deterministic mock embed of the
@@ -500,10 +500,10 @@ describe('analyzeThread — expansion e2e', () => {
     // reading, flagged as such, gap explained — and a judge-considered
     // self-contained message explains itself as judged, not unconsidered.
     const turnFour = report.gateReplay?.points[3];
-    expect('expandedText' in (turnFour ?? {})).toBe(false);
+    expect('rewrittenText' in (turnFour ?? {})).toBe(false);
     expect(turnFour?.driftPSource).toBe('raw-fallback');
     expect(turnFour?.driftPGated).toBe(turnFour?.driftP);
-    expect(turnFour?.expansionNote).toBe('skip_judge_self_contained');
+    expect(turnFour?.rewriteNote).toBe('skip_judge_self_contained');
 
     // Two heuristic rewrites (T3, T5) + one judge-added rewrite (T2),
     // each with its transient expanded embed: 5 stored Turns +
@@ -528,14 +528,14 @@ describe('analyzeThread — expansion e2e', () => {
 
     // JSON sidecar carries the composite fields verbatim.
     const parsed = JSON.parse(renderThreadReport(report).json) as typeof report;
-    expect(parsed.params.expansion?.mode).toBe('heuristic');
-    expect(parsed.gateReplay?.points[2]?.expandedText).toBe(turnThree?.expandedText);
+    expect(parsed.params.rewrite?.mode).toBe('heuristic');
+    expect(parsed.gateReplay?.points[2]?.rewrittenText).toBe(turnThree?.rewrittenText);
     expect(parsed.gateReplay?.points[2]?.driftPSource).toBe('rewritten');
 
     // Every un-rewritten gated Turn explains its fallback.
     for (const point of report.gateReplay?.points ?? []) {
       if (point.driftPSource !== 'rewritten') {
-        expect(point.expansionNote).toBeDefined();
+        expect(point.rewriteNote).toBeDefined();
       }
     }
   });
@@ -544,31 +544,31 @@ describe('analyzeThread — expansion e2e', () => {
     const threadId = await seedThread('expansion-off', CORPUS);
     const before = mock.embeddings.requestCount();
 
-    const result = await analyzeThread(threadId, { gateReplay: true, expansion: 'off' });
+    const result = await analyzeThread(threadId, { gateReplay: true, rewrite: 'off' });
     expect(result.type).toBe('success');
     if (result.type !== 'success') return;
     const report = result.data;
 
-    expect(report.params.expansion).toBeUndefined();
+    expect(report.params.rewrite).toBeUndefined();
     expect(report.totals.rewriteCostUsd).toBe(0);
     expect(report.totals.judgeCostUsd).toBe(0);
     // No extra embed calls, no expansion fields anywhere.
     expect(mock.embeddings.requestCount() - before).toBe(10);
     for (const point of report.gateReplay?.points ?? []) {
       expect('driftPSource' in point).toBe(false);
-      expect('expandedText' in point).toBe(false);
+      expect('rewrittenText' in point).toBe(false);
       // No composite distinction either: the verdict signal IS the raw one.
       expect(point.driftPGated).toBe(point.driftP);
       // 'off' explains itself by carrying no annotation at all — the
       // report stays byte-compatible with previous versions replay.
-      expect('expansionNote' in point).toBe(false);
+      expect('rewriteNote' in point).toBe(false);
     }
     const { html } = renderThreadReport(report);
     expect(html).not.toContain('series-raw-drift');
     expect(html).not.toContain('drift_p (verdict)');
     expect(html).not.toContain('Expansion pipeline active');
     // No raw audit lane, no expansion UI — the live chart stays minimal
-    // without the expansion tier's audit reading.
+    // without the rewrite tier's audit reading.
     expect(html).not.toContain('drift_p on the raw message (audit)');
     expect(html).not.toContain('rewritten user message');
   });
@@ -578,7 +578,7 @@ describe('analyzeThread — expansion e2e', () => {
     mock.rewrites.failAll();
     const before = mock.embeddings.requestCount();
 
-    const result = await analyzeThread(threadId, { gateReplay: true, expansion: 'heuristic' });
+    const result = await analyzeThread(threadId, { gateReplay: true, rewrite: 'heuristic' });
     expect(result.type).toBe('success');
     if (result.type !== 'success') return;
     const report = result.data;
@@ -591,7 +591,7 @@ describe('analyzeThread — expansion e2e', () => {
     expect(mock.embeddings.requestCount() - before).toBe(10);
     expect(report.totals.rewriteCostUsd).toBe(0);
     expect(report.totals.judgeCostUsd).toBeGreaterThan(0);
-    expect(report.params.expansion).toEqual({
+    expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
       modelId: REWRITE_MODEL_ID,
       judgeModelId: JUDGE_MODEL_ID,
@@ -605,11 +605,11 @@ describe('analyzeThread — expansion e2e', () => {
     // self-contained Turn 4 explains itself as judged. Muted Turns
     // explain themselves as mute (the fold wins the annotation).
     const turnTwo = report.gateReplay?.points[1];
-    expect(turnTwo?.expansionNote).toBe('skip_rewrite_failed');
+    expect(turnTwo?.rewriteNote).toBe('skip_rewrite_failed');
     const turnFour = report.gateReplay?.points[3];
-    expect(turnFour?.expansionNote).toBe('skip_judge_self_contained');
+    expect(turnFour?.rewriteNote).toBe('skip_judge_self_contained');
     const turnFive = report.gateReplay?.points[4];
-    expect(turnFive?.expansionNote).toBe('skip_rewrite_failed');
+    expect(turnFive?.rewriteNote).toBe('skip_rewrite_failed');
     // Every Turn still carries its drift_p and verdict.
     expect(report.gateReplay?.points.every((point) => point.driftP !== undefined)).toBe(true);
   });
@@ -617,7 +617,7 @@ describe('analyzeThread — expansion e2e', () => {
   it('always mode rewrites every Turn with a prior exchange', async () => {
     const threadId = await seedThread('expansion-always', CORPUS);
 
-    const result = await analyzeThread(threadId, { gateReplay: true, expansion: 'always' });
+    const result = await analyzeThread(threadId, { gateReplay: true, rewrite: 'always' });
     expect(result.type).toBe('success');
     if (result.type !== 'success') return;
     const report = result.data;
@@ -629,7 +629,7 @@ describe('analyzeThread — expansion e2e', () => {
         .filter((point) => point.driftPSource === 'rewritten')
         .map((point) => point.turnNumber) ?? [];
     expect(rewrittenTurns).toEqual([2, 3, 4, 5]);
-    expect(report.params.expansion).toEqual({ mode: 'always', modelId: REWRITE_MODEL_ID });
+    expect(report.params.rewrite).toEqual({ mode: 'always', modelId: REWRITE_MODEL_ID });
     // Always mode rewrites everything — the judge has nothing to add.
     expect(report.totals.judgeCostUsd).toBe(0);
   });
@@ -639,7 +639,7 @@ describe('analyzeThread — expansion e2e', () => {
     mock.judges.failAll();
     const before = mock.embeddings.requestCount();
 
-    const result = await analyzeThread(threadId, { gateReplay: true, expansion: 'heuristic' });
+    const result = await analyzeThread(threadId, { gateReplay: true, rewrite: 'heuristic' });
     expect(result.type).toBe('success');
     if (result.type !== 'success') return;
     const report = result.data;
@@ -655,9 +655,9 @@ describe('analyzeThread — expansion e2e', () => {
     expect(report.totals.judgeCostUsd).toBe(0);
     // The failed consultations explain themselves on both shortlisted
     // Turns, and provenance still carries the attempted judge model.
-    expect(report.gateReplay?.points[1]?.expansionNote).toBe('skip_judge_failed');
-    expect(report.gateReplay?.points[3]?.expansionNote).toBe('skip_judge_failed');
-    expect(report.params.expansion).toEqual({
+    expect(report.gateReplay?.points[1]?.rewriteNote).toBe('skip_judge_failed');
+    expect(report.gateReplay?.points[3]?.rewriteNote).toBe('skip_judge_failed');
+    expect(report.params.rewrite).toEqual({
       mode: 'heuristic',
       modelId: REWRITE_MODEL_ID,
       judgeModelId: JUDGE_MODEL_ID,

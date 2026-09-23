@@ -500,7 +500,7 @@ function SegmentTable({ view }: { view: LiveAnalysisView }) {
                   </td>
                 </tr>
                 {arrivals.map((point) => {
-                  const rewritten = point.expandedText;
+                  const rewritten = point.rewrittenText;
                   return (
                     <tr key={point.messageId} className="border-b border-border/50">
                       <td

@@ -1,4 +1,4 @@
-import { EMBEDDING_MODEL_ID, JUDGE_MODEL_ID, REWRITE_MODEL_ID } from '@services/aiService/config';
+import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
 import { type UsagePricing, computeCostUsd } from '@services/aiService/cost';
 import { getFallbackPricing, getModelConfig } from '@services/modelConfigService';
 import type { CostPoint } from './types';
@@ -61,19 +61,12 @@ export async function computeEmbeddingCostUsd(promptTokens: number): Promise<num
   return round10((promptTokens * embeddingPricePerMillionUsd) / 1_000_000);
 }
 
-export async function computeRewriteCostUsd(
+export async function computeInferenceCostUsd(
+  modelId: string,
   promptTokens: number,
   completionTokens: number,
 ): Promise<number> {
-  const pricing = await resolveCallPricing(REWRITE_MODEL_ID);
-  return computeCostUsd({ pricing, promptTokens, completionTokens });
-}
-
-export async function computeJudgeCostUsd(
-  promptTokens: number,
-  completionTokens: number,
-): Promise<number> {
-  const pricing = await resolveCallPricing(JUDGE_MODEL_ID);
+  const pricing = await resolveCallPricing(modelId);
   return computeCostUsd({ pricing, promptTokens, completionTokens });
 }
 

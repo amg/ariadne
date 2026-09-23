@@ -42,10 +42,10 @@ export function pairTurns(messages: Message[]): Turn[] {
 /**
  * The Prospective Turn text block: the Turn block with an
  * empty assistant half — the byte-legal empty-assistant passage of the
- * frozen format. `turnText` shares this builder, so a complete Turn whose
+ * frozen format. `formattedTurn` shares this builder, so a complete Turn whose
  * assistant reply is empty embeds byte-identically to its Prospective.
  */
-export function prospectiveText(userContent: string): string {
+export function formattedProspectiveTurn(userContent: string): string {
   return `User:\n${userContent}\n\n`;
 }
 
@@ -55,9 +55,9 @@ export function prospectiveText(userContent: string): string {
  * content contributes nothing to the text, but the Turn keeps its
  * position.
  */
-export function turnText(turn: Turn): string {
+export function formattedTurn(turn: Turn): string {
   const assistant = turn.assistantMessage.content;
-  if (assistant.length === 0) return prospectiveText(turn.userMessage.content);
+  if (assistant.length === 0) return formattedProspectiveTurn(turn.userMessage.content);
   return `User:\n${turn.userMessage.content}\n\nAssistant:\n${assistant}\n\n`;
 }
 
@@ -80,7 +80,7 @@ export function buildTurnBlocks(turns: Turn[]): TurnBlock[] {
   return turns.map((turn) => ({
     turnNumber: turn.turnNumber,
     assistantMessage: turn.assistantMessage,
-    text: turnText(turn),
+    text: formattedTurn(turn),
   }));
 }
 
@@ -104,6 +104,6 @@ export function buildProspectiveBlocks(turns: Turn[]): ProspectiveBlock[] {
   return turns.map((turn) => ({
     turnNumber: turn.turnNumber,
     userMessage: turn.userMessage,
-    text: prospectiveText(turn.userMessage.content),
+    text: formattedProspectiveTurn(turn.userMessage.content),
   }));
 }
