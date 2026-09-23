@@ -26,6 +26,11 @@ When a task matches a description below, you MUST use the `read` tool to load th
     <description>Read-only database queries. Agent writes queries, user runs them from host terminal. Use for debugging, data analysis, and investigating issues.</description>
     <location>alex-chat-bot/.pi/agent/skills/db-access/SKILL.md</location>
   </skill>
+  <skill>
+    <name>writing-ui-components</name>
+    <description>Guidelines for building UI components, splitting bloated files into folders, handling subcomponents, and managing TypeScript exports.</description>
+    <location>alex-chat-bot/.pi/agent/skills/writing-ui-components/SKILL.md</location>
+  </skill>
 </available_skills>
 
 ## Global Skills
