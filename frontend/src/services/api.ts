@@ -202,6 +202,13 @@ export interface ThreadSummary {
   assistantMessages: number;
   totalCostUsd: string;
   cachedCostUsd: string;
+  /** Composition of `totalCostUsd` (all USD decimal strings). */
+  costBreakdown: {
+    chat: string;
+    embedding: string;
+    rewrite: string;
+    judge: string;
+  };
   totalTokens: {
     prompt: number;
     completion: number;

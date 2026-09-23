@@ -89,6 +89,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
     assistantMessages,
     totalCostUsd,
     cachedCostUsd,
+    costBreakdown,
     totalTokens,
     primaryModel,
     primaryModelPricing,
@@ -140,6 +141,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
           Total Cost
         </div>
         <p className="text-lg font-bold text-foreground">{costDisplay ?? '—'}</p>
+        {costBreakdown && <CostBreakdown breakdown={costBreakdown} />}
         {cachedCostUsd && Number.parseFloat(cachedCostUsd) > 0 && (
           <p className="mt-1 text-xs text-green-600" title="Savings from cached tokens">
             Cached: {cachedCostDisplay} saved
@@ -222,6 +224,93 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
   );
 }
 
+/** Cost categories for the Includes breakdown. */
+const CHAT_COST_ROW = {
+  field: 'chat',
+  label: 'Chat',
+  title: 'Conversation token cost from the chat model',
+} as const;
+
+/** Analyzer categories are omitted from the list when their spend is zero. */
+const ANALYZER_COST_ROWS = [
+  {
+    field: 'embedding',
+    label: 'Embeddings',
+    title: 'Thread analyzer: embedding arriving user messages',
+  },
+  {
+    field: 'rewrite',
+    label: 'Rewrite',
+    title: 'Thread analyzer: expanding context-dependent follow-ups',
+  },
+  {
+    field: 'judge',
+    label: 'Judgement',
+    title: 'Thread analyzer: classifying context dependence',
+  },
+] as const;
+
+type CostRow = typeof CHAT_COST_ROW | (typeof ANALYZER_COST_ROWS)[number];
+
+/** Share of the thread's total spend; '—' when total spend is zero. */
+function formatShare(valueUsd: string, totalUsd: number): string {
+  if (totalUsd <= 0) return '—';
+  const pct = (Number.parseFloat(valueUsd) / totalUsd) * 100;
+  if (pct <= 0) return '0%';
+  if (pct < 0.1) return '<0.1%';
+  return `${pct.toFixed(1)}%`;
+}
+
+/** One breakdown row: label, share of the total, USD amount. */
+function BreakdownRow({
+  row,
+  valueUsd,
+  totalUsd,
+}: { row: CostRow; valueUsd: string; totalUsd: number }) {
+  return (
+    <>
+      <span className="truncate text-muted-foreground" title={row.title}>
+        {row.label}:
+      </span>
+      <span className="text-right font-medium tabular-nums text-foreground">
+        {formatShare(valueUsd, totalUsd)}
+      </span>
+      <span className="text-right tabular-nums text-muted-foreground">
+        {formatCost(valueUsd) ?? '$0.00'}
+      </span>
+    </>
+  );
+}
+
+/** "Includes" list under the total: label, share of the total, cost per row. */
+function CostBreakdown({ breakdown }: { breakdown: ThreadSummary['costBreakdown'] }) {
+  const rows = [
+    CHAT_COST_ROW,
+    ...ANALYZER_COST_ROWS.filter((row) => Number.parseFloat(breakdown[row.field]) > 0),
+  ];
+  const totalUsd =
+    Number.parseFloat(breakdown.chat) +
+    Number.parseFloat(breakdown.embedding) +
+    Number.parseFloat(breakdown.rewrite) +
+    Number.parseFloat(breakdown.judge);
+
+  return (
+    <div className="mt-2 border-t pt-2 text-xs">
+      <p className="mb-1 text-muted-foreground">Includes:</p>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-3 gap-y-1">
+        {rows.map((row) => (
+          <BreakdownRow
+            key={row.field}
+            row={row}
+            valueUsd={breakdown[row.field]}
+            totalUsd={totalUsd}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StatRow({
   icon: Icon,
   label,
@@ -244,13 +333,15 @@ function TokenRow({
   label,
   value,
   bold,
+  title,
 }: {
   label: string;
   value: string | null;
   bold?: boolean;
+  title?: string;
 }) {
   return (
-    <div className="flex justify-between">
+    <div className="flex justify-between" title={title}>
       <span className="text-muted-foreground">{label}:</span>
       <span className={bold ? 'font-bold text-foreground' : 'font-medium text-foreground'}>
         {value ?? '—'}

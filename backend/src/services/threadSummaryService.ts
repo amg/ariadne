@@ -1,7 +1,11 @@
+import { sumAnalyzerCostsByThread } from '@queries/messageEmbeddings/sumAnalyzerCostsByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
 import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { getModelConfig } from './modelConfigService';
+
+/** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
+const round10 = (value: number): number => Number(value.toFixed(10));
 
 /** Aggregated thread statistics computed on-the-fly from message_usage. */
 export interface ThreadSummary {
@@ -11,6 +15,17 @@ export interface ThreadSummary {
   assistantMessages: number;
   totalCostUsd: string;
   cachedCostUsd: string;
+  /**
+   * Composition of `totalCostUsd`: chat spend from `message_usage`,
+   * plus the analyzer pipeline's embedding, rewrite, and judge spend
+   * persisted on arrival embedding rows.
+   */
+  costBreakdown: {
+    chat: string;
+    embedding: string;
+    rewrite: string;
+    judge: string;
+  };
   totalTokens: {
     prompt: number;
     completion: number;
@@ -116,8 +131,14 @@ export async function getThreadSummary(args: {
       totalMessages: 0,
       userMessages: 0,
       assistantMessages: 0,
-      totalCostUsd: '0',
-      cachedCostUsd: '0',
+      totalCostUsd: '0.0000000000',
+      cachedCostUsd: '0.0000000000',
+      costBreakdown: {
+        chat: '0.0000000000',
+        embedding: '0.0000000000',
+        rewrite: '0.0000000000',
+        judge: '0.0000000000',
+      },
       totalTokens: { prompt: 0, completion: 0, cached: 0, reasoning: 0, total: 0 },
       primaryModel: null,
       primaryModelPricing: null,
@@ -129,6 +150,15 @@ export async function getThreadSummary(args: {
   // Aggregate statistics
   const stats = aggregateStats(messages);
   const primaryModel = findPrimaryModel(stats.modelCounts);
+
+  // Analyzer pipeline spend (embeddings, rewrites, judge calls) persists
+  // on arrival embedding rows rather than `message_usage`, so it is
+  // summed on its own and folded into the thread's total.
+  const analyzerTotals = await sumAnalyzerCostsByThread({ threadId });
+  const embeddingCost = round10(Number.parseFloat(analyzerTotals.embeddingCostUsd));
+  const rewriteCost = round10(Number.parseFloat(analyzerTotals.rewriteCostUsd));
+  const judgeCost = round10(Number.parseFloat(analyzerTotals.judgeCostUsd));
+  const grandTotalCost = round10(stats.totalCost + embeddingCost + rewriteCost + judgeCost);
 
   // Get context window, pricing, and cached rate from DB cache (or fallback)
   let contextLimit: number | null = null;
@@ -167,8 +197,14 @@ export async function getThreadSummary(args: {
     totalMessages: messages.length,
     userMessages: stats.userCount,
     assistantMessages: stats.assistantCount,
-    totalCostUsd: stats.totalCost.toFixed(10),
+    totalCostUsd: grandTotalCost.toFixed(10),
     cachedCostUsd: cachedCost.toFixed(10),
+    costBreakdown: {
+      chat: round10(stats.totalCost).toFixed(10),
+      embedding: embeddingCost.toFixed(10),
+      rewrite: rewriteCost.toFixed(10),
+      judge: judgeCost.toFixed(10),
+    },
     totalTokens: {
       prompt: stats.totalPrompt,
       completion: stats.totalCompletion,
