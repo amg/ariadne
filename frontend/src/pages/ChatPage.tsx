@@ -109,7 +109,11 @@ export default function ChatPage() {
         />
       ) : null}
       {analyzing ? (
-        <AnalysisTab threadId={threadId} refreshKey={analysisRefreshKey} />
+        <AnalysisTab
+          threadId={threadId}
+          refreshKey={analysisRefreshKey}
+          onLoaded={() => refreshThreadSummary()}
+        />
       ) : (
         <ChatController
           threadId={threadId}

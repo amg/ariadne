@@ -1,6 +1,6 @@
 import { type LiveAnalysisPoint, type LiveAnalysisView, fetchThreadAnalysis } from '@/services/api';
 import { PencilSparkles } from 'lucide-react';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 /**
  * The Analysis tab: the thread's live reading straight from the persisted
@@ -538,9 +538,15 @@ function SegmentTable({ view }: { view: LiveAnalysisView }) {
 export default function AnalysisTab({
   threadId,
   refreshKey,
-}: { threadId: string; refreshKey?: number }) {
+  onLoaded,
+}: { threadId: string; refreshKey?: number; onLoaded?: () => void }) {
   const [view, setView] = useState<LiveAnalysisView | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Call the freshest callback without re-running the fetch: the closure
+  // captured at effect time would freeze whatever the page passed first.
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a refetch trigger, not a read value
   useEffect(() => {
@@ -549,7 +555,11 @@ export default function AnalysisTab({
     setError(null);
     fetchThreadAnalysis(threadId)
       .then((loaded) => {
-        if (!stale) setView(loaded);
+        if (stale) return;
+        setView(loaded);
+        // The GET backfills missing arrival signals, so analyzer spend can
+        // land during it; the cost panel needs the same nudge the tab got.
+        onLoadedRef.current?.();
       })
       .catch((err: unknown) => {
         if (!stale) setError(err instanceof Error ? err.message : 'Failed to load the analysis.');
