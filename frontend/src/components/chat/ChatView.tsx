@@ -419,9 +419,9 @@ export default function ChatView({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative mx-auto flex h-full w-full min-h-0 min-w-0 max-w-[900px] flex-col">
-        <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full min-w-0 max-w-[900px] flex-col">
           <div className="flex flex-col gap-4 py-4">
             {rows.map((row, index) => (
               <MessageRow
@@ -450,37 +450,37 @@ export default function ChatView({
             ) : null}
           </div>
         </div>
-        {rows.length > 0 && !atBottom ? (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            aria-label="Jump to latest message"
-            className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background/90 p-2 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
-          >
-            <ArrowDown className="h-4 w-4" />
-          </button>
-        ) : null}
-        <div className="border-t bg-background p-4">
-          {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
-          <form className="flex gap-2" onSubmit={handleSubmit}>
-            <Input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Type your message..."
-              className="flex-1"
-              autoFocus
-            />
-            {busy ? (
-              <Button type="button" size="icon" variant="destructive" onClick={onStop}>
-                <Square className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button type="submit" size="icon" disabled={!input.trim()}>
-                <Send className="h-4 w-4" />
-              </Button>
-            )}
-          </form>
-        </div>
+      </div>
+      {rows.length > 0 && !atBottom ? (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label="Jump to latest message"
+          className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-background/90 p-2 text-muted-foreground shadow-md backdrop-blur transition-colors hover:text-foreground"
+        >
+          <ArrowDown className="h-4 w-4" />
+        </button>
+      ) : null}
+      <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
+        {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
+        <form className="flex gap-2" onSubmit={handleSubmit}>
+          <Input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Type your message..."
+            className="flex-1"
+            autoFocus
+          />
+          {busy ? (
+            <Button type="button" size="icon" variant="destructive" onClick={onStop}>
+              <Square className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button type="submit" size="icon" disabled={!input.trim()}>
+              <Send className="h-4 w-4" />
+            </Button>
+          )}
+        </form>
       </div>
     </div>
   );
