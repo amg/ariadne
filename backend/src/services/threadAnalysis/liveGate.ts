@@ -317,9 +317,58 @@ async function claimSegment(state: LiveWalkState, threadId: string, startMessage
   const stored = state.storedSegments.shift();
   if (stored) state.currentSegmentId = stored.id;
   else {
-    const inserted = await insertThreadSegment({ threadId, startMessageId });
+    const inserted = await insertThreadSegment({
+      threadId,
+      startMessageId,
+      modelId: EMBEDDING_MODEL_ID,
+    });
     state.currentSegmentId = inserted.id;
   }
+}
+
+/**
+ * The live lane's entry: gate the thread's arrivals up to (and including)
+ * the target Message, or fill the whole thread when no target is given.
+ * Off means the walk never queues and the caller sees the empty outcome.
+ * Every walk runs the fill-forward walk under per-thread serialization
+ * (see `serializedWalk`).
+ */
+export async function runLiveGate({
+  threadId,
+  upToMessageId,
+}: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
+  if (env.THREAD_ANALYSIS_MODE === 'off')
+    return ok({ verdict: null, fireChannel: null, messageId: null });
+  return serializedWalk(threadId, () =>
+    walkLiveChain(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
+  );
+}
+
+/**
+ * One backend serves every surface, but two surfaces drive the walk at
+ * once — the exchange judges up to its arrival while the analysis surface
+ * backfills the thread. Each walk snapshots the chain at its start, so
+ * overlapping walks re-judge and re-log arrivals the other writes after
+ * the snapshot, duplicating rows. Walks on one thread therefore run
+ * tightly serialized: the LATER walk re-reads the store, finds the chain
+ * complete, and degrades to a pure read.
+ */
+const walksByThread = new Map<string, Promise<unknown>>();
+
+function serializedWalk<T>(threadId: string, walk: () => Promise<T>): Promise<T> {
+  const previous = walksByThread.get(threadId) ?? Promise.resolve();
+  let release!: () => void;
+  const holding = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  walksByThread.set(threadId, holding);
+  // Even a broken walk hands the queue forward intactly.
+  const run = previous.then(walk, walk);
+  run.then(release, release);
+  void run.finally(() => {
+    if (walksByThread.get(threadId) === holding) walksByThread.delete(threadId);
+  });
+  return run;
 }
 
 /**
@@ -333,13 +382,14 @@ async function claimSegment(state: LiveWalkState, threadId: string, startMessage
  * provider failure (`provider_not_configured`, `embed_failed`) which the
  * chat route surfaces as a failed exchange.
  */
-export async function runLiveGate({
+async function walkLiveChain({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
+  // Fresh read at walk time: a queued walk runs after whatever elapsed
+  // between its surface call and its turn under the lock.
   const mode = env.THREAD_ANALYSIS_MODE;
   if (mode === 'off') return ok({ verdict: null, fireChannel: null, messageId: null });
-
   const rows = await listMessagesByThread({ threadId });
   const messages = rows.map((row) => ({
     id: row.id,
@@ -361,8 +411,14 @@ export async function runLiveGate({
   const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
   const expansionMode: LiveExpansionMode = mode === 'always' ? 'always' : 'heuristic';
 
-  const storedSegments = await listThreadSegmentsByThread({ threadId });
-  const storedLogs = await listSegmentDriftLogsByThread({ threadId });
+  const storedSegments = await listThreadSegmentsByThread({
+    threadId,
+    modelId: EMBEDDING_MODEL_ID,
+  });
+  const storedLogs = await listSegmentDriftLogsByThread({
+    threadId,
+    modelId: EMBEDDING_MODEL_ID,
+  });
 
   // One batch fetch of every stored vector the walk reads — arrival rows
   // (keyed to the user Message) and Turn rows (keyed to the assistant).
@@ -459,6 +515,7 @@ async function logArrivalIfNeeded(
   await insertSegmentDriftLog({
     segmentId: state.currentSegmentId as string,
     messageId: userMessageId,
+    modelId: EMBEDDING_MODEL_ID,
     driftP: judged.muted ? null : judged.driftP,
     mu: judged.segmentMu,
     sigma: judged.segmentSigma,

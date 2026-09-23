@@ -5,10 +5,11 @@ type DeleteSegmentDriftLogsByMessageIdsProps = {
 };
 
 /**
- * Drops the arrival verdict rows for the given messages — used when a
- * message edit invalidates that message's signals and everything after it.
- * Chain re-fill recreates them on the next arrival or
- * analysis view. Returns the number deleted.
+ * Drops the arrival verdict rows for the given messages under EVERY
+ * model's chain — a message edit invalidates that message's signals and
+ * everything after it, whichever embedding model judged them. Chain
+ * re-fill recreates them on the next arrival or analysis view. Returns
+ * the number deleted.
  */
 export async function deleteSegmentDriftLogsByMessageIds({
   messageIds,

@@ -301,8 +301,8 @@ function assertError(result: Awaited<ReturnType<typeof runLiveGate>>) {
 
 async function readChain(threadId: string) {
   const [segments, logs] = await Promise.all([
-    listThreadSegmentsByThread({ threadId }),
-    listSegmentDriftLogsByThread({ threadId }),
+    listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
+    listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
   ]);
   return { segments, logs };
 }
@@ -402,6 +402,44 @@ describe('runLiveGate — the fill-forward walk', () => {
 
     // One segment opens on arrival one; each fire burns another right
     // under itself.
+    const expectedSegStarts = TOPIC_SPECS.map((_, index) => index).filter(
+      (index) => index === 0 || expected[index]?.verdict === 'fire',
+    );
+    expect(segments.map((segment) => segment.startMessageId)).toEqual(
+      expectedSegStarts.map((index) => userMessageIds[index]),
+    );
+  });
+
+  it('keeps one clean chain when two walks overlap', async () => {
+    const { threadId, userMessageIds } = await seedThread('overlapping walks', TOPIC_SPECS);
+    const thirdArrival = userMessageIds[2];
+    if (!thirdArrival) throw new Error('seed too short');
+
+    // The two surfaces that drive the walk at once: an exchange judges up
+    // to its own arrival while the analysis backfill walks the whole
+    // thread. Both fire from stale snapshots of the chain — only one walk
+    // may write it.
+    const [exchange, backfill] = await Promise.all([
+      runLiveGate({ threadId, upToMessageId: thirdArrival }),
+      runLiveGate({ threadId }),
+    ]);
+    assertSuccess(exchange);
+    assertSuccess(backfill);
+
+    const { logs, segments } = await readChain(threadId);
+    // One row per arrival — the duplication this defends against.
+    expect(new Set(logs.map((log) => log.messageId)).size).toBe(logs.length);
+    expect(logs.map((log) => log.messageId)).toEqual(userMessageIds);
+
+    // The chain and its judgments are the single walk's either way.
+    const expected = expectedChain(TOPIC_SPECS);
+    for (let index = 0; index < logs.length; index += 1) {
+      const log = logs[index];
+      const exp = expected[index];
+      if (!log || !exp) throw new Error('walk/index misalignment');
+      expect(log.verdict).toBe(exp.verdict);
+      expect(log.segmentStartMessageId).toBe(userMessageIds[exp.segmentStartIndex ?? 0]);
+    }
     const expectedSegStarts = TOPIC_SPECS.map((_, index) => index).filter(
       (index) => index === 0 || expected[index]?.verdict === 'fire',
     );
@@ -649,6 +687,36 @@ describe('the analysis surface reads the persisted chain', () => {
     );
     expect(view.data.segments.length).toBe(view.data.points.length);
     expect(view.data.segments[view.data.segments.length - 1]?.closed).toBe(false);
+  });
+
+  it('lists a boundary arrival under the segment it opens, not the one it burned', async () => {
+    const { threadId } = await seedThread('boundary attribution', TOPIC_SPECS);
+    assertSuccess(await runLiveGate({ threadId }));
+    const view = await buildLiveAnalysisView(threadId);
+    if (view.type !== 'success') throw new Error('expected success');
+
+    // Membership follows the segment span: the Boundary turn closes the
+    // current Topic segment and seeds the next, so the fired arrival
+    // belongs to the segment it opens — the one whose start Message it
+    // is. The drift log keeps the judged-in segment; that is the previous
+    // ledger's story, not the membership one.
+    for (const segment of view.data.segments) {
+      const opening = view.data.points.find((point) => point.messageId === segment.startMessageId);
+      expect(opening).toBeDefined();
+      expect(opening?.segmentIndex).toBe(segment.index);
+    }
+    // Every pivot fires in this corpus, so arrival i opens segment i.
+    expect(view.data.points.map((point) => point.segmentIndex)).toEqual([1, 2, 3, 4, 5]);
+    expect(view.data.segments.map((segment) => segment.arrivalCount)).toEqual([1, 1, 1, 1, 1]);
+
+    // The store is untouched: the log still names the segment that judged
+    // the fired arrival — the burned segment's start Message, not the
+    // fired arrival itself.
+    const { logs } = await readChain(threadId);
+    const firedLog = logs.find((log) => log.verdict === 'fire');
+    expect(firedLog?.segmentStartMessageId).not.toBe(
+      view.data.points.find((point) => point.verdict === 'fire')?.messageId,
+    );
   });
 
   it('the off switch erases the view without touching the store', async () => {

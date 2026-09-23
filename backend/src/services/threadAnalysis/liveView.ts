@@ -9,12 +9,13 @@ import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from './types';
 import type { JudgingParams } from './verdict';
 
 /**
- * The Analysis tab's data contract: a plain read of the
- * persisted live chain — segments, one drift row per arrival, and the
- * judging params the points were produced with. No recomputation, no
- * provider calls: whatever the surface finds here is what the thread last
- * persisted; missing signals show up as `pending: true` and the tab
- * renders its loading state.
+ * The Analysis tab's data contract: a plain read of the thread's live
+ * chain under the current embedding model — segments, one drift row per
+ * arrival, and the judging params the points were produced with. No
+ * recomputation, no provider calls: whatever the surface finds here is
+ * what the thread last persisted; a retired model's chain stays stored
+ * but invisible, and missing signals show up as `pending: true` so the
+ * tab renders its loading state.
  */
 
 /** One arrival as the Analysis tab reads it. */
@@ -24,7 +25,13 @@ export interface LiveAnalysisPoint {
   messageText: string;
   /** 1-based arrival ordinal — the chart's x axis. */
   turnNumber: number;
-  /** 1-based index of the segment the arrival was judged in. */
+  /**
+   * 1-based index of the segment whose span holds the arrival —
+   * membership, not the judging segment. A fired arrival is the Boundary
+   * turn that closes one segment and seeds the next, so it lists under
+   * the segment it opens; the drift log keeps the burned segment as the
+   * judged-in one.
+   */
   segmentIndex: number;
   verdict: GateVerdict;
   fireChannel: 'immediate' | 'slow' | null;
@@ -52,7 +59,7 @@ export interface LiveAnalysisSegment {
   segmentId: string;
   /** The user Message whose arrival opened the segment. */
   startMessageId: string;
-  /** Number of arrivals judged inside the segment (muted included). */
+  /** Number of arrivals that landed in the segment's span (muted included). */
   arrivalCount: number;
   /** True when a fired arrival closed this segment. */
   closed: boolean;
@@ -96,8 +103,8 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
 
   const [messageRows, segments, logs] = await Promise.all([
     listMessagesByThread({ threadId }),
-    listThreadSegmentsByThread({ threadId }),
-    listSegmentDriftLogsByThread({ threadId }),
+    listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
+    listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
   ]);
 
   const messages = messageRows.map((row) => ({
@@ -109,11 +116,27 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   }));
   const userMessages = messages.filter((message) => message.role === 'user');
 
-  const segmentIndexById = new Map(segments.map((segment, index) => [segment.id, index + 1]));
-
   const arrivalTurnByMessageId = new Map(
     userMessages.map((message, index) => [message.id, index + 1]),
   );
+
+  // Membership follows the segment SPAN, not the judging row: the segment
+  // a drift log names is the ledger that judged the arrival — for a fired
+  // arrival that is the segment it burned — while the Boundary turn closes
+  // the current Topic segment and seeds the next one, so it lists under
+  // the segment it opens. An arrival belongs to the last segment whose own
+  // opening arrival stands at or before it.
+  const segmentOpeners = segments.map((segment, index) => ({
+    openTurn: arrivalTurnByMessageId.get(segment.startMessageId) ?? 0,
+    index: index + 1,
+  }));
+  const memberSegmentIndex = (turnNumber: number): number => {
+    let index = 1;
+    for (const opener of segmentOpeners) {
+      if (opener.openTurn <= turnNumber) index = opener.index;
+    }
+    return index;
+  };
 
   const arrivalRows = await listMessageEmbeddingsByMessageIds({
     messageIds: userMessages.map((message) => message.id),
@@ -136,11 +159,12 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
           ? (log.mu as number) +
             params.immediateK * Math.max(log.sigma as number, params.sigmaFloor)
           : params.segmentThreshold;
+    const turnNumber = arrivalTurnByMessageId.get(log.messageId) ?? 0;
     return {
       messageId: log.messageId,
       messageText: contentById.get(log.messageId) ?? '',
-      turnNumber: arrivalTurnByMessageId.get(log.messageId) ?? 0,
-      segmentIndex: segmentIndexById.get(log.segmentId) ?? 0,
+      turnNumber,
+      segmentIndex: memberSegmentIndex(turnNumber),
       verdict: log.verdict as GateVerdict,
       fireChannel: log.fireChannel as 'immediate' | 'slow' | null,
       driftP: log.driftP,
@@ -153,7 +177,8 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   });
 
   // Live segment spans: a segment's arrivals run from its opening message
-  // up to (not including) the next segment's — chronology, no end column.
+  // up to (not including) the next segment's — chronology, no end column;
+  // a fired arrival already counts toward the segment it opened (above).
   const arrivalCountBySegment = new Map<number, number>();
   for (const point of points) {
     arrivalCountBySegment.set(
@@ -161,7 +186,6 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       (arrivalCountBySegment.get(point.segmentIndex) ?? 0) + 1,
     );
   }
-
   const segmentView: LiveAnalysisSegment[] = segments.map((segment, index) => {
     const next = segments[index + 1];
     return {

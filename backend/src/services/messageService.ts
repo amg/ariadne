@@ -10,7 +10,7 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { deleteThreadSegmentsByStartMessageIds } from '@queries/threadSegments/deleteThreadSegmentsByStartMessageIds';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
-import { SYSTEM_PROMPT } from './aiService/config';
+import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
 
 /** Usage as served on the GET payload (identity columns implied by the row). */
 export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
@@ -176,7 +176,9 @@ export async function getMessages({
   // Per-arrival verdict straight from the persisted live chain (no
   // computation here). The flag suppresses the surface, never the store.
   const driftLogs =
-    env.THREAD_ANALYSIS_MODE === 'off' ? [] : await listSegmentDriftLogsByThread({ threadId });
+    env.THREAD_ANALYSIS_MODE === 'off'
+      ? []
+      : await listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
   const verdictByMessageId = new Map(
     driftLogs.map((log): [string, NonNullable<DriftVerdictPayload>] => [
       log.messageId,

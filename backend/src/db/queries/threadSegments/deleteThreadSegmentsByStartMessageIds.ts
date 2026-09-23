@@ -5,10 +5,10 @@ type DeleteThreadSegmentsByStartMessageIdsProps = {
 };
 
 /**
- * Drops live-chain segments that START at one of the given messages; rows
- * logged against a deleted segment cascade away, while rows against
- * earlier segments (the valid part of the chain) survive. Returns the
- * number deleted.
+ * Drops live-chain segments that START at one of the given messages,
+ * under every model's chain; rows logged against a deleted segment
+ * cascade away, while rows against earlier segments (the valid part of
+ * the chain) survive. Returns the number deleted.
  */
 export async function deleteThreadSegmentsByStartMessageIds({
   startMessageIds,

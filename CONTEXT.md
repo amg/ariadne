@@ -114,13 +114,18 @@ nothing else about it enters the chat.
 _Avoid_: draft turn, pending message, preview, hypothesis
 
 **Live chain**:
-The live gate's persisted arrival history: one record per judged
-arrival (the reading, the segment-ledger snapshot taken before the
-verdict, the verdict, the firing channel) and one segment per live
-segment. The chain is the conversation's truth about the live lane —
-the walk is fill-forward and never re-embeds or re-judges a complete
-chain; a thread predating the feature or a tail an edit shredded is
-refilled by the same walk resuming where the chain stops.
+The live gate's persisted arrival history under ONE embedding model:
+one record per judged arrival (the reading, the segment-ledger snapshot
+taken before the verdict, the verdict, the firing channel) and one
+segment per live segment, each carrying the model that produced the
+reading as provenance — the same identity the embedding rows use. A
+thread runs one chain per model: switching models starts a fresh chain
+from the walk, and the retired one stays stored for pruning. The chain
+is the conversation's truth about the live lane — the walk is
+fill-forward and never re-embeds or re-judges a complete chain; a thread
+predating the feature or a tail an edit shredded is refilled by the same
+walk resuming where the chain stops. (An edit invalidates signals under
+every model.)
 _Avoid_: verdict history, ledger table, live audit
 
 **Expanded signal / composite verdict signal**:

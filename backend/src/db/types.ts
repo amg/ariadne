@@ -87,6 +87,8 @@ export interface ThreadSegmentsTable {
   id: Generated<string>; // UUID
   threadId: string; // UUID FK -> threads.id (cascade delete)
   startMessageId: string; // UUID FK -> messages.id (first user Message of the segment)
+  /** Provenance of the reading that cut this segment — the embedding model. */
+  modelId: string;
   createdAt: Generated<Date>;
 }
 
@@ -100,6 +102,8 @@ export interface SegmentDriftLogsTable {
   id: Generated<string>; // UUID
   segmentId: string; // UUID FK -> thread_segments.id (segment the arrival was judged in)
   messageId: string; // UUID FK -> messages.id (the user Message that arrived)
+  /** Provenance of the judged reading — the embedding model. */
+  modelId: string;
   /** The composite reading judged; null on muted arrivals. */
   driftP: number | null;
   mu: number | null;

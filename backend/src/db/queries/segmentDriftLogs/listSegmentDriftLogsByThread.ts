@@ -3,6 +3,8 @@ import type { SegmentDriftLog } from '@db/types';
 
 type ListSegmentDriftLogsByThreadProps = {
   threadId: string;
+  /** Which model's chain to read — one chain per embedding model runs. */
+  modelId: string;
 };
 
 export interface SegmentDriftLogWithStart extends SegmentDriftLog {
@@ -11,22 +13,25 @@ export interface SegmentDriftLogWithStart extends SegmentDriftLog {
 }
 
 /**
- * Every arrival verdict recorded for a thread, in chronology, carrying the
- * segment's start Message so consumers can group the live chain without a
- * second join.
+ * Every arrival verdict recorded for a thread's chain under one embedding
+ * model, in chronology, carrying the segment's start Message so consumers
+ * can group the live chain without a second join.
  */
 export async function listSegmentDriftLogsByThread({
   threadId,
+  modelId,
 }: ListSegmentDriftLogsByThreadProps): Promise<SegmentDriftLogWithStart[]> {
   const rows = await db
     .selectFrom('segmentDriftLogs as log')
     .innerJoin('threadSegments as seg', 'seg.id', 'log.segmentId')
     .innerJoin('messages as msg', 'msg.id', 'log.messageId')
     .where('msg.threadId', '=', threadId)
+    .where('log.modelId', '=', modelId)
     .select([
       'log.id',
       'log.segmentId',
       'log.messageId',
+      'log.modelId',
       'log.driftP',
       'log.mu',
       'log.sigma',
