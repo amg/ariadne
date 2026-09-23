@@ -31,6 +31,11 @@ When a task matches a description below, you MUST use the `read` tool to load th
     <description>Guidelines for building UI components, splitting bloated files into folders, handling subcomponents, and managing TypeScript exports.</description>
     <location>alex-chat-bot/.pi/agent/skills/writing-ui-components/SKILL.md</location>
   </skill>
+  <skill>
+    <name>git-workflow</name>
+    <description>Guidelines for git merges, branching, and repository management.</description>
+    <location>alex-chat-bot/.pi/agent/skills/git-workflow/SKILL.md</location>
+  </skill>
 </available_skills>
 
 ## Global Skills
