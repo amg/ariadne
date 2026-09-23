@@ -177,9 +177,11 @@ export default function AppLayout() {
           }
           onRegenerateTitle={(id) =>
             // formData (not null) so `generatingTitleThreadId` above flips the
-            // sidebar/info panel to the loading pulse immediately.
+            // sidebar/info panel to the loading pulse immediately. `forced`
+            // tells the backend to title from the thread's first segment
+            // instead of its first exchange.
             generateTitleFetcher.submit(
-              { threadId: id },
+              { threadId: id, forced: 'true' },
               { method: 'post', action: `/threads/${id}/generate-title` },
             )
           }

@@ -9,13 +9,19 @@ type GenerateTitleParams = {
   id: string;
 };
 
+type GenerateTitleBody = {
+  /** Regenerate button on an existing thread → title from the first segment. */
+  forced?: unknown;
+};
+
 export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
   fastify.post(
     '/api/threads/:id/generate-title',
     async (request: FastifyRequest, reply: FastifyReply) => {
       const params = request.params as GenerateTitleParams;
 
-      const outcome = await autoTitleThread(REQUEST_USER_ID, params.id);
+      const body = (request.body ?? {}) as GenerateTitleBody;
+      const outcome = await autoTitleThread(REQUEST_USER_ID, params.id, body.forced === true);
 
       if (outcome.type === 'titled') {
         return reply.send({ success: true, title: outcome.title });

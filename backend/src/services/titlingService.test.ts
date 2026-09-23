@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { insertMessage } from '@queries/messages/insertMessage';
+import { insertThreadSegment } from '@queries/threadSegments/insertThreadSegment';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -9,6 +10,7 @@ import { useTestDb } from '@test/test-db';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
 import { ErrorCodes } from '../types/errorCodes';
+import { EMBEDDING_MODEL_ID } from './aiService/config';
 
 /**
  * e2e against the built-in mock inference server (same documented deviation
@@ -142,6 +144,38 @@ async function seedExchange(threadId: string) {
     role: 'assistant',
     content: 'Steam expands and pushes a piston.',
   });
+}
+
+/** Two exchanges on two topics + their live-chain segments, for the forced window. */
+async function seedDriftedThread(threadId: string) {
+  const first = await insertMessage({
+    threadId,
+    role: 'user',
+    content: 'How do steam engines work?',
+  });
+  await insertMessage({
+    threadId,
+    role: 'assistant',
+    content: 'Steam expands and pushes a piston.',
+  });
+  const pivot = await insertMessage({
+    threadId,
+    role: 'user',
+    content: 'Switching gears: best pasta recipe?',
+  });
+  await insertMessage({
+    threadId,
+    role: 'assistant',
+    content: 'Boil salted water, cook the spaghetti al dente.',
+  });
+  await insertThreadSegment({ threadId, startMessageId: first.id, modelId: EMBEDDING_MODEL_ID });
+  return { first: first.id, pivot: pivot.id };
+}
+
+/** The prompt text of a captured chat-completion request. */
+function promptOf(body: unknown): string {
+  const messages = (body as { messages?: Array<{ content?: string }> })?.messages ?? [];
+  return messages.map((m) => m.content ?? '').join('\n');
 }
 
 async function titleOf(userId: string, threadId: string): Promise<string | null> {
@@ -335,6 +369,85 @@ describe('autoTitleThread', () => {
 
       expect(outcome).toEqual({ type: 'titled', title: 'Steam Engines Explained' });
       expect(await titleOf(userId, threadId)).toBe('Steam Engines Explained');
+    } finally {
+      await stop();
+    }
+  });
+});
+
+describe('autoTitleThread message window', () => {
+  it('auto keeps learning from the first exchange on a drifted thread', async () => {
+    const { userId, threadId } = await createThread();
+    const { pivot } = await seedDriftedThread(threadId);
+    await insertThreadSegment({ threadId, startMessageId: pivot, modelId: EMBEDDING_MODEL_ID });
+
+    let requestBody: unknown;
+    const stop = await startProvider({
+      title: 'Steam Engine Basics',
+      onRequest: (body) => {
+        requestBody = body;
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId);
+
+      expect(outcome.type).toBe('titled');
+      const prompt = promptOf(requestBody);
+      expect(prompt).toContain('steam engines');
+      expect(prompt).not.toContain('pasta');
+    } finally {
+      await stop();
+    }
+  });
+
+  it('forced regeneration names the thread from its first full segment', async () => {
+    const { userId, threadId } = await createThread();
+    const { pivot } = await seedDriftedThread(threadId);
+    // Drift cuts a second segment at the pasta question — the first
+    // segment (the anchor) ends right before it.
+    await insertThreadSegment({ threadId, startMessageId: pivot, modelId: EMBEDDING_MODEL_ID });
+
+    let requestBody: unknown;
+    const stop = await startProvider({
+      title: 'Steam Engine Basics',
+      onRequest: (body) => {
+        requestBody = body;
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId, true);
+
+      expect(outcome.type).toBe('titled');
+      const prompt = promptOf(requestBody);
+      expect(prompt).toContain('steam engines');
+      expect(prompt).toContain('pushes a piston');
+      expect(prompt).not.toContain('pasta');
+      expect(prompt).not.toContain('spaghetti');
+    } finally {
+      await stop();
+    }
+  });
+
+  it('forced regeneration uses the whole thread while no drift boundary exists', async () => {
+    const { userId, threadId } = await createThread();
+    // Only the anchor segment — the thread has not drifted, so it is still
+    // one segment and the whole conversation names it.
+    await seedDriftedThread(threadId);
+
+    let requestBody: unknown;
+    const stop = await startProvider({
+      title: 'Steam Then Pasta',
+      onRequest: (body) => {
+        requestBody = body;
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId, true);
+
+      expect(outcome.type).toBe('titled');
+      const prompt = promptOf(requestBody);
+      expect(prompt).toContain('steam engines');
+      expect(prompt).toContain('pasta');
     } finally {
       await stop();
     }

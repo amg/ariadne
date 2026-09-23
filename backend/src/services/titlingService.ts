@@ -1,5 +1,9 @@
 import { env } from '@config/env';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import {
+  type MessageWithUsageRow,
+  listMessagesByThread,
+} from '@queries/messages/listMessagesByThread';
+import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
@@ -11,7 +15,12 @@ import {
   logger,
 } from '../logger';
 import { ErrorCodes, type TitlingErrorCode } from '../types/errorCodes';
-import { createModel, isInferenceConfigured, resolveInferenceConfig } from './aiService/config';
+import {
+  EMBEDDING_MODEL_ID,
+  createModel,
+  isInferenceConfigured,
+  resolveInferenceConfig,
+} from './aiService/config';
 import { renameThread } from './threadService';
 
 /**
@@ -144,10 +153,39 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
 }
 
 /**
- * Derives a short title for a thread from the first exchange.
- * Used asynchronously to avoid blocking the main chat stream.
+ * Message window for a forced (user-triggered) regeneration: the thread's
+ * first full segment — the anchor. Segments chain the thread's topic drift:
+ * everything before the second segment's start message belongs to the first
+ * segment. If drift has not split the thread yet (or the analysis chain is
+ * absent), the whole thread *is* that one segment and is used as is.
  */
-export async function autoTitleThread(userId: string, threadId: string): Promise<TitlingOutcome> {
+async function firstSegmentMessages(
+  threadId: string,
+  messages: MessageWithUsageRow[],
+): Promise<MessageWithUsageRow[]> {
+  const segments = await listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
+  if (segments.length < 2) {
+    return messages;
+  }
+  const boundary = messages.findIndex((m) => m.id === segments[1]?.startMessageId);
+  return boundary > 0 ? messages.slice(0, boundary) : messages;
+}
+
+/**
+ * Derives a short title for a thread.
+ *
+ * - Auto (`forced` false): fires right after the first exchange and learns
+ *   from just that exchange — one turn, cheap. Used asynchronously so it
+ *   never blocks the main chat stream.
+ * - Forced (`forced` true): user-triggered regeneration; names the thread
+ *   from its first full segment (the anchor), so topic drift further down
+ *   the thread never leaks into the title.
+ */
+export async function autoTitleThread(
+  userId: string,
+  threadId: string,
+  forced = false,
+): Promise<TitlingOutcome> {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return {
@@ -171,10 +209,17 @@ export async function autoTitleThread(userId: string, threadId: string): Promise
     return { type: 'settled' };
   }
 
+  const messagesToUse = forced
+    ? await firstSegmentMessages(threadId, messages)
+    : messages.slice(0, 2);
+
+  const conversationText = messagesToUse
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${clipped(m.content)}`)
+    .join('\n');
+
   const prompt = `Given the following conversation, generate a very short, concise title (max 5 words). Do not use quotes, punctuation, or generic filler like "Chat about". Reply with only the title.
 
-User: ${clipped(messages[0]?.content)}
-Assistant: ${clipped(messages[1]?.content)}`;
+${conversationText}`;
 
   try {
     const modelStr = env.TITLING_MODEL || config.model;
