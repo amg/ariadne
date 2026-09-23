@@ -7,6 +7,9 @@ import { formatCost, formatTokens } from '@/services/utils';
 import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
 import { useState } from 'react';
 
+type ModelInfo = ThreadSummary['models'][number];
+type ModelRole = ModelInfo['roles'][number];
+
 type Props = {
   summary: ThreadSummary | null;
   threadTitle?: string | null;
@@ -32,13 +35,14 @@ function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
 /**
  * Formats model pricing for display
  */
-function ModelPricing({
-  pricing,
-}: { pricing: Exclude<ThreadSummary['primaryModelPricing'], null> }) {
+function ModelPricing({ pricing }: { pricing: NonNullable<ModelInfo['pricing']> }) {
   const formatPrice = (price: number | null | undefined) =>
     price == null ? '—' : price < 0.01 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
-  const formatRate = (rate: number | null | undefined) =>
-    rate == null ? '—' : `${(rate * 100).toFixed(0)}%`;
+
+  const savingsPct =
+    pricing.cachedRateMultiplier != null
+      ? Math.round((1 - pricing.cachedRateMultiplier) * 100)
+      : null;
 
   return (
     <div className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -53,16 +57,41 @@ function ModelPricing({
         </span>
       </div>
       {pricing.cachedPricePerMillion !== null && (
-        <div className="flex items-center gap-3">
-          <span title="Cached token price per million tokens">
-            <span className="font-medium text-foreground">Cached:</span>{' '}
-            {formatPrice(pricing.cachedPricePerMillion)}/1M
-          </span>
-          <span title="Cached token rate (multiplier of input price)">
-            <span className="font-medium text-foreground">Rate:</span>{' '}
-            {formatRate(pricing.cachedRateMultiplier)} of input
-          </span>
+        <div
+          title={`Price per million cached input tokens${savingsPct != null ? ` — saves ${savingsPct}% vs input price` : ''}`}
+        >
+          <span className="font-medium text-foreground">Cache input:</span>{' '}
+          {formatPrice(pricing.cachedPricePerMillion)}/1M
+          {savingsPct != null && <span className="text-green-600"> · saves {savingsPct}%</span>}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Generated labels for pipeline roles the model serves. */
+const ROLE_LABELS: Record<ModelRole, string> = {
+  chat: 'Chat',
+  embedding: 'Embedding',
+  rewrite: 'Rewrite',
+  judge: 'Judgement',
+};
+
+/** One model card: role labels, model id, pricing. */
+function ModelRow({ model }: { model: ModelInfo }) {
+  const roles = model.roles.map((role) => ROLE_LABELS[role]).join(' · ');
+  return (
+    <div className="border-t py-2 first:border-t-0 first:pt-0 last:pb-0">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {roles}
+      </p>
+      <p className="truncate text-xs text-foreground" title={model.modelId}>
+        {model.modelId}
+      </p>
+      {model.pricing ? (
+        <ModelPricing pricing={model.pricing} />
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">No pricing data</p>
       )}
     </div>
   );
@@ -91,8 +120,7 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
     cachedCostUsd,
     costBreakdown,
     totalTokens,
-    primaryModel,
-    primaryModelPricing,
+    models,
     contextUsage,
     createdAt,
   } = summary;
@@ -192,30 +220,25 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
         )}
       </div>
 
-      {/* Primary Model with Pricing and Refresh Button */}
+      {/* Models with pricing and refresh button */}
       <div className="rounded-md border bg-background p-3">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
             <Bot className="h-4 w-4 text-purple-500" />
-            Primary Model
+            Models
           </div>
           <button
             type="button"
             onClick={handleRefresh}
-            disabled={isRefreshing || !primaryModel}
+            disabled={isRefreshing || models.length === 0}
             title="Refresh model pricing from provider"
             className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
-        {primaryModel ? (
-          <>
-            <p className="truncate text-xs text-foreground" title={primaryModel}>
-              {primaryModel}
-            </p>
-            {primaryModelPricing && <ModelPricing pricing={primaryModelPricing} />}
-          </>
+        {models.length > 0 ? (
+          models.map((model) => <ModelRow key={model.modelId} model={model} />)
         ) : (
           <p className="text-xs text-muted-foreground">No model data</p>
         )}

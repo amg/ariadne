@@ -217,12 +217,17 @@ export interface ThreadSummary {
     total: number;
   };
   primaryModel: string | null;
-  primaryModelPricing: {
-    inputPricePerMillion: number | null;
-    outputPricePerMillion: number | null;
-    cachedPricePerMillion: number | null;
-    cachedRateMultiplier: number | null;
-  } | null;
+  /** Every model the thread spent on, grouped by model id. */
+  models: Array<{
+    modelId: string;
+    roles: Array<'chat' | 'embedding' | 'rewrite' | 'judge'>;
+    pricing: {
+      inputPricePerMillion: number | null;
+      outputPricePerMillion: number | null;
+      cachedPricePerMillion: number | null;
+      cachedRateMultiplier: number | null;
+    } | null;
+  }>;
   contextUsage: {
     used: number;
     limit: number | null;

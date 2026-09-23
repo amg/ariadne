@@ -2,10 +2,29 @@ import { sumAnalyzerCostsByThread } from '@queries/messageEmbeddings/sumAnalyzer
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
 import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import { getModelConfig } from './modelConfigService';
+import { EMBEDDING_MODEL_ID, JUDGE_MODEL_ID, REWRITE_MODEL_ID } from './aiService/config';
+import { type ModelConfigRow, getModelConfig } from './modelConfigService';
 
 /** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
 const round10 = (value: number): number => Number(value.toFixed(10));
+
+/** A pipeline role a model serves in a thread's spend. */
+export type ThreadModelRole = 'chat' | 'embedding' | 'rewrite' | 'judge';
+
+/** Pricing for one model; null when the model has no known pricing. */
+export type ModelPricing = {
+  inputPricePerMillion: number | null;
+  outputPricePerMillion: number | null;
+  cachedPricePerMillion: number | null;
+  cachedRateMultiplier: number | null;
+} | null;
+
+/** One model used by a thread, with every role it serves grouped together. */
+export interface ThreadModelInfo {
+  modelId: string;
+  roles: ThreadModelRole[];
+  pricing: ModelPricing;
+}
 
 /** Aggregated thread statistics computed on-the-fly from message_usage. */
 export interface ThreadSummary {
@@ -34,12 +53,12 @@ export interface ThreadSummary {
     total: number;
   };
   primaryModel: string | null;
-  primaryModelPricing: {
-    inputPricePerMillion: number | null;
-    outputPricePerMillion: number | null;
-    cachedPricePerMillion: number | null;
-    cachedRateMultiplier: number | null;
-  } | null;
+  /**
+   * Every model the thread spent on, grouped by model id. The chat role
+   * carries the primary model; analyzer roles carry the current pipeline
+   * models and appear only when that category spent something.
+   */
+  models: ThreadModelInfo[];
   contextUsage: {
     used: number;
     limit: number | null;
@@ -106,6 +125,55 @@ function findPrimaryModel(modelCounts: Record<string, number>): string | null {
   return primaryModel;
 }
 
+/** Display pricing for a resolved model config. */
+function pricingFromConfig(config: ModelConfigRow): ModelPricing {
+  return {
+    inputPricePerMillion: config.inputPricePerMillion,
+    outputPricePerMillion: config.outputPricePerMillion,
+    cachedPricePerMillion: config.cachedPricePerMillion,
+    cachedRateMultiplier: config.cachedRateMultiplier,
+  };
+}
+
+/** Per-request model config lookup that shares a row per model id. */
+function createConfigLoader() {
+  const cache = new Map<string, ModelConfigRow | null>();
+  return async (modelId: string): Promise<ModelConfigRow | null> => {
+    if (!cache.has(modelId)) cache.set(modelId, await getModelConfig(modelId));
+    return cache.get(modelId) ?? null;
+  };
+}
+
+interface ModelSlot {
+  role: ThreadModelRole;
+  modelId: string | null;
+}
+
+/**
+ * Groups a thread's spent model slots by model id: slots sharing an id
+ * collapse into one entry whose roles preserve pipeline order.
+ */
+async function listThreadModels(
+  slots: ModelSlot[],
+  loadConfig: (modelId: string) => Promise<ModelConfigRow | null>,
+): Promise<ThreadModelInfo[]> {
+  const models: ThreadModelInfo[] = [];
+  for (const { role, modelId } of slots) {
+    if (modelId === null) continue;
+    let entry = models.find((candidate) => candidate.modelId === modelId);
+    if (!entry) {
+      entry = { modelId, roles: [], pricing: null };
+      models.push(entry);
+    }
+    entry.roles.push(role);
+  }
+  for (const entry of models) {
+    const config = await loadConfig(entry.modelId);
+    if (config) entry.pricing = pricingFromConfig(config);
+  }
+  return models;
+}
+
 /**
  * Computes thread summary statistics on-the-fly from message_usage rows.
  * Returns null if thread not found or user doesn't have access.
@@ -141,7 +209,7 @@ export async function getThreadSummary(args: {
       },
       totalTokens: { prompt: 0, completion: 0, cached: 0, reasoning: 0, total: 0 },
       primaryModel: null,
-      primaryModelPricing: null,
+      models: [],
       contextUsage: { used: 0, limit: null, percentage: null },
       createdAt: thread.createdAt.toISOString(),
     };
@@ -161,25 +229,15 @@ export async function getThreadSummary(args: {
   const grandTotalCost = round10(stats.totalCost + embeddingCost + rewriteCost + judgeCost);
 
   // Get context window, pricing, and cached rate from DB cache (or fallback)
+  const loadConfig = createConfigLoader();
+
   let contextLimit: number | null = null;
-  let primaryModelPricing: {
-    inputPricePerMillion: number | null;
-    outputPricePerMillion: number | null;
-    cachedPricePerMillion: number | null;
-    cachedRateMultiplier: number | null;
-  } | null = null;
   let cachedCost = 0;
 
   if (primaryModel) {
-    const config = await getModelConfig(primaryModel);
+    const config = await loadConfig(primaryModel);
     if (config) {
       contextLimit = config.contextWindow;
-      primaryModelPricing = {
-        inputPricePerMillion: config.inputPricePerMillion,
-        outputPricePerMillion: config.outputPricePerMillion,
-        cachedPricePerMillion: config.cachedPricePerMillion,
-        cachedRateMultiplier: config.cachedRateMultiplier,
-      };
 
       // Calculate cached cost: cachedTokens × cachedPricePerMillion / 1M
       if (stats.totalCached > 0 && config.cachedPricePerMillion) {
@@ -187,6 +245,18 @@ export async function getThreadSummary(args: {
       }
     }
   }
+
+  // Analyzer slots list the current pipeline models and only appear when
+  // their category spent something.
+  const models = await listThreadModels(
+    [
+      { role: 'chat', modelId: primaryModel },
+      { role: 'embedding', modelId: embeddingCost > 0 ? EMBEDDING_MODEL_ID : null },
+      { role: 'rewrite', modelId: rewriteCost > 0 ? REWRITE_MODEL_ID : null },
+      { role: 'judge', modelId: judgeCost > 0 ? JUDGE_MODEL_ID : null },
+    ],
+    loadConfig,
+  );
 
   const totalTokensUsed = stats.totalPrompt + stats.totalCompletion;
   const contextPercentage =
@@ -213,7 +283,7 @@ export async function getThreadSummary(args: {
       total: totalTokensUsed,
     },
     primaryModel,
-    primaryModelPricing,
+    models,
     contextUsage: {
       used: totalTokensUsed,
       limit: contextLimit,

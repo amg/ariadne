@@ -4,6 +4,7 @@ import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { EMBEDDING_MODEL_ID, REWRITE_MODEL_ID } from '@services/aiService/config';
 import { getThreadSummary } from '@services/threadSummaryService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -52,6 +53,7 @@ describe('getThreadSummary', () => {
       rewrite: '0.0000000000',
       judge: '0.0000000000',
     });
+    expect(summary?.models).toEqual([]);
   });
 
   it('adds analyzer pipeline spend to the total and breaks it down', async () => {
@@ -82,6 +84,13 @@ describe('getThreadSummary', () => {
       rewrite: '0.0000002000',
       judge: '0.0000003000',
     });
+    // One entry per distinct model, roles grouped; rewrite and judge share
+    // a model id, so they collapse into a single entry.
+    expect(summary?.models).toEqual([
+      { modelId: 'provider/model-a', roles: ['chat'], pricing: null },
+      { modelId: EMBEDDING_MODEL_ID, roles: ['embedding'], pricing: null },
+      { modelId: REWRITE_MODEL_ID, roles: ['rewrite', 'judge'], pricing: null },
+    ]);
   });
 
   it('total equals chat cost alone when the analyzer recorded nothing', async () => {
@@ -95,5 +104,9 @@ describe('getThreadSummary', () => {
     expect(summary?.costBreakdown.embedding).toBe('0.0000000000');
     expect(summary?.costBreakdown.rewrite).toBe('0.0000000000');
     expect(summary?.costBreakdown.judge).toBe('0.0000000000');
+    // Only the chat model spent: no analyzer slots appear.
+    expect(summary?.models).toEqual([
+      { modelId: 'provider/model-a', roles: ['chat'], pricing: null },
+    ]);
   });
 });
