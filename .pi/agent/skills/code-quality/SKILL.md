@@ -10,6 +10,9 @@ description: Defines code quality standards, complexity limits, testing governan
 *   **Complexity**: Limit branching and function scope.
     - *Business logic*: Strictly limit `if`/`else`/`switch`. Use guard clauses for early returns.
     - *UI components*: Explicit `switch` cases for visual variants and divergent markup. Object maps only for simple scaling attributes (e.g., `size`).
+*   **Naming by Outcome**: Name functions for what the caller gets back — the decision answered or the value returned — never the internal mechanism that runs.
+    - Decision-shaped: `needsRewrite` (returns `{ rewrite: boolean }`), not `consultBackstop` (interaction verb hides the return) nor `needsRewriteJudge` (parses as "a judge that rewrites").
+    - Mechanism nouns (`judge`, `cache`, `query`) are legitimate only on the layer that owns that mechanism (e.g., `judgeContextDependence` in aiService, where the model call IS the contract).
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 
 ## 2. Testing Governance
