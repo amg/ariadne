@@ -56,6 +56,12 @@ const origins = getCorsOrigins();
 - `AI_TITLING_TIMEOUT_MS` - Titling timeout in ms (default: 5000)
 - `TITLING_MODEL` - Override model for titling (optional)
 
+### Thread Analysis (live drift gate)
+- `THREAD_ANALYSIS_MODE` - 'off' | 'heuristic' | 'always' (default: 'heuristic').
+  `off` skips the live pipeline and hides the Analysis surface (stored signals
+  survive and reappear when flipped back); `heuristic`/`always` run the live
+  lane with that expansion tier.
+
 ### CORS
 - `CORS_ORIGINS` - Comma-separated allowed origins (optional, defaults to localhost)
 

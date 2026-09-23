@@ -12,14 +12,12 @@ import {
 } from './verdict';
 
 /**
- * Pure drift math (folder-private; verified through `analyzeThread`).
- * Key concepts: Anchor, Anchor distance, Segment drift,
- * Gravity point, Drift score, Boundary turn, Topic segment. Binds
- * Turn unit, Segment drift against a rolling Gravity point,
- * single-signal Drift score (clamped Segment drift), demoted Anchor
- * (charted series, no threshold, no classification role). All cosine math
- * runs in process over stored Turn vectors — no dependency on DB vector
- * operators, no API calls.
+ * Pure drift math (folder-private). Measures Segment drift against a
+ * rolling Gravity point and derives the single-signal Drift score
+ * (clamped Segment drift); a demoted Anchor is a charted series with no
+ * threshold and no classification role. All cosine math runs in process
+ * over stored Turn vectors — no dependency on DB vector operators, no
+ * API calls.
  */
 
 /**

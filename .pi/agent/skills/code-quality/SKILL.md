@@ -20,6 +20,8 @@ description: Defines code quality standards, complexity limits, testing governan
 
 ## 3. Enforcing Quality
 
+**Comments & Docs**: Writing or modifying comments, JSDoc, or project documents requires the **docs-quality** skill. The `comment-hygiene` gate check blocks the gross violation classes mechanically; the skill carries the rest.
+
 **Validation**: After any code modification, activate **workflow-gate** to run `npm run gate`.
 
 **Architectural Conflicts**: If the gate fails due to architectural decisions (complexity limits, avoiding hasty abstractions), DO NOT bypass with ignore directives (`// biome-ignore`). Pause and ask the user for a decision.

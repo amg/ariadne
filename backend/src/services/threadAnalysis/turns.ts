@@ -1,11 +1,9 @@
 import type { Message } from '@db/types';
 
 /**
- * Pure Turn reconstruction and embedding-target building (folder-private;
- * verified through `analyzeThread`). Key concepts: Turn, Turn
- * embedding. Binds the Turn is the unit of embedding and scoring
- * — each Turn embeds once as its text block, keyed to the Turn's assistant
- * Message.
+ * Pure Turn reconstruction and embedding-target building (folder-private).
+ * The Turn is the unit of embedding and scoring — each Turn embeds once
+ * as its text block, keyed to the Turn's assistant Message.
  */
 
 export interface Turn {
@@ -57,7 +55,7 @@ export function prospectiveText(userContent: string): string {
  * content contributes nothing to the text, but the Turn keeps its
  * position.
  */
-function turnText(turn: Turn): string {
+export function turnText(turn: Turn): string {
   const assistant = turn.assistantMessage.content;
   if (assistant.length === 0) return prospectiveText(turn.userMessage.content);
   return `User:\n${turn.userMessage.content}\n\nAssistant:\n${assistant}\n\n`;

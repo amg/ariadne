@@ -1,4 +1,4 @@
-import type { Message } from '@/services/api';
+import type { Message, MessageDriftVerdict } from '@/services/api';
 import { updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import type { UIMessage } from 'ai';
@@ -25,7 +25,7 @@ type ChatControllerProps = {
 type UiMessageLike = {
   id: string;
   role: 'user' | 'assistant' | 'system';
-  parts: Array<{ type: string; text?: string }>;
+  parts: Array<{ type: string; text?: string; data?: unknown }>;
 };
 
 /** Join the text parts of a useChat message into one content string. */
@@ -54,6 +54,40 @@ function countByKey(rows: Message[]): Map<string, number> {
   return counts;
 }
 
+type StreamVerdict = {
+  userMessageId: string;
+  verdict: 'muted' | 'pass' | 'fire';
+  fireChannel: 'immediate' | 'slow' | null;
+};
+
+/**
+ * The live gate's verdict rides the stream as a TRANSIENT
+ * `data-thread-verdict` part, written before any reply content. Transient
+ * data parts never land in `message.parts` — the SDK delivers them only
+ * through useChat's `onData` — so this payload is parsed there. Returns
+ * null on any part that is not a verdict payload.
+ */
+function readVerdictData(part: { data?: unknown }): StreamVerdict | null {
+  if (part.data === undefined || typeof part.data !== 'object') return null;
+  const data = part.data as { verdict?: string; fireChannel?: string | null };
+  if (data.verdict !== 'muted' && data.verdict !== 'pass' && data.verdict !== 'fire') return null;
+  return {
+    userMessageId: '',
+    verdict: data.verdict,
+    fireChannel:
+      data.fireChannel === 'immediate' || data.fireChannel === 'slow' ? data.fireChannel : null,
+  };
+}
+
+/** The most recent user message in live chat state — the pending arrival. */
+function lastUserMessage(chatMessages: UiMessageLike[]): UiMessageLike | null {
+  for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+    const candidate = chatMessages[i];
+    if (candidate?.role === 'user') return candidate;
+  }
+  return null;
+}
+
 /**
  * Merge rules (ids differ between optimistic/streaming state and DB rows):
  * - rows already in the DB render from loader data — ids pinned by the server,
@@ -77,6 +111,7 @@ function buildSettledRow(
       usage: row.usage ?? null,
       streaming: streaming, // True while actually streaming, false during the revalidation gap
       reasoning: reasoning || null,
+      verdict: row.driftVerdict ?? null,
     };
   }
   return {
@@ -85,20 +120,45 @@ function buildSettledRow(
     usage: row.usage ?? null,
     streaming: false,
     reasoning: reasoningCache.get(row.id) ?? null,
+    verdict: row.driftVerdict ?? null,
   };
+}
+
+/** The live verdict a pending row wears — only its own arrival bubble. */
+function pendingVerdictFor(
+  message: UiMessageLike,
+  liveVerdict: StreamVerdict | null,
+): MessageDriftVerdict | null {
+  if (!liveVerdict || message.role !== 'user' || liveVerdict.userMessageId !== message.id) {
+    return null;
+  }
+  return { verdict: liveVerdict.verdict, fireChannel: liveVerdict.fireChannel };
 }
 
 function mergeDisplayRows(
   rows: Message[],
   chatMessages: UiMessageLike[],
-  streaming: boolean,
+  status: 'submitted' | 'streaming' | 'ready' | 'error',
   reasoningCache: Map<string, string>,
+  liveVerdict: StreamVerdict | null,
 ): DisplayRow[] {
   const sdkMessages = new Map(chatMessages.map((m) => [m.id, m]));
   const usageById = new Map(rows.map((row) => [row.id, row.usage ?? null]));
 
+  // Only the assistant row actively receiving chunks wears the blinking
+  // caret: mid-stream the live chat array ends with it, while 'submitted'
+  // ends with the user prompt and 'ready'/'error' are not streaming at all.
+  const lastChatMessage = chatMessages[chatMessages.length - 1];
+  const lastStreamingAssistantId =
+    status === 'streaming' && lastChatMessage?.role === 'assistant' ? lastChatMessage.id : null;
+
   const settled = rows.map((row) =>
-    buildSettledRow(row, sdkMessages.get(row.id), streaming, reasoningCache),
+    buildSettledRow(
+      row,
+      sdkMessages.get(row.id),
+      row.id === lastStreamingAssistantId,
+      reasoningCache,
+    ),
   );
 
   const rowCountByKey = countByKey(rows);
@@ -132,8 +192,9 @@ function mergeDisplayRows(
         usage: null,
       },
       usage: null,
-      streaming: message.role === 'assistant' && streaming,
+      streaming: message.id === lastStreamingAssistantId,
       reasoning: reasoning || null,
+      verdict: pendingVerdictFor(message, liveVerdict),
     });
   }
 
@@ -166,6 +227,12 @@ export default function ChatController({
 
   const [droppedIds, setDroppedIds] = useState<Set<string>>(new Set());
 
+  // The transient `data-thread-verdict` part arrives only through `onData`
+  // (the SDK keeps it out of message.parts), so the verdict is held here and
+  // applied to the pending user bubble before the reply grows.
+  const [streamVerdict, setStreamVerdict] = useState<StreamVerdict | null>(null);
+  const messagesRef = useRef<UiMessageLike[]>([]);
+
   // Keep track of the latest isNewChat value without re-triggering useChat options
   const isNewChatRef = useRef(isNewChat);
   useMemo(() => {
@@ -175,15 +242,29 @@ export default function ChatController({
   const chat = useChat({
     id: threadId,
     transport,
+    // The verdict flows `onData` as the stream's first event: map it to the
+    // pending arrival (the last user message) so the bubble tints before the
+    // reply starts growing. The verdict rides the gun-pipeline exchange, and
+    // only `submit-message` triggers that — the last pending user row IS the
+    // judged arrival.
+    onData: (part) => {
+      if ((part as { type?: string }).type !== 'data-thread-verdict') return;
+      const payload = readVerdictData(part as { data?: unknown });
+      const arrival = lastUserMessage(messagesRef.current);
+      if (!payload || !arrival) return;
+      setStreamVerdict({ ...payload, userMessageId: arrival.id });
+    },
     // After every stream (including user stop) refetch rows so usage
     // metadata and persisted ids replace the optimistic/streaming state.
     onFinish: () => {
+      setStreamVerdict(null);
       onSettle();
       if (onGenerateTitle) {
         onGenerateTitle();
       }
     },
     onError: () => {
+      setStreamVerdict(null);
       onSettle();
       if (onGenerateTitle) {
         onGenerateTitle();
@@ -194,8 +275,10 @@ export default function ChatController({
   // Preserve reasoning across renders (even after stream completes)
   const reasoningCache = useRef<Map<string, string>>(new Map());
 
-  // Update cache with any new reasoning from chat messages
+  // Update cache with any new reasoning from chat messages, and keep a
+  // fresh snapshot for `onData` (which fires mid-stream, outside render).
   useMemo(() => {
+    messagesRef.current = chat.messages;
     for (const msg of chat.messages) {
       if (msg.role === 'assistant') {
         const reasoning = extractReasoning(msg.parts);
@@ -210,10 +293,21 @@ export default function ChatController({
     [rows, droppedIds],
   );
 
+  // The purple bubble: the transient verdict arrives through `onData` before
+  // the reply grows, so the merge keys it to the arrival's optimistic row;
+  // after settle the loader rows carry the persisted verdicts instead.
+  const liveVerdict = streamVerdict;
+
   const display = useMemo(
     () =>
-      mergeDisplayRows(visibleRows, chat.messages, chat.status !== 'ready', reasoningCache.current),
-    [visibleRows, chat.messages, chat.status],
+      mergeDisplayRows(
+        visibleRows,
+        chat.messages,
+        chat.status,
+        reasoningCache.current,
+        liveVerdict,
+      ),
+    [visibleRows, chat.messages, chat.status, liveVerdict],
   );
 
   const send = (content: string) => {

@@ -1,8 +1,13 @@
+import { EMBEDDING_MODEL_ID, JUDGE_MODEL_ID, REWRITE_MODEL_ID } from '@services/aiService/config';
+import { type UsagePricing, computeCostUsd } from '@services/aiService/cost';
+import { getFallbackPricing, getModelConfig } from '@services/modelConfigService';
 import type { CostPoint } from './types';
 
 /**
- * Cost math for the analyzer (folder-private; verified through
- * `analyzeThread`). Key concepts: Marginal cost, Running total.
+ * Cost math for the analyzer (folder-private). Rewrite, judge, and
+ * embedding rates resolve through the same seam chat usage uses — the DB
+ * pricing table, falling through to the central fallback pricing — so
+ * this file keeps no private rate table.
  */
 
 /** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
@@ -11,45 +16,65 @@ export function round10(value: number): number {
 }
 
 /**
- * Embedding-model pricing: $0.01 per 1M prompt tokens (research doc
- * fallback constant). Recorded in the report only, never in chat data.
+ * Embedding-model pricing fallback: $0.01 per 1M prompt tokens. Used
+ * only when the DB has no `model_configs` row pricing
+ * `EMBEDDING_MODEL_ID` — the central fallback is a chat-tier price and
+ * does not extend to embeddings. Recorded in the report only, never in
+ * chat data.
  */
 export const EMBEDDING_COST_PER_MILLION_USD = 0.01;
 
-export function computeEmbeddingCostUsd(promptTokens: number): number {
-  return round10((promptTokens * EMBEDDING_COST_PER_MILLION_USD) / 1_000_000);
-}
+// Resolved-pricing cache (process lifetime): one PK lookup per model per
+// process. Rates stay as fresh as the process start; a
+// `refreshModelConfigs` mid-process won't repoint them — acceptable for
+// report-only numbers.
+const callPricingCache = new Map<string, UsagePricing>();
+let embeddingPricePerMillionUsd: number | null = null;
 
 /**
- * Rewrite-model pricing: small-instruct estimates for the
- * detached decontextualising call — Mistral-7B-Instruct-v0.3 class
- * (input $0.05 / output $0.10 per 1M, conservative until the real
- * billing settles). Recorded in the report only, never in chat data.
+ * Per-call pricing from the shared seam: the DB `model_configs` row for
+ * the actual model being called, falling through to the central fallback
+ * pricing for models the billing table doesn't know.
  */
-export const REWRITE_COST_PER_MILLION_USD = { input: 0.05, output: 0.1 } as const;
-
-export function computeRewriteCostUsd(promptTokens: number, completionTokens: number): number {
-  return round10(
-    (promptTokens * REWRITE_COST_PER_MILLION_USD.input +
-      completionTokens * REWRITE_COST_PER_MILLION_USD.output) /
-      1_000_000,
-  );
+async function resolveCallPricing(modelId: string): Promise<UsagePricing> {
+  const cached = callPricingCache.get(modelId);
+  if (cached) return cached;
+  const row = await getModelConfig(modelId);
+  const fallback = getFallbackPricing();
+  const pricing: UsagePricing =
+    row !== null && row.inputPricePerMillion !== null && row.outputPricePerMillion !== null
+      ? {
+          input: row.inputPricePerMillion,
+          output: row.outputPricePerMillion,
+          cachedRateMultiplier: row.cachedRateMultiplier,
+        }
+      : { input: fallback.inputPerMillionUsd, output: fallback.outputPerMillionUsd };
+  callPricingCache.set(modelId, pricing);
+  return pricing;
 }
 
-/**
- * Trigger-judge pricing: small-instruct estimate for the
- * context-clarity verdict call — gemma-3-4b-it class (input $0.02 /
- * output $0.06 per 1M, conservative until the real billing settles).
- * Recorded in the report only, never in chat data.
- */
-export const JUDGE_COST_PER_MILLION_USD = { input: 0.02, output: 0.06 } as const;
+export async function computeEmbeddingCostUsd(promptTokens: number): Promise<number> {
+  if (embeddingPricePerMillionUsd === null) {
+    const row = await getModelConfig(EMBEDDING_MODEL_ID);
+    embeddingPricePerMillionUsd = row?.inputPricePerMillion ?? EMBEDDING_COST_PER_MILLION_USD;
+  }
+  return round10((promptTokens * embeddingPricePerMillionUsd) / 1_000_000);
+}
 
-export function computeJudgeCostUsd(promptTokens: number, completionTokens: number): number {
-  return round10(
-    (promptTokens * JUDGE_COST_PER_MILLION_USD.input +
-      completionTokens * JUDGE_COST_PER_MILLION_USD.output) /
-      1_000_000,
-  );
+export async function computeRewriteCostUsd(
+  promptTokens: number,
+  completionTokens: number,
+): Promise<number> {
+  const pricing = await resolveCallPricing(REWRITE_MODEL_ID);
+  return computeCostUsd({ pricing, promptTokens, completionTokens });
+}
+
+export async function computeJudgeCostUsd(
+  promptTokens: number,
+  completionTokens: number,
+): Promise<number> {
+  const pricing = await resolveCallPricing(JUDGE_MODEL_ID);
+  return computeCostUsd({ pricing, promptTokens, completionTokens });
 }
 
 interface CostProfileMessage {
@@ -59,7 +84,7 @@ interface CostProfileMessage {
 }
 
 /**
- * The cost series, defined at every message (spec 002): marginal cost is
+ * The cost series, defined at every message: marginal cost is
  * the assistant message's stored `cost_usd` (already per-message per chat
  * model, so mixed-model Threads are exact); missing usage rows (user
  * messages, failed exchanges) contribute 0; the Running total accumulates

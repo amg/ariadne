@@ -12,6 +12,8 @@ export interface Database {
   messages: MessagesTable;
   messageUsage: MessageUsageTable;
   messageEmbeddings: MessageEmbeddingsTable;
+  threadSegments: ThreadSegmentsTable;
+  segmentDriftLogs: SegmentDriftLogsTable;
   modelConfigs: ModelConfigsTable;
 }
 
@@ -55,17 +57,57 @@ export interface MessageUsageTable {
 }
 
 /**
- * Thread-health Turn embeddings keyed 1:1 to the Turn's assistant message
- *. The row on message N holds
- * "state of the conversation ending at this message", NOT "this message".
- * Provenance is `(modelId)` alone — mismatched rows are re-embedded,
- * never compared.
+ * Thread-health embeddings, keyed 1:1 to a Message. One table, two kinds:
+ * a *Turn* row keys to the Turn's assistant Message — "state of the
+ * conversation ending at this message", NOT "this message"; an *arrival*
+ * row keys to the Turn's user Message — the arriving signal judged before
+ * inference. Provenance is `(modelId)` alone — mismatched
+ * rows are re-embedded, never compared.
  */
 export interface MessageEmbeddingsTable {
   messageId: string; // UUID FK -> messages.id (1:1, PK, cascade delete)
   /** pgvector `vector(1024)`; Postgres text form `[0.1,-0.2,…]` (parsed in the query layer). */
   embedding: string;
   modelId: string;
+  /** Arrival rows only: the self-contained rewrite the embedding came from; null when none landed. */
+  expandedText: string | null;
+  /** Per-step spend recorded for audit — never written to `message_usage`. numeric(14,10) → string. */
+  embeddingCostUsd: string | null;
+  rewriteCostUsd: string | null;
+  judgeCostUsd: string | null;
+  createdAt: Generated<Date>;
+}
+
+/**
+ * The live arrival chain the gate builds as the conversation progresses —
+ * deliberately NOT the offline fold's segments. A segment's end is simply
+ * the next segment's start (chronology), so there is no end column.
+ */
+export interface ThreadSegmentsTable {
+  id: Generated<string>; // UUID
+  threadId: string; // UUID FK -> threads.id (cascade delete)
+  startMessageId: string; // UUID FK -> messages.id (first user Message of the segment)
+  createdAt: Generated<Date>;
+}
+
+/**
+ * One row per judged arrival in the live lane: the composite reading
+ * judged against the segment it entered, plus the µ/σ/z snapshot of that
+ * segment's ledger exactly as it stood BEFORE the arrival joined it. Muted
+ * strides keep a row with null numbers.
+ */
+export interface SegmentDriftLogsTable {
+  id: Generated<string>; // UUID
+  segmentId: string; // UUID FK -> thread_segments.id (segment the arrival was judged in)
+  messageId: string; // UUID FK -> messages.id (the user Message that arrived)
+  /** The composite reading judged; null on muted arrivals. */
+  driftP: number | null;
+  mu: number | null;
+  sigma: number | null;
+  zScore: number | null;
+  verdict: 'muted' | 'pass' | 'fire';
+  /** Which channel produced a fire; null otherwise. */
+  fireChannel: 'immediate' | 'slow' | null;
   createdAt: Generated<Date>;
 }
 
@@ -107,6 +149,24 @@ export type NewMessageEmbedding = {
   embedding: number[];
   modelId: string;
 };
+
+/** Insert/upsert input for an *arrival* embedding row (keyed to the user Message). */
+export type NewArrivalEmbedding = {
+  messageId: string;
+  embedding: number[];
+  modelId: string;
+  /** The self-contained rewrite the embedding came from; null when the raw message was embedded. */
+  expandedText?: string | null;
+  embeddingCostUsd?: number | null;
+  rewriteCostUsd?: number | null;
+  judgeCostUsd?: number | null;
+};
+
+export type ThreadSegment = Selectable<ThreadSegmentsTable>;
+export type NewThreadSegment = Insertable<ThreadSegmentsTable>;
+
+export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;
+export type NewSegmentDriftLog = Insertable<SegmentDriftLogsTable>;
 
 /**
  * Synthetic + provider finish states persisted on `message_usage`

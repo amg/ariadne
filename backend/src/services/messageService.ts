@@ -1,8 +1,13 @@
+import { env } from '@config/env';
 import type { Message, MessageFinishReason, MessageUsage } from '@db/types';
+import { deleteMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/deleteMessageEmbeddingsByMessageIds';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread';
 import { updateMessageContent } from '@queries/messages/updateMessageContent';
+import { deleteSegmentDriftLogsByMessageIds } from '@queries/segmentDriftLogs/deleteSegmentDriftLogsByMessageIds';
+import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
+import { deleteThreadSegmentsByStartMessageIds } from '@queries/threadSegments/deleteThreadSegmentsByStartMessageIds';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
 import { SYSTEM_PROMPT } from './aiService/config';
@@ -10,13 +15,28 @@ import { SYSTEM_PROMPT } from './aiService/config';
 /** Usage as served on the GET payload (identity columns implied by the row). */
 export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
 
+/**
+ * The live gate's two-channel verdict on a user arrival — the Conversation
+ * tab's purple bubble. null on non-user rows, on threads with no persisted
+ * verdict row yet, and while the feature flag is off (stored signals
+ * survive the off period; the surface just stops wearing them).
+ */
+export type DriftVerdictPayload = {
+  verdict: 'muted' | 'pass' | 'fire';
+  fireChannel: 'immediate' | 'slow' | null;
+} | null;
+
 export type MessageWithUsage = Message & {
   /** Inference telemetry for assistant messages; null until available. */
   usage: UsagePayload | null;
+  driftVerdict: DriftVerdictPayload;
 };
 
 /** Flattens the join aliases from `listMessagesByThread` into a nested row. */
-export function messageRowToMessageWithUsage(row: MessageWithUsageRow): MessageWithUsage {
+export function messageRowToMessageWithUsage(
+  row: MessageWithUsageRow,
+  driftVerdict: DriftVerdictPayload = null,
+): MessageWithUsage {
   const {
     usageModel: model,
     usageProviderId: providerId,
@@ -40,7 +60,7 @@ export function messageRowToMessageWithUsage(row: MessageWithUsageRow): MessageW
     costUsd === null ||
     finishReason === null
   ) {
-    return { ...message, usage: null };
+    return { ...message, usage: null, driftVerdict };
   }
   return {
     ...message,
@@ -58,6 +78,7 @@ export function messageRowToMessageWithUsage(row: MessageWithUsageRow): MessageW
       finishReason: finishReason as MessageFinishReason,
       latencyMs,
     },
+    driftVerdict,
   };
 }
 
@@ -121,6 +142,20 @@ export async function updateMessage({
     await deleteMessage({ messageId: row.id });
   }
 
+  // Live chain invalidation: the arrival signal for the edited row and
+  // everything after it came from the old reading. Arrival embeddings,
+  // drift logs and segment starts drop here; the chain re-fills itself the
+  // next time an arrival lands or the analysis surface reads it.
+  const invalidatedRows = rows.slice(lastUserIndex);
+  const invalidatedUserIds = invalidatedRows
+    .filter((row) => row.role === 'user')
+    .map((row) => row.id);
+  await deleteMessageEmbeddingsByMessageIds({
+    messageIds: invalidatedRows.map((row) => row.id),
+  });
+  await deleteSegmentDriftLogsByMessageIds({ messageIds: invalidatedUserIds });
+  await deleteThreadSegmentsByStartMessageIds({ startMessageIds: invalidatedUserIds });
+
   await updateMessageContent({ messageId, content: normalized });
   return ok(messageRowToMessageWithUsage({ ...lastUser, content: normalized }));
 }
@@ -137,17 +172,40 @@ export async function getMessages({
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return null;
   const rows = await listMessagesByThread({ threadId });
-  const messages = rows.map(messageRowToMessageWithUsage);
+
+  // Per-arrival verdict straight from the persisted live chain (no
+  // computation here). The flag suppresses the surface, never the store.
+  const driftLogs =
+    env.THREAD_ANALYSIS_MODE === 'off' ? [] : await listSegmentDriftLogsByThread({ threadId });
+  const verdictByMessageId = new Map(
+    driftLogs.map((log): [string, NonNullable<DriftVerdictPayload>] => [
+      log.messageId,
+      {
+        verdict: log.verdict as NonNullable<DriftVerdictPayload>['verdict'],
+        fireChannel: log.fireChannel as NonNullable<DriftVerdictPayload>['fireChannel'],
+      },
+    ]),
+  );
+
+  const messages = rows.map((row) =>
+    messageRowToMessageWithUsage(
+      row,
+      row.role === 'user' ? (verdictByMessageId.get(row.id) ?? null) : null,
+    ),
+  );
+
+  const seededSystemMessage: MessageWithUsage = {
+    id: `system-${threadId}`,
+    threadId,
+    role: 'system',
+    content: SYSTEM_PROMPT,
+    createdAt: thread.createdAt,
+    usage: null,
+    driftVerdict: null,
+  };
 
   if (messages.length === 0 || messages[0]?.role !== 'system') {
-    messages.unshift({
-      id: `system-${threadId}`,
-      threadId,
-      role: 'system',
-      content: SYSTEM_PROMPT,
-      createdAt: thread.createdAt,
-      usage: null,
-    });
+    messages.unshift(seededSystemMessage);
   }
 
   return messages;

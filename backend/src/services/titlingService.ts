@@ -83,8 +83,8 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
     },
     // The always-runnable shape: nothing to be rejected (no knobs) and no
     // output cap to race — thinking models fill any cap with reasoning and
-    // answer empty `content` at `finish_reason: length` (spec evidence, incl.
-    // caps of 400). Uncapped, the model finishes thinking and emits the
+    // answer empty `content` at `finish_reason: length` — observed even
+    // for caps of 400. Uncapped, the model finishes thinking and emits the
     // title; the shared time budget, not tokens, bounds this attempt.
     { ...base },
   ];

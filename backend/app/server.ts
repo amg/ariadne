@@ -5,10 +5,12 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { setupChatPostRoute } from '@routes/chat';
+import { setupConfigRoute } from '@routes/config';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
 import { setupModelsRefreshRoute } from '@routes/models';
 import {
+  setupThreadAnalysisRoute,
   setupThreadSummaryRoute,
   setupThreadsDeleteRoute,
   setupThreadsGenerateTitleRoute,
@@ -72,12 +74,14 @@ await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' }
 
 // Register routes
 setupHealthRoute(app);
+setupConfigRoute(app);
 setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
 setupThreadsGenerateTitleRoute(app);
 setupThreadsPatchRoute(app);
 setupThreadsDeleteRoute(app);
 setupThreadSummaryRoute(app);
+setupThreadAnalysisRoute(app);
 setupMessagesGetRoute(app);
 setupMessagesPatchRoute(app);
 setupModelsRefreshRoute(app);

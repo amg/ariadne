@@ -10,38 +10,32 @@ import type { EmbeddingModel, LanguageModel } from 'ai';
 export const SYSTEM_PROMPT = 'You are a helpful assistant.';
 
 /**
- * Embedding model for thread-health Turn embeddings.
- * A configuration constant by decision — no env toggle (env-sync gate
- * untouched).
+ * Embedding model for thread-health Turn embeddings. A configuration
+ * constant — no env toggle.
  */
 export const EMBEDDING_MODEL_ID = 'BAAI/bge-m3';
 
 /**
- * Expanded-signal rewrite model: the detached decontext-
- * ualising rewriter that turns an ambiguous incoming user message into a
- * self-contained one before its Prospective Turn embeds. A small, cheap
- * instruct model — the task is bounded rephrasing, never answering.
- * Probed 2026-09: Mistral-7B-v0.3 resolves ellipsis reliably (Qwen2.5-7B
- * answered empty, Gemma-2-9B kept the anaphora, Llama-3.1-8B absent from
- * the provider). A configuration constant by decision — no env toggle.
+ * Expanded-signal rewrite model: the detached decontextualising rewriter
+ * that turns an ambiguous incoming user message into a self-contained one
+ * before its Prospective Turn embeds. Small, cheap instruct capacity is
+ * enough — the task is bounded rephrasing, never answering. Tracks the
+ * chat model; kept as its own constant — no env toggle — so the rewriter
+ * can be repointed independently when a reliable small model appears.
  */
-export const REWRITE_MODEL_ID = 'mistralai/Mistral-7B-Instruct-v0.3';
+export const REWRITE_MODEL_ID = 'Qwen/Qwen3.5-9B';
 
 /**
  * Expansion trigger judge model: the tiny classifier that decides whether
  * a short, non-heuristic incoming message dangles a referent into the
  * prior Turn before a rewrite is even attempted. Classification-only
- * (one verdict label out, nothing else), so the cheapest small instruct
- * model on the provider is enough.
- * Probed 2026-09 via /v1/openai/models: no sub-4B text instruct on
- * DeepInfra anymore (no Qwen2.5 0.5B–3B, no SmolLM); gemma-3-4b-it is
- * the smallest fit. Caveat observed on first corpus run: DeepInfra hosts
- * it on-demand (cold starts up to ~15s, "Model busy" while loading), so
- * the judge call carries a load-tolerant timeout — see `judge.ts`. A configuration constant by decision — no env
- * toggle (same stance as the rewriter); a future local endpoint can host
- * this model behind the same OpenAI-compatible seam.
+ * (one verdict label out, nothing else), so cheap small-model capacity is
+ * enough. Small models load on demand (cold starts up to ~15s), so the
+ * judge call carries a load-tolerant timeout. Tracks the chat model; kept
+ * as its own constant — no env toggle — so the judge can be repointed to
+ * a cheap small model independently.
  */
-export const JUDGE_MODEL_ID = 'google/gemma-3-4b-it';
+export const JUDGE_MODEL_ID = 'Qwen/Qwen3.5-9B';
 
 export const NOT_CONFIGURED_MESSAGE =
   'Neither MOCK_AI_BASE_URL (mock) nor DEEPINFRA_API_KEY (real provider) is set.';

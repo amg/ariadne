@@ -5,7 +5,9 @@ import ThreadSidebar from '@/components/layout/ThreadSidebar';
 import {
   TITLE_GENERATING_SENTINEL,
   type Thread,
+  type ThreadAnalysisMode,
   type ThreadSummary,
+  fetchConfig,
   fetchThreadSummary,
   fetchThreads,
   refreshModelPricing,
@@ -23,12 +25,22 @@ import {
 import { toast } from 'sonner';
 
 export async function loader() {
-  return { threads: await fetchThreads() };
+  // Config failure degrades quietly: treat the analysis surface as on.
+  let threadAnalysisMode: ThreadAnalysisMode = 'heuristic';
+  try {
+    threadAnalysisMode = (await fetchConfig()).threadAnalysisMode;
+  } catch {
+    // Surface falls back on; the backend still enforces its own flag.
+  }
+  return { threads: await fetchThreads(), threadAnalysisMode };
 }
 
 // Framework entry for the app chrome: reads route state, delegates to the pure shell.
 export default function AppLayout() {
-  const { threads } = useRouteLoaderData('root') as { threads: Thread[] };
+  const { threads, threadAnalysisMode } = useRouteLoaderData('root') as {
+    threads: Thread[];
+    threadAnalysisMode: ThreadAnalysisMode;
+  };
   const match = useMatch('/threads/:threadId');
   const location = useLocation();
   const navigate = useNavigate();
@@ -134,13 +146,28 @@ export default function AppLayout() {
     return result;
   };
 
+  // Refresh thread summary (cost, tokens, etc.) - called after each message
+  const handleRefreshThreadSummary = async () => {
+    if (!currentThreadId) return;
+    try {
+      const summary = await fetchThreadSummary(currentThreadId);
+      setThreadSummary(summary);
+    } catch (err) {
+      console.error('Failed to refresh thread summary:', err);
+    }
+  };
+
   return (
     <AppShell
       sidebar={
         <ThreadSidebar
           threads={visibleThreads}
           activeThreadId={match?.params.threadId ?? null}
-          onSelectThread={(id) => navigate(`/threads/${id}`)}
+          onSelectThread={(id) =>
+            // Preserve the query string (e.g. ?mode=analyze) so analysis
+            // viewing carries across thread switches.
+            navigate({ pathname: `/threads/${id}`, search: location.search, hash: location.hash })
+          }
           onNewChat={() => createFetcher.submit(null, { method: 'post', action: '/threads/new' })}
           onRename={(id, title) =>
             renameFetcher.submit(
@@ -180,12 +207,14 @@ export default function AppLayout() {
       <Outlet
         key={match?.params.threadId ?? 'empty'}
         context={{
+          analysisMode: threadAnalysisMode,
           generateTitle: (id: string) => {
             generateTitleFetcher.submit(
               { threadId: id },
               { method: 'post', action: `/threads/${id}/generate-title` },
             );
           },
+          refreshThreadSummary: handleRefreshThreadSummary,
         }}
       />
     </AppShell>

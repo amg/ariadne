@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type ChatStreamHandle, retryLastExchange, submitChat } from '@services/aiService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
@@ -44,8 +45,15 @@ function sendExchangeError(
     reply.code(409).send({ error: 'The thread has no exchange to retry.' });
     return;
   }
+  // Failure-swap classes the UI can act on (vs the generic 500).
   if (result.code === 'provider_not_configured') {
     reply.code(503).send({ error: result.message ?? 'AI provider is not configured.' });
+    return;
+  }
+  if (result.code === 'embed_failed') {
+    reply
+      .code(502)
+      .send({ error: result.message ?? 'The thread analysis pipeline failed to embed.' });
     return;
   }
   reply.code(500).send({ error: 'Failed to start the AI exchange.' });
@@ -65,6 +73,22 @@ function createStreamResponse(request: FastifyRequest, handle: ChatStreamHandle)
 
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
+      // The live gate's verdict rides the stream as the FIRST event: the
+      // arrival was judged before inference ran, so the UI tints the user
+      // bubble before the reply starts growing. Transient — the settled
+      // verdict lives on the persisted signal, not the message parts.
+      if (handle.threadVerdict) {
+        writer.write({
+          type: 'data-thread-verdict',
+          id: randomUUID(),
+          data: {
+            messageId: handle.threadVerdict.messageId,
+            verdict: handle.threadVerdict.verdict,
+            fireChannel: handle.threadVerdict.fireChannel,
+          },
+          transient: true,
+        });
+      }
       writer.merge(handle.stream);
     },
     onError: () => 'An error occurred while generating the reply.',

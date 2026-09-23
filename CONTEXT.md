@@ -108,10 +108,20 @@ _Avoid_: retrospective, backfill, reanalysis, audit
 **Prospective Turn**:
 An incoming user Message scored as a Turn *before* inference — its text
 embedded as a user-only Turn block and fed through the Drift gate exactly
-as a completed Turn would be. Exists only inside Replay (pretend
-replay); nothing about it is persisted, and it never changes what
-the assistant actually receives.
+as a completed Turn would be. The live lane persists it as an *arrival
+row* keyed to the user Message (Turn rows key to the assistant Message);
+nothing else about it enters the chat.
 _Avoid_: draft turn, pending message, preview, hypothesis
+
+**Live chain**:
+The live gate's persisted arrival history: one record per judged
+arrival (the reading, the segment-ledger snapshot taken before the
+verdict, the verdict, the firing channel) and one segment per live
+segment. The chain is the conversation's truth about the live lane —
+the walk is fill-forward and never re-embeds or re-judges a complete
+chain; a thread predating the feature or a tail an edit shredded is
+refilled by the same walk resuming where the chain stops.
+_Avoid_: verdict history, ledger table, live audit
 
 **Expanded signal / composite verdict signal**:
 The arrival-time verdict signal of the live gate after the

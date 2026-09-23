@@ -17,7 +17,8 @@
     "audit:boundaries": "depcruise frontend/src backend/src",
     "audit:env": "node scripts/checks/env-sync.mjs",
     "audit:docker": "node scripts/checks/docker-lint.mjs",
-    "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",
+    "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:comments && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",
+    "audit:comments": "node scripts/checks/comment-hygiene.mjs",
     "gate": "npm run checks && npm run test && npm run build:frontend",
     "prepare": "lefthook install"
   },

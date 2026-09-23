@@ -3,6 +3,7 @@ import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
+import { runLiveGate } from '@services/threadAnalysis';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, err, ok } from '../../types/result';
@@ -20,9 +21,14 @@ import { ChatExchange, type ChatOutcome } from './exchange';
  *   1. verify thread ownership,
  *   2. resolve the user turn (insert it on `submitChat`, reuse the persisted
  *      last user row on `retryLastExchange`),
- *   3. `streamText` over the full thread history, with inter-token idle
+ *   3. run the live thread-health gate on the arriving user Message
+ *      (`submitChat` only): expansion → embed → the shared two-channel
+ *      verdict → persist, awaited before inference; a pipeline failure
+ *      fails the whole exchange. `regenerate`/`resume-stream` carry no new
+ *      arrival and skip it;
+ *   4. `streamText` over the full thread history, with inter-token idle
  *      timeout watched by the exchange,
- *   4. `ChatExchange` persists text + usage as the stream settles.
+ *   5. `ChatExchange` persists text + usage as the stream settles.
  */
 
 export type ChatStreamHandle = {
@@ -33,6 +39,16 @@ export type ChatStreamHandle = {
   outcome: Promise<Result<ChatOutcome>>;
   /** Aborts the provider stream from the outside (user stop). */
   abort: () => void;
+  /**
+   * The live gate's verdict on the exchange's arriving user Message, for
+   * the advisory bubble signal; null on retries (no new arrival) and when
+   * the feature flag is off.
+   */
+  threadVerdict?: {
+    messageId: string;
+    verdict: 'muted' | 'pass' | 'fire';
+    fireChannel: 'immediate' | 'slow' | null;
+  };
 };
 
 type SubmitChatProps = {
@@ -157,7 +173,23 @@ export async function submitChat({
 
   const precedingRows = await listMessagesByThread({ threadId });
   const userMessage = await insertMessage({ threadId, role: 'user', content });
-  return ok(await startExchange({ userId, threadId, precedingRows, userMessage }));
+
+  // The live gate judges the arriving message before inference: the
+  // pipeline persists every step as it completes, so a failure leaves the
+  // user row in place (regenerate retries the exchange) and a later
+  // arrival backfills whatever this run did not finish.
+  const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
+  if (gate.type === 'error') return gate;
+
+  const handle = await startExchange({ userId, threadId, precedingRows, userMessage });
+  if (gate.data.verdict !== null && gate.data.messageId !== null) {
+    handle.threadVerdict = {
+      messageId: gate.data.messageId,
+      verdict: gate.data.verdict,
+      fireChannel: gate.data.fireChannel,
+    };
+  }
+  return ok(handle);
 }
 
 /**

@@ -8,7 +8,7 @@ import {
 } from './config';
 
 /**
- * The embed export of the provider boundary (thread-health spec 002).
+ * The embed export of the provider boundary.
  * Built on the DeepInfra provider's embedding model, inheriting the
  * established provider config resolution (mock switch, configured check)
  * exactly like the chat path — callers never hand-roll provider config.

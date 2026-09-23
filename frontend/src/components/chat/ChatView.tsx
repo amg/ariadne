@@ -2,7 +2,7 @@ import { MessageMetaRow } from '@/components/metadata';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Message, MessageUsage } from '@/services/api';
+import type { Message, MessageDriftVerdict, MessageUsage } from '@/services/api';
 import { chatStatusText } from '@/services/utils';
 import {
   ArrowDown,
@@ -26,6 +26,8 @@ export interface DisplayRow {
   streaming: boolean;
   /** Reasoning content (thinking) if available */
   reasoning?: string | null;
+  /** Live-gate verdict on user arrivals — the advisory bubble signal. */
+  verdict?: MessageDriftVerdict | null;
 }
 
 type Props = {
@@ -83,6 +85,7 @@ function UserMessageRow({
   const [draft, setDraft] = useState<string | null>(null);
   const isEditing = draft !== null;
   const showEdit = isLastUser && !busy && !isEditing;
+  const fired = row.verdict?.verdict === 'fire';
 
   return (
     <div className="flex min-w-0 max-w-[85%] flex-col self-end md:max-w-[75%]">
@@ -97,7 +100,16 @@ function UserMessageRow({
           }}
         />
       ) : (
-        <div className="max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-primary p-3 text-primary-foreground">
+        <div
+          className={
+            fired
+              ? 'max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-purple-600 p-3 text-purple-50'
+              : 'max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-primary p-3 text-primary-foreground'
+          }
+          title={
+            fired ? 'Topic drift: the thread-health gate judged this prompt a departure' : undefined
+          }
+        >
           {message.content}
         </div>
       )}
@@ -334,9 +346,15 @@ export default function ChatView({
   const [input, setInput] = useState('');
   const busy = status === 'submitted' || status === 'streaming';
 
-  // While waiting for the reply (submitted) there is no assistant row yet
-  // in useChat state — append a thinking bubble so loading is visible.
-  const needsPendingBubble = busy && !rows.some((row) => row.streaming);
+  // Always show thinking bubble during "submitted" phase (while drift evaluation runs).
+  // During "streaming", only show if no assistant row with content exists yet.
+  const hasVisibleAssistant = rows.some(
+    (row) =>
+      row.streaming &&
+      (row.message.content.trim().length > 0 || (row.reasoning && row.reasoning.trim().length > 0)),
+  );
+  const needsPendingBubble =
+    status === 'submitted' || (status === 'streaming' && !hasVisibleAssistant);
 
   // The last user prompt is the only editable row — even when a (possibly
   // failed) assistant reply follows it.
@@ -365,8 +383,13 @@ export default function ChatView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: rows is the trigger, see above
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (viewport && followBottom.current) viewport.scrollTop = viewport.scrollHeight;
-  }, [rows]);
+    if (viewport && followBottom.current) {
+      // Use RAF to ensure DOM has updated before scrolling
+      requestAnimationFrame(() => {
+        viewport.scrollTop = viewport.scrollHeight;
+      });
+    }
+  }, [rows, needsPendingBubble]);
 
   // Chase growth that happens without a rows change (code blocks, images).
   useEffect(() => {

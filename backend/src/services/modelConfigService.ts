@@ -208,6 +208,18 @@ export async function refreshModelConfigs(): Promise<{
 }
 
 /**
+ * The pricing tier every unknown model falls back to. Exported so the
+ * analyzer's call-specific costs (threadAnalysis/cost.ts) can share the
+ * central fallback instead of keeping a private pricing table.
+ */
+export function getFallbackPricing(): { inputPerMillionUsd: number; outputPerMillionUsd: number } {
+  return {
+    inputPerMillionUsd: FALLBACK_CONFIG.inputPricePerMillion ?? 0,
+    outputPerMillionUsd: FALLBACK_CONFIG.outputPricePerMillion ?? 0,
+  };
+}
+
+/**
  * Gets config for a specific model.
  * Falls back to hardcoded config if not in DB.
  */

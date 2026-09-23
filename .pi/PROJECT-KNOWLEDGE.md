@@ -2,8 +2,11 @@
 
 A dockerized, single-user chatbot with streaming replies and cost
 observability plus a planned cross-session factual memory (ADR 0003 is
-accepted, its pipeline unimplemented). It also carries a standalone thread
-health analyzer (topic-drift detection + live gate) decided by ADR 0006.
+accepted, its pipeline unimplemented). It also carries a thread-health
+analyzer for topic-drift detection (ADR 0006); its live gate now runs
+with every conversation — arrivals are expanded, embedded, judged, and
+persisted — with the reading surfaced under Conversation/Analysis tabs
+(`?mode=analyze`), behind `THREAD_ANALYSIS_MODE`.
 
 ## Start Here
 

@@ -109,7 +109,7 @@ export async function analyzeThread(
       modelId: EMBEDDING_MODEL_ID,
     });
     embeddingCostUsd = round10(
-      embeddingCostUsd + computeEmbeddingCostUsd(embedded.data.promptTokens),
+      embeddingCostUsd + (await computeEmbeddingCostUsd(embedded.data.promptTokens)),
     );
   }
 
@@ -273,7 +273,7 @@ async function attemptRewrite(candidate: ExpansionCandidate): Promise<RewriteAtt
   if (rewritten.type === 'error') {
     return { kind: 'skip_rewrite_failed', costUsd: 0 };
   }
-  const costUsd = computeRewriteCostUsd(
+  const costUsd = await computeRewriteCostUsd(
     rewritten.data.usage.promptTokens,
     rewritten.data.usage.completionTokens,
   );
@@ -320,7 +320,10 @@ async function consultJudgeBackstop(
     const verdict: ContextDependenceVerdict = judged.data.verdict;
     judgeCostUsd = round10(
       judgeCostUsd +
-        computeJudgeCostUsd(judged.data.usage.promptTokens, judged.data.usage.completionTokens),
+        (await computeJudgeCostUsd(
+          judged.data.usage.promptTokens,
+          judged.data.usage.completionTokens,
+        )),
     );
     if (verdict === 'context-dependent') {
       addedCandidates.push(backstop);
@@ -368,7 +371,7 @@ async function embedRewriteCandidates(
     expandedVectorByTurn.set(candidate.turnNumber, embedded.data.embedding);
     expandedTextByTurn.set(candidate.turnNumber, attempted.text);
     prospectiveCostUsd = round10(
-      prospectiveCostUsd + computeEmbeddingCostUsd(embedded.data.promptTokens),
+      prospectiveCostUsd + (await computeEmbeddingCostUsd(embedded.data.promptTokens)),
     );
   }
   return ok({ rewriteCostUsd, prospectiveCostUsd });
@@ -403,7 +406,7 @@ async function buildGateReplaySection({
     if (embedded.type === 'error') return embedded;
     prospectiveVectorByTurn.set(block.turnNumber, embedded.data.embedding);
     prospectiveEmbedCostUsd = round10(
-      prospectiveEmbedCostUsd + computeEmbeddingCostUsd(embedded.data.promptTokens),
+      prospectiveEmbedCostUsd + (await computeEmbeddingCostUsd(embedded.data.promptTokens)),
     );
   }
 

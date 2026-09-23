@@ -31,16 +31,15 @@ import {
 
 /**
  * Real e2e against the built-in mock inference server: the analysis seam
- * is verified through `analyzeThread` only — returned report data,
- * persisted rows, and errors. No DB mocking. Scoring concepts:
- * Turn embeddings, Segment drift against the rolling Gravity
- * point, single-threshold Boundary turns, demoted charted Anchor.
+ * is exercised through `analyzeThread` only — returned report data,
+ * persisted rows, and errors. No DB mocking.
  */
 
 // The analyzer operates under the single-user placeholder (like every route).
 const USER_ID = DEFAULT_USER_ID;
 
-// Embedding price from the spec (research-doc fallback constant).
+// Embedding price: $0.01 per 1M prompt tokens, used when the DB pricing
+// table has no row for the embedding model.
 const EMBEDDING_COST_PER_MILLION_USD = 0.01;
 
 function expectedEmbeddingCostUsd(text: string): number {

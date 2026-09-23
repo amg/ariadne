@@ -80,10 +80,12 @@ the conversation is drifting into a new topic, and may pause the turn
 to offer a choice.
 
 - **The arriving message is scored as a Prospective Turn** — embedded
-  exactly like a Turn's user half (the assistant reply doesn't exist
-  yet), transiently; Prospective Turn embeddings are not persisted.
+  like the user half of a Turn (the assistant reply doesn't exist
+  yet) and persisted as an *arrival row* keyed to the user Message, in
+  the same `message_embeddings` table the offline fold uses, with the
+  expanded text the reading came from and the per-step spend alongside.
   Solves: restriction 1 — the only text available at arrival is the
-  user message.
+  user message — while never paying twice for the same reading.
 - **Context-dependent messages are rewritten before embedding.** When
   an incoming message reads as a follow-up to what came before, a
   small model rewrites it into self-contained form against the
@@ -119,6 +121,26 @@ to offer a choice.
   material. Solves: the detection is fallible, so it must not
   silently decide for the user, and its mistakes need to stay visible
   to improve it.
+- **The live chain persists as it runs and never re-reads itself.**
+  Each judged arrival logs one row — the reading, the ledger snapshot,
+  the verdict, the channel — and a fire burns a new segment row. The
+  walk is fill-forward, so a thread predating the feature and the tail
+  an edit shredded are both refilled by the same walk resuming where
+  the chain stopped; a replay over a complete chain skips every
+  provider call. Solves: the online signals survive restarts, retries,
+  and flips of the flag.
+- **One feature flag sets the expansion tier and the surface.**
+  `THREAD_ANALYSIS_MODE` is `off` | `heuristic` | `always`: the two
+  live tiers decide which arrivals get expanded against the previous
+  context; `off` skips the pipeline and hides the Analysis surface,
+  but stored signals survive an `off` period and reappear when it
+  flips back. Solves: shipping the lane behind a dial without losing
+  its history to a cosmetic setting.
+- **The verdict rides the first stream event of the reply.** An
+  arrival judged fire tints its own bubble before that reply starts
+  growing, because the verdict is written into the response stream
+  before the exchange stream merges in. Solves: the reader sees the
+  drift flag on the message that drifted, not one turn later.
 
 The math — formulas, parameters, numerical guardrails — lives in
 `docs/ideas/THREAD-DRIFT-MATH.md`.
@@ -153,11 +175,13 @@ The math — formulas, parameters, numerical guardrails — lives in
   offline analysis (calibration data, overridable per run), a live
   verdict judged against the thread's own state message by message,
   and a silent accumulator behind it for the slow crawl.
-- The live gate costs one transient embed per arriving message — a
-  small-model rewrite only for follow-ups — and persists nothing, so
-  transient readings cannot leak into chat data. The storage table
-  reads as per-message at first glance; this ADR is referenced from
-  the migration to guard against "fixing" that.
+- The live gate costs one embed per arriving message — a small-model
+  rewrite only for follow-ups under `heuristic` — and its signals
+  persist alongside it, so arrival readings can never leak into the
+  fold's data. Arrival embeddings read as per-message at first glance
+  (Turn rows key to the assistant Message, arrival rows key to the user
+  Message), but the live chain never touches `message_usage`: per-step
+  spend rides the arrival row.
 - Re-runs with different numbers reclassify threads for free — all
   embeddings are stored.
 - Limits, each with a noted repair path (FUTURE-IMPROVEMENTS),

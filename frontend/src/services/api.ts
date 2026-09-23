@@ -7,6 +7,81 @@ export type MessageFinishReason =
   | 'timeout'
   | 'interrupted';
 
+/** The deployment feature-flag surfaces the chrome is driven from. */
+export interface AppConfig {
+  /** off|heuristic|always — `off` hides the Analysis tab and bubble tints. */
+  threadAnalysisMode: 'off' | 'heuristic' | 'always';
+}
+
+export async function fetchConfig(): Promise<AppConfig> {
+  const res = await fetch('/api/config');
+  if (!res.ok) throw new Error(`Failed to fetch config: ${res.statusText}`);
+  return res.json();
+}
+
+export type ThreadAnalysisMode = AppConfig['threadAnalysisMode'];
+
+/** Admin-level thread health flag (mirrors backend `THREAD_ANALYSIS_MODE`). */
+export type DriftVerdict = 'muted' | 'pass' | 'fire';
+export type DriftFireChannel = 'immediate' | 'slow';
+
+/** The live gate's verdict on one arriving user message. */
+export interface MessageDriftVerdict {
+  verdict: DriftVerdict;
+  fireChannel: DriftFireChannel | null;
+}
+
+// ── Analysis endpoint: the thread's live reading from persisted signals ──
+
+export interface LiveAnalysisSegment {
+  index: number;
+  segmentId: string;
+  startMessageId: string;
+  label: string;
+  arrivalCount: number;
+  closed: boolean;
+  createdAt: string;
+}
+
+export interface LiveAnalysisPoint {
+  messageId: string;
+  turnNumber: number;
+  segmentIndex: number;
+  verdict: DriftVerdict;
+  fireChannel: DriftFireChannel | null;
+  driftP: number | null;
+  mu: number | null;
+  sigma: number | null;
+  zScore: number | null;
+  immediateThreshold: number | null;
+  expandedText: string | null;
+}
+
+export interface LiveAnalysisView {
+  threadId: string;
+  mode: ThreadAnalysisMode;
+  params: {
+    segmentThreshold: number;
+    immediateK: number;
+    sigmaFloor: number;
+    lambda: number;
+    delta: number;
+    minSamples: number;
+    coldStartTurns: number;
+    embeddingModelId: string;
+  };
+  segments: LiveAnalysisSegment[];
+  points: LiveAnalysisPoint[];
+  /** True while some user arrivals have no verdict row yet. */
+  pending: boolean;
+}
+
+export async function fetchThreadAnalysis(threadId: string): Promise<LiveAnalysisView> {
+  const res = await fetch(`/api/threads/${threadId}/analysis`);
+  if (!res.ok) throw new Error(`Failed to fetch thread analysis: ${res.statusText}`);
+  return res.json();
+}
+
 export interface Thread {
   id: string;
   title: string | null;
@@ -41,6 +116,8 @@ export interface Message {
   content: string;
   createdAt: string;
   usage: MessageUsage | null;
+  /** Live-gate verdict on user arrivals; null elsewhere and when off. */
+  driftVerdict?: MessageDriftVerdict | null;
 }
 
 /**

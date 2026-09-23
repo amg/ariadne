@@ -73,12 +73,9 @@ Follow-up: what's the record for each?
 Rewrite: What's the weight lifting record for a woman and a man?`;
 
 /** Own time budget so a stalled rewrite never drags the analysis out.
- * Generous on purpose: DeepInfra serves the rewriter on-demand and a
- * cold start can take up to ~15s — aborting a loading instance kills
- * the warm-up in flight, and that is exactly how a 4s budget starved
- * the rewrite tier into raw fallbacks. The output is a short rephrase,
- * so once loaded the timeout is bounded by model load, not tokens. */
-const REWRITE_TIMEOUT_MS = 20000;
+ * The output is a short rephrase, so once loaded the timeout is bounded
+ *  by model load, not tokens. */
+const REWRITE_TIMEOUT_MS = 5000;
 
 /** The rewrite is a short rephrase; bound output so nothing rambles. */
 const REWRITE_MAX_OUTPUT_TOKENS = 120;

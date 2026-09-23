@@ -34,6 +34,9 @@ export type EnvConfig = {
   AI_TITLING_TIMEOUT_MS: number | undefined;
   TITLING_MODEL: string | undefined;
 
+  // Thread analysis (live drift gate)
+  THREAD_ANALYSIS_MODE: 'off' | 'heuristic' | 'always';
+
   // CORS
   CORS_ORIGINS: string | undefined;
 
@@ -71,6 +74,9 @@ const defaultConfig: Omit<EnvConfig, 'NODE_ENV'> = {
   AI_TITLING_TIMEOUT_MS: undefined,
   TITLING_MODEL: undefined,
 
+  // Thread analysis (live drift gate)
+  THREAD_ANALYSIS_MODE: 'heuristic',
+
   // CORS
   CORS_ORIGINS: undefined,
 
@@ -93,13 +99,21 @@ function getNumber(key: string, fallback: number): number {
   return Number.parseInt(process.env[key] ?? String(fallback), 10);
 }
 
-/**
- * Helper to get a boolean from env with fallback.
- */
 function getBoolean(key: string, fallback: boolean): boolean {
   const value = process.env[key];
   if (value === undefined) return fallback;
   return value === 'true';
+}
+
+/** Thread-analysis feature flag values; anything else falls back. */
+type ThreadAnalysisMode = 'off' | 'heuristic' | 'always';
+const THREAD_ANALYSIS_MODES: readonly ThreadAnalysisMode[] = ['off', 'heuristic', 'always'];
+
+function getThreadAnalysisMode(key: string, fallback: ThreadAnalysisMode): ThreadAnalysisMode {
+  const value = process.env[key];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  return THREAD_ANALYSIS_MODES.find((mode) => mode === normalized) ?? fallback;
 }
 
 /**
@@ -168,6 +182,14 @@ export const env: EnvConfig = {
   },
   get TITLING_MODEL() {
     return process.env.TITLING_MODEL;
+  },
+
+  // Thread analysis (live drift gate):
+  // off = surface gone (pipeline skipped, Analysis tab hidden, bubbles
+  // untinted); heuristic/always = live lane runs with that expansion tier.
+  // Stored signals survive an `off` period and reappear when flipped back.
+  get THREAD_ANALYSIS_MODE() {
+    return getThreadAnalysisMode('THREAD_ANALYSIS_MODE', 'heuristic');
   },
 
   // CORS
