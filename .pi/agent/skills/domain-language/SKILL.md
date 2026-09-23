@@ -5,7 +5,7 @@ description: Enforces linguistic philosophy, naming conventions, and domain voca
 
 # Domain Language & Naming Philosophy
 
-This skill defines the universal language standards for naming and communication. It acts as the central reference for code quality (naming constraints) and docs quality (commenting and documentation vocabulary).
+This skill defines the universal language standards for naming and communication. 
 
 ## 1. Simplicity & Directness
 *   **Avoid Dense or Academic Terms**: Use simple, widely understood terms over fuzzy, academic, or complex synonyms.
@@ -28,6 +28,3 @@ Name functions and variables for exactly what they represent in the domain or th
 *   **Attach Context to Stats/Math**: When dealing with statistics, math concepts, or generic data structures, attach them directly to the domain entity they describe.
     *   *Generic Example*: Use `UserSessionStats` instead of just `RollingStats` or `Baseline` to clarify exactly *what* is being measured.
 
-## 4. Documentation Language
-*   **Assumed Vocabulary**: Use the project's domain vocabulary (e.g. from its `CONTEXT.md`) naturally as the assumed language of the codebase. Do not explicitly cite markdown files to define or justify terms.
-*   **Interface Over Mechanics**: Comments should explain *what* the interface does, completely free from internal mechanics, specific algorithm names, or underlying dependencies.

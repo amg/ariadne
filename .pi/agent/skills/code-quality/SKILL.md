@@ -10,7 +10,7 @@ description: Defines code quality standards, complexity limits, testing governan
 *   **Complexity**: Limit branching and function scope.
     - *Business logic*: Strictly limit `if`/`else`/`switch`. Use guard clauses for early returns.
     - *UI components*: Explicit `switch` cases for visual variants and divergent markup. Object maps only for simple scaling attributes (e.g., `size`).
-*   **Language & Naming**: Naming must strictly follow the `domain-language` skill. Name things by outcome and result, not by mechanism. Be explicit about nullability.
+*   **Naming**: Name things by outcome and result, not by mechanism. Be explicit about nullability.
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 
 ## 2. Testing Governance
