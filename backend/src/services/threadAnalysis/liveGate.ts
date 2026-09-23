@@ -149,13 +149,10 @@ async function expandArrival(input: {
 }
 
 /**
- * The judge backstop for `heuristic` mode: the short message the anaphora
- * trigger let through asks the small classifier whether it dangles a
- * referent into the prior Turn. CONTEXT_DEPENDENT joins the rewrite list;
- * every other outcome fails open to the raw fast path. Verdicts only ADD
- * rewrite candidates, never vetoes.
+ * Asks a small classifier whether a message only makes sense with the
+ * prior Turn in view. Fails open: any error returns `rewrite: false`.
  */
-async function consultBackstop(input: {
+async function needsRewrite(input: {
   incomingText: string;
   contextUserText: string;
   contextAssistantText: string;
@@ -207,12 +204,13 @@ async function decideExpansion(input: {
   const trimmed = input.incomingText.trim();
   const shortEnough = trimmed.length > 0 && trimmed.length <= EXPANSION_MAX_TRIGGER_LENGTH;
   if (input.mode !== 'heuristic' || !shortEnough) return rawOutcome;
-  const backstop = await consultBackstop(context);
-  if (!backstop.rewrite) {
-    return { ...rawOutcome, judgeCostUsd: backstop.judgeCostUsd };
+  // Second chance for short messages the heuristic missed.
+  const checked = await needsRewrite(context);
+  if (!checked.rewrite) {
+    return { ...rawOutcome, judgeCostUsd: checked.judgeCostUsd };
   }
   const expanded = await expandArrival(context);
-  return { ...expanded, judgeCostUsd: backstop.judgeCostUsd };
+  return { ...expanded, judgeCostUsd: checked.judgeCostUsd };
 }
 
 /**
