@@ -1,7 +1,6 @@
 import { MessageMetaRow } from '@/components/metadata';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Message, MessageDriftVerdict, MessageUsage } from '@/services/api';
 import { chatStatusText } from '@/services/utils';
 import {
@@ -280,7 +279,7 @@ function ReasoningBlock({ reasoning, isThinking }: { reasoning: string; isThinki
         </span>
       </button>
       {isExpanded && (
-        <div className="max-h-96 overflow-y-auto border-t border-border bg-muted/20 px-3 py-3 text-sm italic text-muted-foreground">
+        <div className="scrollbar-slim max-h-96 overflow-y-auto border-t border-border bg-muted/20 px-3 py-3 text-sm italic text-muted-foreground">
           <MarkdownContent content={reasoning} streaming={false} />
         </div>
       )}
@@ -422,8 +421,8 @@ export default function ChatView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative mx-auto flex h-full w-full min-h-0 min-w-0 max-w-[900px] flex-col">
-        <ScrollArea viewportRef={viewportRef} className="min-h-0 flex-1 p-4">
-          <div className="flex flex-col gap-4">
+        <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-4 py-4">
             {rows.map((row, index) => (
               <MessageRow
                 key={row.id}
@@ -450,7 +449,7 @@ export default function ChatView({
               </div>
             ) : null}
           </div>
-        </ScrollArea>
+        </div>
         {rows.length > 0 && !atBottom ? (
           <button
             type="button"

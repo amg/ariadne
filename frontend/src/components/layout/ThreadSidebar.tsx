@@ -74,7 +74,7 @@ export default function ThreadSidebar({
           <Plus className="h-4 w-4" />
         </Button>
       </div>
-      <div className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto">
+      <div className="scrollbar-slim mt-2 flex flex-1 flex-col gap-1 overflow-y-auto">
         {threads.map((thread) => {
           const isActive = thread.id === activeThreadId;
           const isEditing = thread.id === editingId;

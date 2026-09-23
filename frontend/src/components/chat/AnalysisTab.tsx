@@ -579,7 +579,7 @@ export default function AnalysisTab({
   const fires = view.points.filter((point) => point.verdict === 'fire').length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="scrollbar-slim flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full min-w-0 max-w-[900px] py-4 flex-col gap-6">
         <header className="flex flex-col gap-1">
           <h2 className="text-sm font-medium">Live reading</h2>
