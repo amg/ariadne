@@ -272,6 +272,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       ]),
       foldBoundaryTurns: new Set(),
       anchorVector: flat,
+      userMessageIdByTurn: new Map(turnNumbers.map((t) => [t, 'msg'])),
       userMessageIndexByTurn: new Map(turnNumbers.map((n) => [n, n * 2 - 1])),
       judging,
     });
@@ -338,6 +339,11 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       ]),
       foldBoundaryTurns: new Set(),
       anchorVector: flat,
+      userMessageIdByTurn: new Map([
+        [1, 'msg'],
+        [2, 'msg'],
+        [3, 'msg'],
+      ]),
       userMessageIndexByTurn: new Map([
         [1, 1],
         [2, 3],
@@ -375,6 +381,7 @@ describe('scoreGateReplay — the composite verdict signal', () => {
       ]),
       foldBoundaryTurns: new Set(),
       anchorVector: flat,
+      userMessageIdByTurn: new Map(turnNumbers.map((t) => [t, 'msg'])),
       userMessageIndexByTurn: new Map(turnNumbers.map((n) => [n, n * 2 - 1])),
       judging,
     });

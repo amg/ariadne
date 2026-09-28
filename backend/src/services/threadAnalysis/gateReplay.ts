@@ -65,6 +65,8 @@ export interface ScoreGateReplayProps {
   anchorVector: number[];
   /** 1-based message numbers of the incoming user Messages. */
   userMessageIndexByTurn: Map<number, number>;
+  /** The message IDs of the incoming user Messages. */
+  userMessageIdByTurn: Map<number, string>;
   /**
    * The flat judging params — the shared two-channel verdict's full set,
    * identical to the fold's. T_segment survives in here ONLY as the
@@ -256,14 +258,21 @@ function replayTurn(state: ReplayState, args: ScoreGateReplayProps, turnNumber: 
   // The Anchor is Segment 1, so the wander reading exists from Turn 1 —
   // counsel sees every Turn, including the muted cold start; the gate's
   // verdicts only start where a reading can be judged.
-  if (state.counsel.update(anchorDistance)) {
+  if (state.counsel.update(anchorDistance, turnNumber.toString())) {
     state.counselRows.push({ turnNumber, anchorDistance });
   }
 
   let fired = false;
   let judgment: Judgment | null = null;
   if (!muted && driftPGated !== null) {
-    ({ judgment, fired } = evaluateAndRecord(state.verdict, args.judging, driftPGated));
+    const userMessageId = args.userMessageIdByTurn.get(turnNumber) as string;
+    ({ judgment, fired } = evaluateAndRecord(
+      state.verdict,
+      args.judging,
+      driftPGated,
+      anchorDistance,
+      userMessageId,
+    ));
   }
 
   const verdict = verdictFor({ muted, fired });

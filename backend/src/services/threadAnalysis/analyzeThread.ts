@@ -471,6 +471,7 @@ async function buildGateReplaySection({
     userMessageIndexByTurn: new Map(
       turns.map((turn) => [turn.turnNumber, messageIndexByMessageId.get(turn.userMessage.id) ?? 0]),
     ),
+    userMessageIdByTurn: new Map(turns.map((turn) => [turn.turnNumber, turn.userMessage.id])),
     judging,
   });
 

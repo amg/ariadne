@@ -149,6 +149,9 @@ interface DriftState {
    * opening segment.
    */
   memberSum: number[] | null;
+  /** The vector of the first turn of the current segment. */
+  currentSegmentAnchor: number[] | null;
+  anchorMemberCount: number;
   /** The pre-judge Gravity snapshot per Turn (G_live at arrival time). */
   preGravityByTurn: Map<number, number[] | null>;
   /** The shared two-channel verdict state (segment baseline + slow patrol). */
@@ -197,6 +200,7 @@ interface ScoreBlockContext {
   messageIndexByMessageId: Map<string, number>;
   labelByTurn: Map<number, string>;
   contentByTurn: Map<number, TopicSegmentTurn>;
+  userMessageIdByTurn: Map<number, string>;
 }
 
 /**
@@ -256,6 +260,10 @@ function measureBlockDrift(
   const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
   state.preGravityByTurn.set(block.turnNumber, gravity);
   const segmentDrift = gravity === null ? null : cosineDistance(vector, gravity);
+  const anchorDriftP =
+    state.currentSegmentAnchor === null
+      ? null
+      : cosineDistance(vector, unitVector(state.currentSegmentAnchor));
   const muted = isColdStart(state.completedTurns, context.judging, segmentDrift);
 
   const point: DriftPoint = {
@@ -270,8 +278,15 @@ function measureBlockDrift(
     boundaryReason: null,
   };
 
-  if (!muted && segmentDrift !== null) {
-    const { judgment, fired } = evaluateAndRecord(state.verdict, context.judging, segmentDrift);
+  if (!muted && segmentDrift !== null && anchorDriftP !== null) {
+    const userMessageId = context.userMessageIdByTurn.get(block.turnNumber) as string;
+    const { judgment, fired } = evaluateAndRecord(
+      state.verdict,
+      context.judging,
+      segmentDrift,
+      anchorDriftP,
+      userMessageId,
+    );
     stampJudgment(point, judgment, state.verdict, fired);
   }
 
@@ -280,10 +295,19 @@ function measureBlockDrift(
   if (point.isBoundary) {
     closeCurrentSegment(state, context, block.turnNumber - 1, block.turnNumber);
   }
-  state.memberSum =
-    point.isBoundary || state.memberSum === null
-      ? [...vector]
-      : accumulate(state.memberSum, vector);
+
+  if (point.isBoundary || state.memberSum === null) {
+    state.memberSum = [...vector];
+    state.currentSegmentAnchor = [...vector];
+    state.anchorMemberCount = 1;
+  } else {
+    if (state.anchorMemberCount < 3 && state.currentSegmentAnchor !== null) {
+      state.currentSegmentAnchor = accumulate(state.currentSegmentAnchor, vector);
+      state.anchorMemberCount += 1;
+    }
+    state.memberSum = accumulate(state.memberSum, vector);
+  }
+
   state.completedTurns += 1;
 }
 
@@ -357,6 +381,7 @@ export function buildDriftProfile({
         },
       ]),
     ),
+    userMessageIdByTurn: new Map(turns.map((turn) => [turn.turnNumber, turn.userMessage.id])),
   };
 
   const state: DriftState = {
@@ -365,6 +390,8 @@ export function buildDriftProfile({
     segmentStart: firstBlock.turnNumber,
     openingBoundary: null,
     memberSum: null,
+    currentSegmentAnchor: null,
+    anchorMemberCount: 0,
     preGravityByTurn: new Map(),
     verdict: createVerdictState(judging),
     completedTurns: 0,
@@ -408,7 +435,7 @@ export function buildDriftProfile({
   const counselDetector = createPageHinkley(patrolOptions(judging));
   const counselRows: AnchorCounselRow[] = [];
   for (const point of state.driftSeries) {
-    if (counselDetector.update(point.anchorDistance)) {
+    if (counselDetector.update(point.anchorDistance, point.turnNumber.toString())) {
       counselRows.push({ turnNumber: point.turnNumber, anchorDistance: point.anchorDistance });
     }
   }

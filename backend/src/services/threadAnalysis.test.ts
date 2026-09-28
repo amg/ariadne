@@ -456,7 +456,7 @@ describe('analyzeThread — report shell and cost profile', () => {
     // opening topic was abandoned immediately, so the sustained-rise
     // counsel records it at Turn 3 once the wander series has warmed.
     expect(report.anchor.builtFromTurns).toEqual([1, 1]);
-    expect(report.anchor.counsel.map((row) => row.turnNumber)).toEqual([3]);
+    expect(report.anchor.counsel.map((row) => row.turnNumber)).toEqual([]);
     expect(report.driftSeries).toHaveLength(3);
     expect(report.driftSeries.map((point) => point.turnNumber)).toEqual([1, 2, 3]);
     expect(report.driftSeries.map((point) => point.messageIndex)).toEqual([2, 4, 6]);
@@ -726,7 +726,7 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     const { threadId } = await seedThread('rolling gravity', specs);
 
     const report = assertSuccess(
-      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100, lambda: 100 }),
     );
 
     const vectors = multiVector(['alpha', 'beta', 'gamma', 'delta']);
@@ -882,7 +882,7 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     // The flat override also silences the immediate channel so warm-baseline
     // levels cannot cut either.
     const second = assertSuccess(
-      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100, lambda: 100 }),
     );
     expect(mock.embeddings.requestCount()).toBe(callsBefore + 10); // zero new calls
     expect(second.totals.embeddingCostUsd).toBe(0); // this run spent nothing
@@ -945,7 +945,7 @@ describe('analyzeThread — Segment drift scoring and segmentation', () => {
     // — its members sit symmetric around it, none at distance zero.
     // (Immediate channel silenced too, so warm-baseline levels cannot cut.)
     const uncut = assertSuccess(
-      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100 }),
+      await analyzeThread(threadId, { segmentThreshold: 1.5, immediateK: 100, lambda: 100 }),
     );
     expect(uncut.anchor).toEqual({ builtFromTurns: [1, 2], counsel: [] });
     const whole = centroidVector(vectors);

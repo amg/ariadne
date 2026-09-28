@@ -19,6 +19,14 @@ export function UserMessageRow({
   const isEditing = draft !== null;
   const showEdit = isLastUser && !busy && !isEditing;
   const fired = row.verdict?.verdict === 'fire';
+  const firedSlow = row.verdict?.fireChannel === 'slow';
+
+  let bgClass = 'bg-primary text-primary-foreground';
+  if (firedSlow) {
+    bgClass = 'bg-green-700 text-green-50';
+  } else if (fired) {
+    bgClass = 'bg-purple-600 text-purple-50';
+  }
 
   return (
     <div className="flex min-w-0 max-w-[85%] flex-col self-end md:max-w-[75%]">
@@ -34,13 +42,13 @@ export function UserMessageRow({
         />
       ) : (
         <div
-          className={
-            fired
-              ? 'max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-purple-600 p-3 text-purple-50'
-              : 'max-w-full self-end whitespace-pre-wrap break-words rounded-lg bg-primary p-3 text-primary-foreground'
-          }
+          className={`max-w-full self-end whitespace-pre-wrap break-words rounded-lg p-3 ${bgClass}`}
           title={
-            fired ? 'Topic drift: the thread-health gate judged this prompt a departure' : undefined
+            firedSlow
+              ? 'Slow topic drift: Page-Hinkley detected a gradual departure from the topic'
+              : fired
+                ? 'Topic drift: the thread-health gate judged this prompt a departure'
+                : undefined
           }
         >
           {message.content}

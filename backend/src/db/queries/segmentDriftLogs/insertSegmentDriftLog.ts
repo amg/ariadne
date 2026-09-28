@@ -23,6 +23,7 @@ export async function insertSegmentDriftLog(row: NewSegmentDriftLog): Promise<Se
       zScore: row.zScore ?? null,
       verdict: row.verdict,
       fireChannel: row.fireChannel ?? null,
+      slowDriftStartMessageId: row.slowDriftStartMessageId ?? null,
     })
     .onConflict((oc) => oc.columns(['messageId', 'modelId']).doNothing())
     .returningAll()
