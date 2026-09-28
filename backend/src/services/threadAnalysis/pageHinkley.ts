@@ -74,7 +74,7 @@ export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetec
       sum += sample;
       const mean = sum / count;
       cumulative += sample - mean - options.delta;
-      if (count === 1 || cumulative < lowWater) {
+      if (count <= options.minSamples || cumulative < lowWater) {
         lowWater = cumulative;
         lowWaterIdValue = sampleId;
       }

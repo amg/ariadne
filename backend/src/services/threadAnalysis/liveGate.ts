@@ -294,6 +294,7 @@ interface LiveWalkState {
    * the anchor distance for the slow channel.
    */
   currentSegmentAnchor: number[] | null;
+  anchorMemberCount: number;
   /** Complete Turns folded so far — the cold-start mute counter. */
   completedTurns: number;
   /** The live-chain segment row the next verdict logs against. */
@@ -438,6 +439,7 @@ async function processLiveChain({
     verdictState: createVerdictState(judging),
     memberSum: null,
     currentSegmentAnchor: null,
+    anchorMemberCount: 0,
     completedTurns: 0,
     currentSegmentId: null,
     storedSegments: storedSegments.map((segment) => ({
@@ -499,7 +501,9 @@ function evaluateArrivalAgainstLedger(
   const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
   const driftP = gravity === null ? null : cosineDistance(vector, gravity);
   const anchorDriftP =
-    state.currentSegmentAnchor === null ? null : cosineDistance(vector, state.currentSegmentAnchor);
+    state.currentSegmentAnchor === null
+      ? null
+      : cosineDistance(vector, unitVector(state.currentSegmentAnchor));
   const muted = isColdStart(state.completedTurns, state.judging, driftP);
   let fired = false;
   let judgment: ReturnType<typeof evaluateAndRecord>['judgment'] | null = null;
@@ -573,8 +577,13 @@ async function completeTurn(input: {
   if (input.reseed || state.memberSum === null) {
     state.memberSum = [...folded.data];
     state.currentSegmentAnchor = [...folded.data];
+    state.anchorMemberCount = 1;
   } else {
     state.memberSum = accumulate(state.memberSum, folded.data);
+    if (state.anchorMemberCount < 3 && state.currentSegmentAnchor !== null) {
+      state.currentSegmentAnchor = accumulate(state.currentSegmentAnchor, folded.data);
+      state.anchorMemberCount += 1;
+    }
   }
   state.completedTurns += 1;
   return ok(undefined);

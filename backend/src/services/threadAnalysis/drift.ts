@@ -151,6 +151,7 @@ interface DriftState {
   memberSum: number[] | null;
   /** The vector of the first turn of the current segment. */
   currentSegmentAnchor: number[] | null;
+  anchorMemberCount: number;
   /** The pre-judge Gravity snapshot per Turn (G_live at arrival time). */
   preGravityByTurn: Map<number, number[] | null>;
   /** The shared two-channel verdict state (segment baseline + slow patrol). */
@@ -260,7 +261,9 @@ function measureBlockDrift(
   state.preGravityByTurn.set(block.turnNumber, gravity);
   const segmentDrift = gravity === null ? null : cosineDistance(vector, gravity);
   const anchorDriftP =
-    state.currentSegmentAnchor === null ? null : cosineDistance(vector, state.currentSegmentAnchor);
+    state.currentSegmentAnchor === null
+      ? null
+      : cosineDistance(vector, unitVector(state.currentSegmentAnchor));
   const muted = isColdStart(state.completedTurns, context.judging, segmentDrift);
 
   const point: DriftPoint = {
@@ -296,7 +299,12 @@ function measureBlockDrift(
   if (point.isBoundary || state.memberSum === null) {
     state.memberSum = [...vector];
     state.currentSegmentAnchor = [...vector];
+    state.anchorMemberCount = 1;
   } else {
+    if (state.anchorMemberCount < 3 && state.currentSegmentAnchor !== null) {
+      state.currentSegmentAnchor = accumulate(state.currentSegmentAnchor, vector);
+      state.anchorMemberCount += 1;
+    }
     state.memberSum = accumulate(state.memberSum, vector);
   }
 
@@ -383,6 +391,7 @@ export function buildDriftProfile({
     openingBoundary: null,
     memberSum: null,
     currentSegmentAnchor: null,
+    anchorMemberCount: 0,
     preGravityByTurn: new Map(),
     verdict: createVerdictState(judging),
     completedTurns: 0,

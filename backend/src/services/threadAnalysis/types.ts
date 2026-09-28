@@ -459,8 +459,8 @@ export type GateReplayOptionOverrides = Partial<Pick<GateReplayParams, 'sinkhorn
 export const DEFAULT_ANALYZE_OPTIONS = {
   segmentThreshold: 0.52,
   immediateK: 2,
-  sigmaFloor: 0.02,
-  lambda: 0.8,
+  sigmaFloor: 0.08,
+  lambda: 0.15,
   delta: 0.05,
   minSamples: 3,
   coldStartTurns: 1,
