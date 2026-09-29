@@ -43,7 +43,7 @@ const origins = getCorsOrigins();
 - `DB_USER` - Database user (default: 'postgres')
 - `DB_PASSWORD` - Database password (default: 'postgrespassword')
 
-**Note**: If both `DATABASE_URL` and `DB_*` parts are provided, the parts take precedence.
+**Note**: An explicit `DATABASE_URL` wins; the `DB_*` parts only feed the fallback connection string assembled when no URL is set.
 
 ### AI Provider
 - `DEEPINFRA_API_KEY` - DeepInfra API key (required for real provider)

@@ -16,7 +16,10 @@ export type EnvConfig = {
   DEBUG: boolean;
 
   // Database
-  DATABASE_URL: string | undefined;
+  /** Explicit URL, else assembled from the DB_* parts; always defined. */
+  DATABASE_URL: string;
+  /** Second standing pool for bench review (same backend, other database). */
+  BENCH_DATABASE_URL: string | undefined;
   DB_HOST: string;
   DB_PORT: number;
   DB_NAME: string;
@@ -45,48 +48,6 @@ export type EnvConfig = {
   // Logger
   FORCE_COLOR: string | undefined;
   NO_COLOR: string | undefined;
-};
-
-/**
- * Default configuration values (used when env vars are not set).
- * @internal - kept for potential future use
- */
-const defaultConfig: Omit<EnvConfig, 'NODE_ENV'> = {
-  // Server
-  PORT: 3001,
-  HOST: '0.0.0.0',
-  DEBUG: false,
-
-  // Database
-  DB_HOST: '127.0.0.1',
-  DB_PORT: 5432,
-  DB_NAME: 'chatbot',
-  DB_USER: 'postgres',
-  DB_PASSWORD: 'postgrespassword',
-  DATABASE_URL: undefined,
-
-  // AI Provider
-  DEFAULT_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-  AI_STREAM_IDLE_TIMEOUT_MS: 5000,
-  ENABLE_REASONING: true,
-  DEEPINFRA_API_KEY: undefined,
-  MOCK_AI_BASE_URL: undefined,
-
-  // Titling Service
-  AI_TITLING_TIMEOUT_MS: undefined,
-  TITLING_MODEL: undefined,
-
-  // Thread analysis (live drift gate)
-  THREAD_ANALYSIS_MODE: 'heuristic',
-  JUDGE_MODEL: 'Qwen/Qwen3.5-9B',
-  REWRITE_MODEL: 'Qwen/Qwen3.5-9B',
-
-  // CORS
-  CORS_ORIGINS: undefined,
-
-  // Logger
-  FORCE_COLOR: undefined,
-  NO_COLOR: undefined,
 };
 
 /**
@@ -140,9 +101,16 @@ export const env: EnvConfig = {
     return getBoolean('DEBUG', false);
   },
 
-  // Database - parts win over connection string if both provided
+  // Database — explicit URL wins; parts only feed the fallback assembly.
   get DATABASE_URL() {
-    return process.env.VITEST_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+    const explicit = process.env.VITEST_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+    if (explicit) return explicit;
+    const user = encodeURIComponent(env.DB_USER);
+    const password = encodeURIComponent(env.DB_PASSWORD);
+    return `postgres://${user}:${password}@${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME}`;
+  },
+  get BENCH_DATABASE_URL() {
+    return process.env.BENCH_DATABASE_URL;
   },
   get DB_HOST() {
     return getString('DB_HOST', '127.0.0.1');

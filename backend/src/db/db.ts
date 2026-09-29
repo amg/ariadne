@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +11,9 @@ import type { Database } from './types';
 /**
  * Build a Kysely instance around an existing pg pool.
  *
- * `CamelCasePlugin` maps code-side camelCase identifiers onto the
- * snake_case schema (query args, column refs, inserts) and maps result
- * rows back to camelCase. Migrations stay snake_case literals — the
- * mapper is a no-op for already-snake strings. Raw `sql` templates
- * bypass the plugin entirely: their SQL and result rows stay exactly
- * as written.
+ * Code-side camelCase identifiers map onto the snake_case schema and
+ * result rows map back to camelCase. Raw `sql` templates pass through
+ * untouched, SQL and result rows alike.
  */
 export function createDbFromPool(pool: Pool): Kysely<Database> {
   return new Kysely<Database>({
@@ -25,37 +23,45 @@ export function createDbFromPool(pool: Pool): Kysely<Database> {
 }
 
 /**
- * Resolve the connection from the environment at import time:
- *   1. `VITEST_TEST_DATABASE_URL` — set by the vitest global setup so every
- *      query/service under test binds to the provisioned test database.
- *   2. `DATABASE_URL` — standard single-string connection (deployment).
- *   3. `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` parts (dev).
- *
- * The pg Pool connects lazily, so merely importing this module never opens a
- * connection.
+ * Per-request database selection: a benched request enters a bench scope;
+ * everything outside a scoped request keeps the default pool.
  */
-function createPool(): Pool {
-  const url = env.DATABASE_URL;
-  if (url) {
-    return new Pool({ connectionString: url });
-  }
-  return new Pool({
-    host: env.DB_HOST,
-    database: env.DB_NAME,
-    user: env.DB_USER,
-    password: env.DB_PASSWORD,
-    port: env.DB_PORT,
-  });
+export const requestDbScope = new AsyncLocalStorage<Kysely<Database>>();
+
+/** The default database: a standing pool on DATABASE_URL. */
+const mainDb = createDbFromPool(new Pool({ connectionString: env.DATABASE_URL }));
+
+/** The bench database: a standing pool on BENCH_DATABASE_URL, null if unset. */
+const benchDb: Kysely<Database> | null = env.BENCH_DATABASE_URL
+  ? createDbFromPool(new Pool({ connectionString: env.BENCH_DATABASE_URL }))
+  : null;
+
+/** Whether this deployment has a bench database to switch to. */
+export const isBenchDbConfigured = benchDb !== null;
+
+/** Enters the bench scope for the current request context; no-op if unset. */
+export function enterBenchScope(): boolean {
+  if (!benchDb) return false;
+  requestDbScope.enterWith(benchDb);
+  return true;
 }
 
 /**
- * The app-wide connection singleton. Query modules import it directly;
- * services no longer receive or pass a Kysely instance. The one exception is
- * `test/global-setup.ts`, which builds its own short-lived instance to reset
- * the schema before workers start.
+ * The app-wide database handle.
+ *
+ * Every access resolves against the bench database when the current request
+ * is bench-scoped, else against the default — the swap stays invisible to
+ * callers. `migrateToLatest` never touches the bench database: migrations
+ * belong to the deployment's own schema.
  */
-export const pool = createPool();
-export const db = createDbFromPool(pool);
+const resolveActiveDb = (): Kysely<Database> => requestDbScope.getStore() ?? mainDb;
+export const db: Kysely<Database> = new Proxy(mainDb, {
+  get(_target, prop) {
+    const active = resolveActiveDb();
+    const value = Reflect.get(active, prop);
+    return typeof value === 'function' ? value.bind(active) : value;
+  },
+});
 
 export async function migrateToLatest() {
   const migrator = new Migrator({
