@@ -45,12 +45,25 @@ export function needsRewriteHeuristic(text: string): boolean {
   return ANAPHORIC_OPENERS.has(firstWord) || ANAPHORIC_TOKENS.test(trimmed);
 }
 
-/** How much of the prior Turn the rewriter sees — keeps the call cheap. */
-export const REWRITE_CONTEXT_LIMITS = { user: 240, assistant: 480, output: 500 } as const;
+/** How much of the prior Turn the judge and the rewriter each see.
+ * Both read the same prior context: half of the rewrite model's context
+ * window (~4 chars per token), sized so real exchanges pass through
+ * whole. `output` bounds the parsed rewrite text itself. */
+export const REWRITE_CONTEXT_LIMITS = { user: 20_000, assistant: 40_000, output: 500 } as const;
 
-/** Caps context text the rewriter receives. */
+/** Caps context at the last sentence boundary inside the budget — a
+ * clean sentence the model can read whole. The budget itself is the
+ * fallback when the slice holds no sentence end to cut at. */
 export function capContext(text: string, limit: number): string {
-  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  if (text.length <= limit) return text;
+  const budget = text.slice(0, limit);
+  const cut = Math.max(
+    budget.lastIndexOf('. '),
+    budget.lastIndexOf('? '),
+    budget.lastIndexOf('! '),
+  );
+  if (cut < 0) return budget.trimEnd();
+  return budget.slice(0, cut + 1).trimEnd();
 }
 
 export interface RewriteCandidate {

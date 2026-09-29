@@ -66,12 +66,24 @@ describe('rewrite policy — the anaphora heuristic', () => {
     expect(needsRewriteHeuristic(longAnaphoric)).toBe(false);
   });
 
-  it('caps context text deterministically', () => {
+  it('keeps context within budget unchanged', () => {
     expect(capContext('short', 240)).toBe('short');
-    const long = 'a'.repeat(REWRITE_CONTEXT_LIMITS.user + 40);
-    const capped = capContext(long, REWRITE_CONTEXT_LIMITS.user);
-    expect(capped.endsWith('…')).toBe(true);
-    expect(capped.length).toBe(REWRITE_CONTEXT_LIMITS.user + 1);
+    expect(capContext('Exactly at budget.', 18)).toBe('Exactly at budget.');
+  });
+
+  it('cuts at the last sentence boundary inside the budget', () => {
+    const text = `First sentence. Second one. ${'tail words '.repeat(50)}`;
+    const capped = capContext(text, 40);
+    expect(capped).toBe('First sentence. Second one.');
+  });
+
+  it('hard-cuts at the budget when the slice holds no sentence end', () => {
+    const capped = capContext(
+      'a'.repeat(REWRITE_CONTEXT_LIMITS.user + 40),
+      REWRITE_CONTEXT_LIMITS.user,
+    );
+    expect(capped.length).toBe(REWRITE_CONTEXT_LIMITS.user);
+    expect(capped).toBe('a'.repeat(REWRITE_CONTEXT_LIMITS.user));
   });
 });
 
