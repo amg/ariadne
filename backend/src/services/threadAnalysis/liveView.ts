@@ -1,4 +1,5 @@
 import { env } from '@config/env';
+import type { ExpandOutcome } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
@@ -50,6 +51,13 @@ export interface LiveAnalysisPoint {
   immediateThreshold: number | null;
   /** The self-contained rewrite behind the reading, when one landed. */
   rewrittenText: string | null;
+  /**
+   * The recorded end of the arrival's try at a rewrite. `accepted` renders
+   * the rewrite cell as today; any `failed_*` marks the cell so the tab can
+   * surface why the arrival fell back to its raw text; null means no rewrite
+   * was attempted and the raw message stood on its own.
+   */
+  expandOutcome: ExpandOutcome | null;
 }
 
 /** One live-chain segment as the Analysis tab lists it. */
@@ -146,6 +154,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       .filter((row) => row.modelId === EMBEDDING_MODEL_ID && row.rewrittenText !== null)
       .map((row) => [row.messageId, row.rewrittenText]),
   );
+  const expandOutcomeById = new Map(arrivalRows.map((row) => [row.messageId, row.expandOutcome]));
 
   const loggedByMessageId = new Set(logs.map((log) => log.messageId));
   const contentById = new Map(messages.map((message) => [message.id, message.content]));
@@ -173,6 +182,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       zScore: log.zScore,
       immediateThreshold,
       rewrittenText: rewrittenTextById.get(log.messageId) ?? null,
+      expandOutcome: expandOutcomeById.get(log.messageId) ?? null,
     };
   });
 

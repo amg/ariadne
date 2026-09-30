@@ -45,22 +45,22 @@ far), and scores every turn, for reports and calibration.
   and starts the next one from its own embedding. Solves: telling
   "this turn continues the current topic" from "a new topic starts",
   without ever comparing one turn to a single previous turn.
-- **An Anchor records wander from the start.** The Anchor IS Segment
-  1: the fold decides the opening segment's member set, and the Anchor
-  is its centroid, frozen at the segment's close — a flip at the
-  second turn leaves it as turn 1 alone, a thread that never leaves
-  its opening theme obtains the whole segment. It charts how far the
-  thread has moved from its opening topic; it charts only, never
-  classifies. Solves: showing cumulative drift (including a return
-  home) without the anchor flagging every later turn forever.
-- **Slow drift also lives here as a report signal.** The same
+- **An Anchor records how far the thread has moved from the start.**
+  The Anchor is the centroid of the opening segment: the fold decides
+  which turns that segment holds, and the Anchor is their centroid,
+  frozen when the segment closes — a flip at the second turn leaves it
+  as turn 1 alone, a thread that never leaves its opening theme gets
+  the whole segment. The Anchor only measures distance from the
+  opening topic; it never classifies a turn. Solves: showing
+  cumulative drift (including a return to the opening) without the
+  anchor flagging every later turn forever.
+- **Slow drift also appears here as a report signal.** The same
   sustained-rise accumulator (Page–Hinkley) runs over the stored
-  drift series, learning each thread's own noise floor: wiggles below
-  a small allowance never accumulate, and only a rise that keeps
+  drift series and learns each thread's own noise floor: small steps
+  below a tolerance never accumulate, and only a rise that keeps
   climbing over several turns fires. In live detection it is the
-  *secondary* channel (see below), never the verdict by itself.
-  Solves: surfacing a topic that crawls away turn by turn in analysis
-  and reports.
+  secondary channel (see below), never the verdict by itself. Solves:
+  surfacing a topic that drifts away gradually, turn by turn.
 - **Segment merging is offline-report advice only.** If a topic leaves
   and comes back, the split (correctly) produces two separate
   segments. Here — and only here: the live path never sees any of
@@ -89,46 +89,49 @@ to offer a choice.
 - **Context-dependent messages are rewritten before embedding.** When
   an incoming message reads as a follow-up to what came before, a
   small model rewrites it into self-contained form against the
-  previous Turn, and that rewrite is what gets compared — the raw
-  message stays as the audited fallback, and both readings are
-  recorded. This enriches the user message with contextual info before
-  embedding. Solves: restriction 2 — a follow-up has no topic of its
-  own, so it is re-read with the previous context before measuring.
+  previous Turn, and that rewrite is what gets compared. If the
+  rewrite is refused or unusable, the raw message stays the fallback,
+  and the outcome of the attempt is recorded on the arrival row.
+  Solves: restriction 2 — a follow-up has no topic of its own, so it
+  is re-read with the previous context before measuring.
 - **The verdict is immediate: one message, one decision.** A topic
   flip can arrive in a single message — if it shifted, it shifted,
   and a verdict that waits to confirm would always decide one turn
   late. The arriving message's reading is judged against the thread's
   own state — its current topic and its noise level — instead of a
-  global constant; messages that read as tweaks of the last Turn are
-  withheld, and the first turn alone is muted while there is nothing
-  to compare against (later cold-start coverage is a calibration knob). Solves: deciding at the exact turn the topic
+  global constant; the first turn alone is muted while there is
+  nothing to compare against (later cold-start coverage is a
+  calibration knob). Solves: deciding at the exact turn the topic
   changed, without tuning one number for every thread.
-- **Slow drift gets a second, quiet channel.** Alongside, a
-  sustained-rise accumulator (Page–Hinkley) rides the same drift
-  stream: it credits rises above the thread's own mean and ignores
-  wiggles, firing only once credit has climbed enough across several
-  messages. A sharp flip never reaches it — the immediate verdict
-  catches those first — so it only speaks when immediate drift stays
-  silent: precisely the crawling-topic class. When it fires, the
-  message gets the same drift verdict, and after any verdict the
-  accumulator resets with the new topic. Solves: gradual drift that
+- **Slow drift gets a second channel.** Alongside, a sustained-rise
+  accumulator (Page–Hinkley) follows the same drift series: it sums
+  rises above the thread's own mean, ignores steps inside its noise
+  floor, and fires only once the total rise has climbed enough across
+  several messages. A sharp flip never reaches it — the immediate
+  verdict catches those first — so it only matters when the immediate
+  channel stays quiet: the gradually drifting topic. When it fires,
+  the message gets the same drift verdict, and after any verdict the
+  accumulator resets around the new topic. Solves: gradual drift that
   never crosses the immediate criterion, without ever delaying a
   sharp one.
-- **The live gate is advisory, never blocking.** It may pause the turn
-  and present the choice, and the offline scoring stays the
-  authoritative record of where segments cut; disagreements between
-  the live verdict and the recorded cuts are kept as calibration
-  material. Solves: the detection is fallible, so it must not
-  silently decide for the user, and its mistakes need to stay visible
-  to improve it.
-- **The live chain persists as it runs and never re-reads itself.**
-  Each judged arrival logs one row — the reading, the ledger snapshot,
-  the verdict, the channel — and a fire burns a new segment row. The
-  walk is fill-forward, so a thread predating the feature and the tail
-  an edit shredded are both refilled by the same walk resuming where
-  the chain stopped; a replay over a complete chain skips every
-  provider call. Solves: the online signals survive restarts, retries,
-  and flips of the flag.
+- **The live gate is advisory, never blocking.** A fire only marks
+  the arriving message in the chat; the reply is produced normally.
+  (A pause-and-choose flow is deferred follow-up work.) The offline
+  scoring stays the authoritative record of where segments cut, and
+  disagreements between the live verdict and the recorded cuts are
+  kept as calibration material. Solves: the detection is fallible, so
+  it must not silently decide for the user, and its mistakes need to
+  stay visible to improve it.
+- **The live lane persists as it runs and never recomputes stored
+  results.** Each judged arrival logs one row — the reading, the
+  baseline it was judged against, the verdict, the channel — and a
+  fire starts a new segment row. Refill always moves forward, so a
+  thread that predates the feature, or the tail an edit invalidated,
+  is rebuilt by running the lane again from where the stored rows
+  stop; a run over an already-complete lane makes no provider calls
+  (the step-by-step shape of this persistence is ADR 0007). Solves:
+  the online signals survive restarts, retries, and flips of the
+  flag.
 - **One feature flag sets the expansion tier and the surface.**
   `THREAD_ANALYSIS_MODE` is `off` | `heuristic` | `always`: the two
   live tiers decide which arrivals get expanded against the previous
@@ -136,11 +139,12 @@ to offer a choice.
   but stored signals survive an `off` period and reappear when it
   flips back. Solves: shipping the lane behind a dial without losing
   its history to a cosmetic setting.
-- **The verdict rides the first stream event of the reply.** An
-  arrival judged fire tints its own bubble before that reply starts
-  growing, because the verdict is written into the response stream
-  before the exchange stream merges in. Solves: the reader sees the
-  drift flag on the message that drifted, not one turn later.
+- **The verdict is delivered with the first event of the reply
+  stream.** The arrival is judged before inference runs, so the
+  verdict is written to the response stream before the reply stream
+  merges in, letting the UI mark the arriving message before the reply
+  starts. Solves: the reader sees the drift flag on the message that
+  drifted, not one turn later.
 
 The math — formulas, parameters, numerical guardrails — lives in
 `docs/ideas/THREAD-DRIFT-MATH.md`.
@@ -152,7 +156,7 @@ The math — formulas, parameters, numerical guardrails — lives in
   below threshold at a window of two (0.237 vs 0.632 for single
   turns), and the dilution grows with window size.
 - **Two thresholds: anchor distance plus consecutive change** — the
-  anchor stays tripped after the first real wander (every later turn
+  anchor stays tripped after the first real departure (every later turn
   flagged), and consecutive change can't tell a same-topic follow-up
   from a topic flip.
 - **Per-message embedding** — adjustment messages embed directionless
@@ -174,18 +178,18 @@ The math — formulas, parameters, numerical guardrails — lives in
 - No global drift threshold to maintain: one segment threshold in the
   offline analysis (calibration data, overridable per run), a live
   verdict judged against the thread's own state message by message,
-  and a silent accumulator behind it for the slow crawl.
+  and a silent accumulator behind it for gradual drift.
 - The live gate costs one embed per arriving message — a small-model
   rewrite only for follow-ups under `heuristic` — and its signals
   persist alongside it, so arrival readings can never leak into the
   fold's data. Arrival embeddings read as per-message at first glance
   (Turn rows key to the assistant Message, arrival rows key to the user
-  Message), but the live chain never touches `message_usage`: per-step
-  spend rides the arrival row.
+  Message), but the live lane never writes to `message_usage`:
+  per-step spend is recorded on the arrival row.
 - Re-runs with different numbers reclassify threads for free — all
   embeddings are stored.
 - Limits, each with a noted repair path (FUTURE-IMPROVEMENTS),
-  neither solved by a wider unit: a slowly crawling topic may never
+  neither solved by a wider unit: a slowly drifting topic may never
   cross the threshold (the centroid follows it — the Anchor chart is
   the compensating signal), and one-liner turns embed close to
   generic chatter.

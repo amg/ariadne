@@ -16,26 +16,23 @@ export interface AnalyzerCostTotals {
  * both coalesce to exact zero sums. Results are decimal strings like
  * `message_usage.cost_usd`, cast to the same numeric(14,10) precision
  * the columns store.
- *
- * Raw SQL so the result aliases come back camelCase by hand (the
- * embedding queries' repo convention).
  */
 export async function sumAnalyzerCostsByThread({
   threadId,
 }: {
   threadId: string;
 }): Promise<AnalyzerCostTotals> {
-  const result = await sql<AnalyzerCostTotals>`
-    select
-      coalesce(sum(me.embedding_cost_usd), 0)::numeric(14,10) as "embeddingCostUsd",
-      coalesce(sum(me.rewrite_cost_usd), 0)::numeric(14,10) as "rewriteCostUsd",
-      coalesce(sum(me.judge_cost_usd), 0)::numeric(14,10) as "judgeCostUsd"
-    from message_embeddings me
-    inner join messages m on m.id = me.message_id
-    where m.thread_id = ${threadId}
-  `.execute(db);
+  const result = await db
+    .selectFrom('messageEmbeddings as me')
+    .innerJoin('messages as m', 'm.id', 'me.messageId')
+    .where('m.threadId', '=', threadId)
+    .select([
+      sql<string>`coalesce(sum(me.embedding_cost_usd), 0)::numeric(14,10)`.as('embeddingCostUsd'),
+      sql<string>`coalesce(sum(me.rewrite_cost_usd), 0)::numeric(14,10)`.as('rewriteCostUsd'),
+      sql<string>`coalesce(sum(me.judge_cost_usd), 0)::numeric(14,10)`.as('judgeCostUsd'),
+    ])
+    .executeTakeFirst();
 
-  const totals = result.rows[0];
-  if (!totals) throw new Error('message_embeddings cost sum returned no row');
-  return totals;
+  if (!result) throw new Error('message_embeddings cost sum returned no row');
+  return result;
 }
