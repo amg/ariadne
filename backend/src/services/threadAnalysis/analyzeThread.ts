@@ -113,11 +113,15 @@ export async function analyzeThread(
 
   // Embedding complete: score from the stored rows only. All runs compute
   // over the exact float4-rounded storage values, keeping reports
-  // bit-stable repeat to repeat.
+  // bit-stable repeat to repeat. Arrival rows born without a vector (live
+  // chain, pre-embed) never belong to a Turn's block — keep the ones
+  // holding a real vector.
   const storedTurns = await listMessageEmbeddingsByMessageIds({
     messageIds: blocks.map((block) => block.assistantMessage.id),
   });
-  const vectorByMessageId = new Map(storedTurns.map((row) => [row.messageId, row.embedding]));
+  const vectorByMessageId = new Map(
+    storedTurns.flatMap((row) => (row.embedding === null ? [] : [[row.messageId, row.embedding]])),
+  );
   const messageIndexByMessageId = new Map(
     messages.map((message, index) => [message.id, index + 1]),
   );

@@ -18,7 +18,8 @@ import { withOnDemandBackoff } from './onDemandRetry';
  * feeds an embedding, and the prompt says so. Crawling on the configured
  * rewrite model (`env.REWRITE_MODEL`); inherits the established provider config
  * resolution (mock switch, configured check) exactly like the chat and
- * embedding paths.
+ * embedding paths. An optional `temperature` overrides the frozen default
+ * of 0.
  */
 
 // The rewrite contract: decontextualisation, never conversation. Voice-
@@ -105,6 +106,7 @@ export function buildRewritePrompt(input: RewriteFollowUpInput): string {
 async function rewriteOnce(
   config: ReturnType<typeof resolveInferenceConfig>,
   input: RewriteFollowUpInput,
+  temperature: number,
 ): Promise<Result<RewriteFollowUpData>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REWRITE_TIMEOUT_MS);
@@ -117,7 +119,7 @@ async function rewriteOnce(
       prompt: buildRewritePrompt(input),
       maxRetries: 0,
       maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS,
-      temperature: 0,
+      temperature,
       abortSignal: controller.signal,
     });
     return ok({
@@ -137,13 +139,23 @@ async function rewriteOnce(
   }
 }
 
+/** Sampling temperature; defaults to the frozen 0. */
+const DEFAULT_REWRITE_TEMPERATURE = 0;
+
+export interface RewriteFollowUpOptions {
+  /** Sampling temperature; defaults to the frozen 0. */
+  temperature?: number;
+}
+
 export async function rewriteFollowUp(
   input: RewriteFollowUpInput,
+  options?: RewriteFollowUpOptions,
 ): Promise<Result<RewriteFollowUpData>> {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
-  return withOnDemandBackoff(() => rewriteOnce(config, input));
+  const temperature = options?.temperature ?? DEFAULT_REWRITE_TEMPERATURE;
+  return withOnDemandBackoff(() => rewriteOnce(config, input, temperature));
 }

@@ -1,6 +1,19 @@
-import type { LiveAnalysisPoint, LiveAnalysisView } from '@/services/api';
-import { PencilSparkles } from 'lucide-react';
+import type { DriftExpandOutcome, LiveAnalysisPoint, LiveAnalysisView } from '@/services/api';
+import { CircleAlert, PencilSparkles } from 'lucide-react';
 import { Fragment } from 'react';
+
+/** Human reason shown on hover when an arrival's rewrite try failed. */
+const EXPAND_FAILURE_LABEL: Partial<Record<DriftExpandOutcome, string>> = {
+  failed_refused: 'the rewrite model refused',
+  failed_quality: 'the rewrite failed quality control',
+  failed_inference: 'the rewrite call failed',
+  failed: 'the rewrite was unusable',
+};
+
+function expandFailureTitle(outcome: DriftExpandOutcome): string {
+  const label = EXPAND_FAILURE_LABEL[outcome] ?? 'the rewrite did not land';
+  return `Rewrite ${outcome}: ${label}. The original message was embedded instead.`;
+}
 
 export function SegmentTable({ view }: { view: LiveAnalysisView }) {
   if (view.segments.length === 0) return null;
@@ -39,6 +52,8 @@ export function SegmentTable({ view }: { view: LiveAnalysisView }) {
                 </tr>
                 {arrivals.map((point) => {
                   const rewritten = point.rewrittenText;
+                  const rewriteFailed =
+                    point.expandOutcome !== null && point.expandOutcome !== 'accepted';
                   return (
                     <tr key={point.messageId} className="border-b border-border/50">
                       <td
@@ -53,6 +68,14 @@ export function SegmentTable({ view }: { view: LiveAnalysisView }) {
                       </td>
                       <td className="px-2 py-1.5" title={rewritten ?? point.messageText}>
                         <span className="flex max-w-[420px] items-center">
+                          {rewriteFailed && point.expandOutcome !== null && (
+                            <span
+                              className="mr-1 shrink-0 cursor-default"
+                              title={expandFailureTitle(point.expandOutcome)}
+                            >
+                              <CircleAlert className="h-3 w-3 text-rose-400" aria-hidden />
+                            </span>
+                          )}
                           {rewritten !== null && (
                             <span className="mr-1 shrink-0 cursor-default" title={rewritten}>
                               <PencilSparkles className="h-3 w-3 text-amber-400" aria-hidden />

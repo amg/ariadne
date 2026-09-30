@@ -14,10 +14,7 @@ description: Defines code quality standards, complexity limits, testing governan
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 
 ## 2. Testing Governance
-*   **No Database Mocks**: NEVER mock the database (Kysely/Postgres).
-*   **Real DB Testing**: All database/repository tests run against real PostgreSQL (Testcontainers).
-*   **Test Isolation**: Wrap tests in transactions with `ROLLBACK`, or truncate tables.
-*   **Permitted Mocks**: ONLY at system boundaries for external network calls (e.g., DeepInfra API).
+*   **Database rules**: the DB-specific rules (no database mocks, real-Postgres tests, isolation, permitted boundary mocks) live in the **db** skill — load it before writing or modifying database tests.
 
 ## 3. Enforcing Quality
 

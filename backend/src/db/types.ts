@@ -66,17 +66,41 @@ export interface MessageUsageTable {
  */
 export interface MessageEmbeddingsTable {
   messageId: string; // UUID FK -> messages.id (1:1, PK, cascade delete)
-  /** pgvector `vector(1024)`; Postgres text form `[0.1,-0.2,…]` (parsed in the query layer). */
-  embedding: string;
+  /**
+   * pgvector `vector(1024)`; Postgres text form `[0.1,-0.2,…]` (parsed in
+   * the query layer). Null only on arrival rows between the rewrite
+   * step's outcome write and the embed step's vector fill — consumers
+   * that need the vector must find it present.
+   */
+  embedding: string | null;
   modelId: string;
   /** Arrival rows only: the self-contained rewrite the embedding came from; null when none landed. */
   expandedText: string | null;
+  /**
+   * Arrival rows only: the recorded end of this arrival's try at a
+   * rewrite; null when no rewrite was attempted (the raw message stood on
+   * its own).
+   */
+  expandOutcome: ExpandOutcome | null;
   /** Per-step spend recorded for audit — never written to `message_usage`. numeric(14,10) → string. */
   embeddingCostUsd: string | null;
   rewriteCostUsd: string | null;
   judgeCostUsd: string | null;
   createdAt: Generated<Date>;
 }
+
+/**
+ * The recorded end of one arrival's try at a rewrite: what the reading
+ * ended up as, and when no reading landed, why — the rewrite model
+ * refused, a quality check rejected it, the provider call failed, or the
+ * output was unusable.
+ */
+export type ExpandOutcome =
+  | 'accepted'
+  | 'failed_refused'
+  | 'failed_quality'
+  | 'failed_inference'
+  | 'failed';
 
 /**
  * The live arrival chain the gate builds as the conversation progresses —
@@ -145,10 +169,15 @@ export type NewModelConfig = Insertable<ModelConfigsTable>;
 export type MessageEmbeddingStored = Selectable<MessageEmbeddingsTable>;
 
 /** Turn embedding row as returned by `queries/messageEmbeddings` (vector parsed to numbers). */
-export type MessageEmbedding = Omit<MessageEmbeddingStored, 'embedding' | 'expandedText'> & {
+export type MessageEmbedding = Omit<
+  MessageEmbeddingStored,
+  'embedding' | 'expandedText' | 'expandOutcome'
+> & {
   rewrittenText: string | null;
+  expandOutcome: ExpandOutcome | null;
 } & {
-  embedding: number[];
+  /** Null on arrival rows written by the rewrite step before the embed step filled the vector. */
+  embedding: number[] | null;
 };
 
 /** Insert/upsert input for `queries/messageEmbeddings` (vector as numbers). */
@@ -165,6 +194,8 @@ export type NewArrivalEmbedding = {
   modelId: string;
   /** The self-contained rewrite the embedding came from; null when the raw message was embedded. */
   rewrittenText?: string | null;
+  /** The recorded end of the arrival's try at a rewrite; pass through unchanged on re-writes. */
+  expandOutcome?: ExpandOutcome | null;
   embeddingCostUsd?: number | null;
   rewriteCostUsd?: number | null;
   judgeCostUsd?: number | null;

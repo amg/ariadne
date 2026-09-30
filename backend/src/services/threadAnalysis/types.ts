@@ -309,7 +309,7 @@ export interface GateReplayPoint {
 /**
  * The gate's verdict on one incoming user message. `muted` inside the
  * cold start; `pass` when nothing accumulates; `fire` — "had this been
- * live, the gate would have paused before this Turn".
+ * live, the gate would have flagged this Turn".
  */
 export type GateVerdict = 'muted' | 'pass' | 'fire';
 

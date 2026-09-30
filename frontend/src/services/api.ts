@@ -24,6 +24,13 @@ export type ThreadAnalysisMode = AppConfig['threadAnalysisMode'];
 /** Admin-level thread health flag (mirrors backend `THREAD_ANALYSIS_MODE`). */
 export type DriftVerdict = 'muted' | 'pass' | 'fire';
 export type DriftFireChannel = 'immediate' | 'slow';
+/** Recorded end of an arrival's rewrite try; mirrors backend ExpandOutcome. */
+export type DriftExpandOutcome =
+  | 'accepted'
+  | 'failed_refused'
+  | 'failed_quality'
+  | 'failed_inference'
+  | 'failed';
 
 /** The live gate's verdict on one arriving user message. */
 export interface MessageDriftVerdict {
@@ -55,6 +62,12 @@ export interface LiveAnalysisPoint {
   zScore: number | null;
   immediateThreshold: number | null;
   rewrittenText: string | null;
+  /**
+   * Recorded end of the arrival's rewrite try. `accepted` renders the rewrite
+   * cell; any `failed_*` marks the cell (full story on hover); null means no
+   * rewrite was attempted.
+   */
+  expandOutcome: DriftExpandOutcome | null;
 }
 
 export interface LiveAnalysisView {

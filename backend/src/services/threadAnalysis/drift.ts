@@ -428,10 +428,11 @@ export function buildDriftProfile({
 
   // Anchor-wander counsel (processing side): Page–Hinkley over the complete
   // turns' anchor distances — the Anchor is born after processing, so the
-  // patrol walks the wander series once the distances exist. Advisory
-  // only: never a cut, never a classification vote. Cold start does not
-  // apply — the Anchor is Segment 1, so the wander reading exists from
-  // Turn 1 and the counsel watches every Turn.
+  // patrol consumes the anchor-distance series once the distances
+  // exist. Advisory only: never a cut, never a classification vote. Cold
+  // start does not apply — the Anchor covers the opening segment, so the
+  // distance reading exists from Turn 1 and the counsel watches every
+  // Turn.
   const counselDetector = createPageHinkley(patrolOptions(judging));
   const counselRows: AnchorCounselRow[] = [];
   for (const point of state.driftSeries) {

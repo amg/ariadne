@@ -1200,7 +1200,7 @@ function renderTurnLines(turn: TopicSegmentTurn): string {
 const VERDICT_LABEL: Record<GateVerdict, string> = {
   muted: 'muted (cold start)',
   pass: 'pass',
-  fire: 'fire — pause before this Turn',
+  fire: 'fire — drift flagged on this Turn',
 };
 
 /**
@@ -1274,7 +1274,7 @@ function renderGateTable(points: GateReplayPoint[], turns: GateReplayTurn[]): st
   const baseHeaders = hasExpanded
     ? `<th title="The Turn being measured (your message arriving; the reply is folded in when the Turn completes).">Turn</th><th title="The global index of the message across the thread, for cross-referencing raw data.">Msg #</th><th title="Drift of the arriving message exactly as it came in, against the segment baseline — the measurement lane. It never alone decides a verdict.">drift_p (raw)</th>${gatedHeader}${rewriteHeader}${anchorHead}`
     : '<th>Turn</th><th>Msg #</th><th>drift_p (raw)</th><th>Anchor distance</th>';
-  return `<table class="segments gate"><thead><tr>${baseHeaders}<th title="The messages in this Turn (user + assistant reply when present).">Messages</th><th title="The outcome for the Turn: muted (cold start, not yet observed), pass, fire (pause before this Turn) — the segment-local two-channel verdict.">Gate verdict</th></tr></thead><tbody>\n${rows}\n</tbody></table>`;
+  return `<table class="segments gate"><thead><tr>${baseHeaders}<th title="The messages in this Turn (user + assistant reply when present).">Messages</th><th title="The outcome for the Turn: muted (cold start, not yet observed), pass, fire (drift flagged on this Turn) — the segment-local two-channel verdict.">Gate verdict</th></tr></thead><tbody>\n${rows}\n</tbody></table>`;
 }
 
 const DIVERGENCE_LABEL: Record<string, string> = {

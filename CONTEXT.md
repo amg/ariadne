@@ -34,17 +34,17 @@ Message carries the state of the conversation ending at it.
 _Avoid_: window embedding, message embedding (misleading — isolated Messages are not embedded)
 
 **Anchor**:
-The frozen reference that IS Segment 1: the centroid of the opening
-segment's Turn embeddings, frozen when Segment 1 closes — pure opening
-topic. A flip at Turn 2 locks it on Turn 1 alone; a Thread that never
-leaves its opening theme hands it the whole segment. Anchor distance
-charts where the Thread wanders relative to its start; the Anchor
-charts only, never classifies.
+The centroid of the opening segment's Turn embeddings, frozen when that
+segment closes — pure opening topic. A flip at Turn 2 locks it on Turn 1
+alone; a Thread that never leaves its opening theme gives it the whole
+segment. Anchor distance shows how far the Thread has moved from its
+start; the Anchor only measures that distance and never classifies a
+Turn.
 _Avoid_: baseline, origin vector, first-K anchor
 
 **Anchor distance**:
 Cosine distance between the current Turn embedding and the Anchor.
-Measures cumulative drift — how far the Thread has wandered from its
+Measures cumulative drift — how far the Thread has moved from its
 opening topic; it falls again when the Thread returns to that topic.
 _Avoid_: total drift, global drift
 
@@ -85,8 +85,9 @@ _Avoid_: dead context, bloat, cruft, noise
 ### Flow
 
 **Drift gate**:
-The check that scores an incoming user Message *before* inference. It may
-pause the Turn and present a choice; it never blocks silently.
+The check that scores an incoming user Message *before* inference. It is
+advisory: a fire marks the arriving Message and the reply proceeds; it
+never blocks silently.
 _Avoid_: guard, interceptor, blocker, middleware
 
 **Replay**:
@@ -104,25 +105,25 @@ nothing else about it enters the chat.
 _Avoid_: draft turn, pending message, preview, hypothesis
 
 **Live chain**:
-The live gate's persisted arrival history under ONE embedding model:
-one record per judged arrival (the reading, the segment-baseline snapshot
-taken before the verdict, the verdict, the firing channel) and one
-segment per live segment, each carrying the model that produced the
-reading as its source — the same identity the embedding rows use. A
-thread runs one chain per model: switching models starts a fresh chain
-from the walk, and the retired one stays stored for pruning. The chain
-is the conversation's truth about the live lane — the walk is
-fill-forward and never re-embeds or re-judges a complete chain; a thread
-predating the feature or a tail an edit shredded is refilled by the same
-walk resuming where the chain stops. (An edit invalidates signals under
-every model.)
+The live gate's persisted arrival history under one embedding model: one
+record per judged arrival (the reading, the segment baseline it was
+judged against, the verdict, the firing channel) and one row per live
+segment, each carrying the model that produced the reading as its
+source — the same identity the embedding rows use. A thread runs one
+chain per model: switching models starts a fresh chain, and the retired
+one stays stored for pruning. The chain is the conversation's truth
+about the live lane — it is refilled forward and never re-embeds or
+re-judges a stored row; a thread that predates the feature, or the tail
+an edit invalidated, is rebuilt from where the chain stops. (An edit
+invalidates signals under every model.)
 _Avoid_: verdict history, ledger table, live audit
 
 **Rewritten signal / composite verdict signal**:
 The arrival-time verdict signal of the live gate after the
 pipeline: the incoming user Message rewritten into self-contained form against the prior
-Turn by a small cheap model — the *rewrite* decides the verdict when one
-lands, the raw message as audited fallback (`driftP`). It restores
+Turn by a small cheap model — the *rewrite* decides the verdict when
+it lands, and the raw message stays the fallback when it is refused or
+unusable (`driftP`; see Expansion outcome). It restores
 what the Prospective Turn loses by withholding the assistant reply:
 concrete referents that anchor it to the real topic. Both readings are
 charted (`driftPGated` = verdict signal, `driftP` = raw audit), and every
@@ -151,6 +152,30 @@ statistics. A sharp topic flip clears it at its arrival turn; the
 Page–Hinkley accumulator speaks only while this channel stays silent,
 and resets after any verdict.
 _Avoid_: live threshold (no global constant applies to the live lane), running mean
+
+**Message transformer**:
+The lane that turns each arriving user Message into a judged Prospective
+Turn before inference: the Message is rewritten into a self-contained
+reading, that reading is checked and embedded, and the result is judged
+against the current Topic segment — closing the segment on a fire and
+folding completed Turns. Runs per Message when its arrival triggers it;
+what is stored replays and never re-runs.
+_Avoid_: link, stage pipeline, interceptor
+
+**Naive refusal detector**:
+The rewrite's string-level check that the rewrite reading is not the
+rewrite model *refusing* ("I can't assist with this request…"). Refusal
+is a closed, provider-stable boilerplate class, decided by pattern,
+never by meaning; a hit discards the rewrite and the Message keeps its
+raw reading.
+_Avoid_: refusal classifier, content filter, guardrail
+
+**Expansion outcome**:
+The recorded end of one Message's try at a rewrite: the self-contained
+reading landed, or why it did not — a refusal, a quality reject, a
+provider failure, or unusable output. Only the end is recorded; attempts
+that led to it are not.
+_Avoid_: stage report, pipeline state
 
 ### Cost
 

@@ -54,6 +54,19 @@ export type MockRewritesControl = {
   failAll: () => void;
   /** Stop failing rewrite requests. */
   clearFailures: () => void;
+  /** Total rewrite chat-completion requests received (failed ones included). */
+  requestCount: () => number;
+  /**
+   * Force every rewrite reply to `text`; null restores the deterministic
+   * reply. Used to simulate a refusal echo or another unusable output.
+   */
+  forceReply: (text: string | null) => void;
+  /**
+   * Reply one call at a time from `texts` in order (e.g. first call
+   * refuses, second succeeds); calls beyond the list fall back to the
+   * deterministic reply. Pass [] to clear.
+   */
+  replySequence: (texts: string[]) => void;
 };
 
 export type MockJudgesControl = {
@@ -230,11 +243,11 @@ async function streamReply(args: {
  *  requests get a deterministic
  *  `Rewritten: <follow-up>` derived from the request itself, so the
  *  thread-health e2e can assert the expanded signal without a real model. */
-function jsonReply(body: ChatCompletionsBody) {
+function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
   const messages = body.messages ?? [];
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
-  const rewrite = rewriteReply(body);
+  const rewrite = rewriteOverride ?? rewriteReply(body);
   const judge = judgeReply(body);
   const replyText = (rewrite ?? judge ?? buildReply(lastUser)).slice(0, 80);
   const tokens = replyText.split(/(?<=\s)/);
@@ -312,16 +325,39 @@ export async function startMockInferenceServer(options?: {
 
   // Per-instance `/embeddings` test hooks (accounting + error injection).
   const embeddingsState = { requestCount: 0, failFrom: Number.POSITIVE_INFINITY };
-  const rewritesState = { failAll: false };
+  // forcedReply: null = deterministic; replySequence drained one call at a time.
+  const rewritesState: {
+    failAll: boolean;
+    requestCount: number;
+    forcedReply: string | null;
+    replySequence: string[];
+  } = { failAll: false, requestCount: 0, forcedReply: null, replySequence: [] };
   const judgesState = { failAll: false };
+
+  // The next override for a rewrite call: the queued reply if any, else the
+  // forced reply if armed, else undefined (deterministic). Consumes the queue.
+  const resolveRewriteOverride = (): string | undefined => {
+    if (rewritesState.replySequence.length > 0) return rewritesState.replySequence.shift();
+    return rewritesState.forcedReply ?? undefined;
+  };
 
   app.post('/v1/openai/chat/completions', async (request, reply) => {
     const body = (request.body ?? {}) as ChatCompletionsBody;
 
+    // Rewrite calls are identified by the rewriter's system-prompt marker.
+    // Account every one (failed ones too) so tests can assert the exact
+    // number of attempts the expansion tier spent.
+    const isRewriteCall = rewriteReply(body) !== null;
+    let rewriteOverride: string | undefined;
+    if (isRewriteCall) {
+      rewritesState.requestCount += 1;
+      rewriteOverride = resolveRewriteOverride();
+    }
+
     // Expansion-tier injection hook: rewrite calls fail while armed, so
     // the analyzer's graceful-skip path is testable. Streamed chat calls
     // are never rewrites and are untouched.
-    if (body.stream !== true && rewritesState.failAll && rewriteReply(body) !== null) {
+    if (body.stream !== true && rewritesState.failAll && isRewriteCall) {
       return reply.code(500).send({
         error: { message: 'Injected rewrite failure (mock).', type: 'mock_rewrite_failure' },
       });
@@ -337,7 +373,7 @@ export async function startMockInferenceServer(options?: {
 
     // OpenAI default is non-streaming; only explicit `stream: true` gets SSE.
     if (body.stream !== true) {
-      return reply.code(200).send(jsonReply(body));
+      return reply.code(200).send(jsonReply(body, rewriteOverride));
     }
 
     reply.hijack();
@@ -409,6 +445,14 @@ export async function startMockInferenceServer(options?: {
       },
       clearFailures: () => {
         rewritesState.failAll = false;
+      },
+      requestCount: () => rewritesState.requestCount,
+      forceReply: (text: string | null) => {
+        rewritesState.forcedReply = text;
+        rewritesState.replySequence = [];
+      },
+      replySequence: (texts: string[]) => {
+        rewritesState.replySequence = [...texts];
       },
     },
     judges: {

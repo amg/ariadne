@@ -24,5 +24,6 @@ After completing ANY code modification that could impact type checking, linting,
 ## Integration
 
 - **code-quality**: Defines quality standards and decision framework
+- **db**: Postgres/Kysely conventions — migrations, database testing
 - **workflow-gate**: Executes validation gate
 - **git-guardian**: Manages commits (requires explicit user confirmation)

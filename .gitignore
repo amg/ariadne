@@ -126,3 +126,6 @@ public
 .pi/*
 !.pi/agent/
 .testing/
+
+# Working scratch (tickets, grill sessions, research drafts)
+.work/

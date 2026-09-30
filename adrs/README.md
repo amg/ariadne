@@ -12,9 +12,10 @@ We use a lightweight markdown format for ADRs. Each ADR should include:
 
 ## Status
 
-All baseline architectural decisions have been accepted. See ADRs 0001–0006:
+All baseline architectural decisions have been accepted. See ADRs 0001–0007:
 0004 supersedes the DI convention of 0001; 0003's storage foundation has
 landed while its extraction/retrieval pipeline is still pending; 0006 is the
 single thread-health drift record — Turn embeddings keyed to messages,
 Segment drift against a rolling Gravity point, the frozen Anchor demoted to a
-chart gauge, and the advisory gate-replay shape.
+chart gauge, and the advisory gate-replay shape; 0007 is the live lane's
+message transformer — steps mediated only through the database.

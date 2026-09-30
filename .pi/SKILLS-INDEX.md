@@ -22,9 +22,14 @@ When a task matches a description below, you MUST use the `read` tool to load th
     <location>alex-chat-bot/.pi/agent/skills/workflow-gate/SKILL.md</location>
   </skill>
   <skill>
-    <name>db-access</name>
-    <description>Read-only database queries. Agent writes queries, user runs them from host terminal. Use for debugging, data analysis, and investigating issues.</description>
-    <location>alex-chat-bot/.pi/agent/skills/db-access/SKILL.md</location>
+    <name>db</name>
+    <description>Conventions for the Postgres/Kysely layer — migrations use the typed schema builder, and DB tests run against real Postgres, never mocks. Use when creating or editing migrations, or when writing database/repository tests.</description>
+    <location>alex-chat-bot/.pi/agent/skills/db/SKILL.md</location>
+  </skill>
+  <skill>
+    <name>domain-language</name>
+    <description>Enforces linguistic philosophy, naming conventions, and domain vocabulary rules to ensure clear, precise, and unambiguous communication across the codebase.</description>
+    <location>alex-chat-bot/.pi/agent/skills/domain-language/SKILL.md</location>
   </skill>
   <skill>
     <name>writing-ui-components</name>
