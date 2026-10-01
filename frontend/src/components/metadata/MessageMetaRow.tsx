@@ -8,6 +8,7 @@ const FINISH_REASON_LABEL: Record<MessageFinishReason, string> = {
   tool_calls: 'tools',
   timeout: 'timeout',
   interrupted: 'stopped',
+  error: 'error',
 };
 
 /**
@@ -50,6 +51,19 @@ function getReasoningDisplay(usage: MessageUsage | null): {
   };
 }
 
+/** Subtracts an absent-tolerant exclusion from a nullable base; null stays null. */
+function tokensExcluding(base: number | null, excluded: number | null): number | null {
+  return base === null ? null : base - (excluded ?? 0);
+}
+
+/** The cost cell's label; estimated spends advertise themselves as such. */
+function costDisplay(usage: MessageUsage | null): { title: string; estimatedTag: string } {
+  if (usage?.estimated) {
+    return { title: 'Estimated spend — the provider reported no usage', estimatedTag: ' est' };
+  }
+  return { title: 'Cost in USD', estimatedTag: '' };
+}
+
 /**
  * One metadata line under an assistant message: prompt / completion /
  * cached / reasoning / cost / time / status. While the reply streams,
@@ -68,9 +82,10 @@ export default function MessageMetaRow({
   action?: React.ReactNode;
   className?: string;
 }) {
-  const prompt = usage ? usage.promptTokens - (usage.cachedInputTokens ?? 0) : null;
-  const completion = usage ? usage.completionTokens - (usage.reasoningTokens ?? 0) : null;
+  const prompt = usage ? tokensExcluding(usage.promptTokens, usage.cachedInputTokens) : null;
+  const completion = usage ? tokensExcluding(usage.completionTokens, usage.reasoningTokens) : null;
   const reasoning = getReasoningDisplay(usage);
+  const cost = costDisplay(usage);
 
   return (
     <div
@@ -102,8 +117,9 @@ export default function MessageMetaRow({
         <span className="text-neutral-500"> {reasoning.label}</span>
       </span>
       {/* cost */}
-      <span title="Cost in USD">
+      <span title={cost.title}>
         <span className="font-bold text-neutral-200">{formatCost(usage?.costUsd) ?? '—'}</span>
+        {cost.estimatedTag ? <span className="text-neutral-500">{cost.estimatedTag}</span> : null}
       </span>
       {/* time — only on settled rows */}
       {showLatency ? (

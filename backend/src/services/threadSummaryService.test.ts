@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
+import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
@@ -9,8 +10,6 @@ import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
 import { getThreadSummary } from '@services/threadSummaryService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
-
-const ZERO_VECTOR = new Array<number>(1024).fill(0);
 
 async function createUserAndThread(): Promise<{ userId: string; threadId: string }> {
   const userId = randomUUID();
@@ -66,13 +65,25 @@ describe('getThreadSummary', () => {
       role: 'user',
       content: 'what about that?',
     });
+    // The embedding spend rides the arrival row; the rewrite/judge spends
+    // land as expansion-cost rows.
     await upsertArrivalEmbedding({
       messageId: userMessage.id,
-      embedding: ZERO_VECTOR,
-      modelId: 'embed/model',
+      embedding: new Array<number>(1024).fill(0),
+      modelId: EMBEDDING_MODEL_ID,
       embeddingCostUsd: 0.00000001,
-      rewriteCostUsd: 0.0000002,
-      judgeCostUsd: 0.0000003,
+    });
+    await upsertExpansionCost({
+      messageId: userMessage.id,
+      kind: 'rewrite',
+      model: env.REWRITE_MODEL,
+      costUsd: '0.0000002000',
+    });
+    await upsertExpansionCost({
+      messageId: userMessage.id,
+      kind: 'judge',
+      model: env.REWRITE_MODEL,
+      costUsd: '0.0000003000',
     });
 
     const summary = await getThreadSummary({ userId, threadId });

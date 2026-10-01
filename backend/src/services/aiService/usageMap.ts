@@ -1,5 +1,5 @@
 import type { MessageFinishReason, NewMessageUsage } from '@db/types';
-import type { LanguageModelUsage } from 'ai';
+import type { LanguageModelUsage, ModelMessage } from 'ai';
 import { encodingForModel } from 'js-tiktoken';
 import { getModelConfig } from '../modelConfigService';
 import { computeCostUsd } from './cost';
@@ -16,21 +16,44 @@ export function hasUsageReport(usage: LanguageModelUsage | undefined): usage is 
 }
 
 /**
+ * Counts tokens in a text with tiktoken (cl100k_base — a reasonable
+ * stand-in for Qwen, Llama, and other modern models). No tokenizer
+ * available: falls back to the rough 1-token-per-4-characters ratio.
+ */
+export function countTextTokens(text: string): number {
+  if (text === '') return 0;
+  try {
+    const encoder = encodingForModel('gpt-4'); // cl100k_base encoding
+    return encoder.encode(text).length;
+  } catch (error) {
+    console.warn('[usageMap] Failed to count text tokens:', error);
+    return Math.ceil(text.length / 4);
+  }
+}
+
+/**
  * Estimates reasoning token count from reasoning content using tiktoken.
  * Returns NULL when no reasoning content is provided.
- * Uses cl100k_base encoding (works well for Qwen, Llama, and other modern models).
  */
 function countReasoningTokens(reasoningContent: string | undefined): number | null {
   if (!reasoningContent || reasoningContent.trim() === '') return null;
-  try {
-    const encoder = encodingForModel('gpt-4'); // cl100k_base encoding
-    const tokens = encoder.encode(reasoningContent);
-    return tokens.length;
-  } catch (error) {
-    // Fallback: rough character-to-token estimate (1 token ≈ 4 chars)
-    console.warn('[usageMap] Failed to count reasoning tokens:', error);
-    return Math.ceil(reasoningContent.length / 4);
+  return countTextTokens(reasoningContent);
+}
+
+/**
+ * Locally counted prompt tokens for an exchange's stream input: the
+ * system prompt plus every replayed message, one naive token count per
+ * text with no chat-template overhead. Used as the estimate when a
+ * provider usage report never arrives.
+ */
+export function estimateChatPromptTokens(systemPrompt: string, messages: ModelMessage[]): number {
+  let tokens = countTextTokens(systemPrompt);
+  for (const message of messages) {
+    const text =
+      typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+    tokens += countTextTokens(text);
   }
+  return tokens;
 }
 
 /**
@@ -80,14 +103,7 @@ export async function buildUsageRow(args: {
 
   // Pricing resolved via the single fallback source (DB → FALLBACK_CONFIG
   // in modelConfigService); null → cost recorded as 0.
-  const modelConfig = await getModelConfig(args.model);
-  const pricing = modelConfig
-    ? {
-        input: modelConfig.inputPricePerMillion,
-        output: modelConfig.outputPricePerMillion,
-        cachedRateMultiplier: modelConfig.cachedRateMultiplier,
-      }
-    : null;
+  const pricing = await resolveModelPricing(args.model);
 
   const row: NewMessageUsage = {
     messageId: args.messageId,
@@ -141,6 +157,52 @@ export async function buildUsageRow(args: {
   // Estimate reasoning tokens from content (works even when provider reports 0)
   row.estimatedReasoningTokens = countReasoningTokens(args.reasoningContent);
 
+  if (args.latencyMs !== null) row.latencyMs = args.latencyMs;
+  return row;
+}
+
+/** Pricing through the single fallback source; null → cost recorded as 0. */
+async function resolveModelPricing(model: string) {
+  const modelConfig = await getModelConfig(model);
+  if (!modelConfig) return null;
+  return {
+    input: modelConfig.inputPricePerMillion,
+    output: modelConfig.outputPricePerMillion,
+    cachedRateMultiplier: modelConfig.cachedRateMultiplier,
+  };
+}
+
+/**
+ * The spend row for an exchange that ended without a provider usage
+ * report — stopped, disconnected, idled out, or aborted by the provider.
+ * The provider still bills the partial work, so the row accounts it the
+ * best way available: the locally counted prompt tokens of the exchange's
+ * stream input and a token count over the text that made it out, marked
+ * `estimated` and without a provider id or cache detail.
+ */
+export async function buildEstimatedUsageRow(args: {
+  messageId: string;
+  model: string;
+  /** Locally counted tokens of the exchange's stream input. */
+  promptTokens: number;
+  /** The text that made it out of the exchange before it ended. */
+  streamedText: string;
+  finishReason: MessageFinishReason;
+  latencyMs: number | null;
+}): Promise<NewMessageUsage> {
+  const promptTokens = args.promptTokens;
+  const completionTokens = countTextTokens(args.streamedText);
+  const pricing = await resolveModelPricing(args.model);
+
+  const row: NewMessageUsage = {
+    messageId: args.messageId,
+    estimated: true,
+    model: args.model,
+    promptTokens,
+    completionTokens,
+    costUsd: computeCostUsd({ pricing, promptTokens, completionTokens }).toFixed(10),
+    finishReason: args.finishReason,
+  };
   if (args.latencyMs !== null) row.latencyMs = args.latencyMs;
   return row;
 }

@@ -18,7 +18,7 @@ async function createAssistantMessage(): Promise<string> {
 describe('insertMessageUsage', () => {
   useTestDb();
 
-  it('inserts a usage row linked 1:1 to its message', async () => {
+  it('inserts a spend row linked 1:1 to its message', async () => {
     const messageId = await createAssistantMessage();
 
     const inserted = await insertMessageUsage({
@@ -35,6 +35,8 @@ describe('insertMessageUsage', () => {
     });
 
     expect(inserted.messageId).toBe(messageId);
+    // The insert-side default: provider-reported spend.
+    expect(inserted.estimated).toBe(false);
     expect(inserted.costUsd).toBe('0.0000052500');
     expect(inserted.latencyMs).toBe(123);
 
@@ -43,7 +45,7 @@ describe('insertMessageUsage', () => {
     expect(fetched?.finishReason).toBe('stop');
   });
 
-  it('rejects a second row for the same message (1:1 via PK)', async () => {
+  it('rejects a second row for the same message (PK)', async () => {
     const messageId = await createAssistantMessage();
     const first = await insertMessageUsage({
       messageId: messageId,

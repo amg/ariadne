@@ -6,11 +6,11 @@ type ListMessagesByThreadProps = {
 };
 
 /**
- * A `messages` row flattened with its optional `message_usage` columns.
- * All `usage*` fields are null when the message has no usage row yet
- * (user messages, in-flight or interrupted assistant messages). The
- * CamelCasePlugin maps `usageModel` → `usage_model` etc. in SQL and maps
- * the result row back to camelCase.
+ * A `messages` row flattened with its optional chat-spend columns. All
+ * `usage*` fields are null when the message has no usage row yet (user
+ * messages, in-flight assistant messages). The CamelCasePlugin maps
+ * `usageModel` → `usage_model` etc. in SQL and maps the result row back
+ * to camelCase.
  */
 export type MessageWithUsageRow = Message & {
   usageModel: string | null;
@@ -24,6 +24,7 @@ export type MessageWithUsageRow = Message & {
   usageCostUsd: string | null;
   usageFinishReason: string | null;
   usageLatencyMs: number | null;
+  usageEstimated: boolean | null;
 };
 
 export async function listMessagesByThread({
@@ -45,6 +46,7 @@ export async function listMessagesByThread({
       'messageUsage.costUsd as usageCostUsd',
       'messageUsage.finishReason as usageFinishReason',
       'messageUsage.latencyMs as usageLatencyMs',
+      'messageUsage.estimated as usageEstimated',
     ])
     .where('messages.threadId', '=', threadId)
     .orderBy('messages.createdAt', 'asc')

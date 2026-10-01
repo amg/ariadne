@@ -58,6 +58,35 @@ async function newestAssistantRow(threadId: string) {
   return undefined;
 }
 
+/**
+ * Aborts carry no provider usage block, yet the ledger still accounts the
+ * exchange. Reads the estimated spend row and verifies its identity fields
+ * and its fallback-priced cost over the tokens it stored.
+ */
+async function readEstimatedSpend(messageId: string) {
+  const usage = await getMessageUsageByMessageId({ messageId });
+  if (!usage) {
+    expect(usage, 'estimated spend row').toBeDefined();
+    return usage;
+  }
+  expect(usage.estimated).toBe(true);
+  expect(usage.providerId).toBeNull();
+  expect(usage.model).toBe(env.DEFAULT_MODEL);
+  const config = await getModelConfig(env.DEFAULT_MODEL);
+  expect(Number(usage.costUsd)).toBe(
+    computeCostUsd({
+      pricing: {
+        input: config?.inputPricePerMillion ?? null,
+        output: config?.outputPricePerMillion ?? null,
+        cachedRateMultiplier: config?.cachedRateMultiplier ?? null,
+      },
+      promptTokens: usage.promptTokens ?? 0,
+      completionTokens: usage.completionTokens ?? 0,
+    }),
+  );
+  return usage;
+}
+
 async function drain(handle: ChatStreamHandle): Promise<void> {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
     // Consuming the stream lets the exchange settle its persistence.
@@ -144,7 +173,9 @@ describe('submitChat', () => {
     // config fallback (modelConfigService FALLBACK_CONFIG — the single
     // fallback source: DB → hard-coded default model config).
     const fallbackConfig = await getModelConfig(env.DEFAULT_MODEL);
-    const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
+    const usage = await getMessageUsageByMessageId({
+      messageId: handle.assistantMessageId,
+    });
     expect(usage).toBeDefined();
     // 1 message in history + the new one → base 4 + 2
     expect(usage?.promptTokens).toBe(MOCK_CACHE.basePromptTokens + 2);
@@ -193,7 +224,7 @@ describe('submitChat', () => {
     const outcome = await handle.outcome;
     expect(outcome).toMatchObject({
       type: 'success',
-      data: { finishReason: 'interrupted', usagePersisted: false },
+      data: { finishReason: 'interrupted', usagePersisted: true },
     });
 
     // Partial text persisted (first token only, before the pause).
@@ -201,9 +232,14 @@ describe('submitChat', () => {
     const assistantRow = rows.find((row) => row.role === 'assistant');
     expect(assistantRow?.content).toBe('Mock ');
 
-    // Usage block never arrived → no usage row.
-    const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
-    expect(usage).toBeUndefined();
+    // No provider usage block arrived, yet the exchange still accounts
+    // its spend: an estimated ledger row from the locally counted input
+    // tokens and the text that made it out.
+    const usage = await readEstimatedSpend(handle.assistantMessageId);
+    expect(usage?.finishReason).toBe('interrupted');
+    expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.completionTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.latencyMs ?? -1).toBeGreaterThanOrEqual(0);
 
     // A deliberate stop settles the exchange as interrupted, releasing the thread.
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
@@ -222,12 +258,19 @@ describe('submitChat', () => {
     const outcome = await handle.outcome;
     expect(outcome).toMatchObject({
       type: 'success',
-      data: { finishReason: 'interrupted', usagePersisted: false },
+      data: { finishReason: 'interrupted', usagePersisted: true },
     });
 
     const assistantRow = await newestAssistantRow(threadId);
     expect(assistantRow?.content).toBe('');
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
+
+    // The prompt was billed even though no output token made it out: the
+    // estimated row accounts the input alone.
+    const usage = await readEstimatedSpend(handle.assistantMessageId);
+    expect(usage?.finishReason).toBe('interrupted');
+    expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.completionTokens).toBe(0);
 
     // The settled row must not trip the in-flight guard on the next exchange.
     const next = await assertSuccess(
@@ -255,6 +298,11 @@ describe('submitChat', () => {
       expect(assistantRow?.content).toBe('Mock ');
       // The watchdog's abort is a failure, not a deliberate stop.
       expect(assistantRow?.exchangeStatus).toBe('error');
+
+      // The failed exchange still settles its estimated spend, tagged
+      // with the timeout finish.
+      const usage = await readEstimatedSpend(handle.assistantMessageId);
+      expect(usage?.finishReason).toBe('timeout');
     } finally {
       restoreIdleTimeout(savedIdleTimeout);
     }

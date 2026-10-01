@@ -1,4 +1,5 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { getExpansionCostByMessageId } from '@queries/messageExpansionCosts/getExpansionCostByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -115,9 +116,17 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('accepted');
     expect(row.rewrittenText).toBe(REWRITE);
-    expect(row.rewriteCostUsd).not.toBeNull();
+    // The rewrite step's spend lands in the expansion-cost rows.
+    const rewriteSpend = await getExpansionCostByMessageId({
+      messageId: arrivalId,
+      kind: 'rewrite',
+    });
+    expect(rewriteSpend).toBeDefined();
+    expect(Number(rewriteSpend?.costUsd)).toBeGreaterThan(0);
     // The heuristic triggered directly — no judge was consulted.
-    expect(row.judgeCostUsd).toBeNull();
+    expect(
+      await getExpansionCostByMessageId({ messageId: arrivalId, kind: 'judge' }),
+    ).toBeUndefined();
     // The judged signal is the rewrite's embedding, nearly identical despite
     // the float4 round-trip digit loss.
     expect(cosineSimilarity(row.embedding, readingVector(REWRITE))).toBeGreaterThan(0.9999);
@@ -195,7 +204,10 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed_inference');
     expect(row.rewrittenText).toBeNull();
-    expect(row.rewriteCostUsd).toBeNull();
+    // The provider never billed the attempt — no expansion-cost row lands.
+    expect(
+      await getExpansionCostByMessageId({ messageId: arrivalId, kind: 'rewrite' }),
+    ).toBeUndefined();
     expect(cosineSimilarity(row.embedding, readingVector(RAW_ARRIVAL))).toBeGreaterThan(0.9999);
     // Inference failure is not a quality failure — no retry is spent.
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(1);

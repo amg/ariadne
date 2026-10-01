@@ -5,7 +5,8 @@ export type MessageFinishReason =
   | 'content_filter'
   | 'tool_calls'
   | 'timeout'
-  | 'interrupted';
+  | 'interrupted'
+  | 'error';
 
 /** The deployment feature-flag surfaces the chrome is driven from. */
 export interface AppConfig {
@@ -106,12 +107,16 @@ export const DEFAULT_THREAD_TITLE = 'New Chat';
 
 export const TITLE_GENERATING_SENTINEL = 'New Chat ...';
 
-/** Telemetry for one assistant message (backend `message_usage`, 1:1). */
+/** Telemetry for one assistant message (backend `message_usage` chat row). */
 export interface MessageUsage {
   model: string;
-  providerId: string;
-  promptTokens: number;
-  completionTokens: number;
+  /** Null when no provider response exists (estimated spends). */
+  providerId: string | null;
+  /** Null when the exchange ended before the provider reported tokens. */
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** True when the tokens and cost were counted locally, not provider-reported. */
+  estimated: boolean;
   /** Provider-reported reasoning tokens (DeepInfra reports 0 even when reasoning). */
   reasoningTokens: number | null;
   /** Our estimate from reasoning content length (NULL when no reasoning). */

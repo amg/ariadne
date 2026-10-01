@@ -49,17 +49,11 @@ export function messageRowToMessageWithUsage(
     usageCostUsd: costUsd,
     usageFinishReason: finishReason,
     usageLatencyMs: latencyMs,
+    usageEstimated: estimated,
     ...message
   } = row;
 
-  if (
-    model === null ||
-    providerId === null ||
-    promptTokens === null ||
-    completionTokens === null ||
-    costUsd === null ||
-    finishReason === null
-  ) {
+  if (model === null || costUsd === null || finishReason === null) {
     return { ...message, usage: null, driftVerdict };
   }
   return {
@@ -67,8 +61,9 @@ export function messageRowToMessageWithUsage(
     usage: {
       model,
       providerId,
-      promptTokens,
-      completionTokens,
+      // NOT NULL whenever the usage row exists; the join types them nullable.
+      promptTokens: promptTokens ?? 0,
+      completionTokens: completionTokens ?? 0,
       // NULL is meaningful: the provider didn't report these fields.
       cachedInputTokens,
       cacheWriteTokens,
@@ -77,6 +72,7 @@ export function messageRowToMessageWithUsage(
       costUsd,
       finishReason: finishReason as MessageFinishReason,
       latencyMs,
+      estimated: estimated === true,
     },
     driftVerdict,
   };

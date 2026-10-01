@@ -1,13 +1,12 @@
 import { db } from '@db/db';
 import type { MessageUsage } from '@db/types';
 
-type GetMessageUsageByMessageIdProps = {
-  messageId: string;
-};
-
+/** The chat exchange's one usage row for a message, when present. */
 export async function getMessageUsageByMessageId({
   messageId,
-}: GetMessageUsageByMessageIdProps): Promise<MessageUsage | undefined> {
+}: {
+  messageId: string;
+}): Promise<MessageUsage | undefined> {
   return db
     .selectFrom('messageUsage')
     .selectAll()

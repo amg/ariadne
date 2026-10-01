@@ -17,6 +17,7 @@ import {
   resolveInferenceConfig,
 } from './config';
 import { ChatExchange, type ChatOutcome } from './exchange';
+import { estimateChatPromptTokens } from './usageMap';
 
 /**
  * Per-call service boundary. Flow:
@@ -140,9 +141,13 @@ async function startExchange({
   });
 
   const controller = new AbortController();
+  const modelMessages = buildModelMessages(precedingRows, userMessage);
   const exchange = new ChatExchange({
     assistantMessageId: assistantMessage.id,
     model: config.model,
+    // If the provider's usage report never arrives, the spend is still
+    // accounted from the locally counted input tokens.
+    promptTokensEstimate: estimateChatPromptTokens(SYSTEM_PROMPT, modelMessages),
     idleTimeoutMs: config.idleTimeoutMs,
     // Fires on the idle deadline; user stop / client disconnect reuse the controller.
     onIdleTimeout: () => controller.abort(),
@@ -151,7 +156,7 @@ async function startExchange({
   const streamResult = streamText({
     model: createModel(config),
     system: SYSTEM_PROMPT,
-    messages: buildModelMessages(precedingRows, userMessage),
+    messages: modelMessages,
     abortSignal: controller.signal,
     maxRetries: 0,
     onChunk: ({ chunk }) => {
