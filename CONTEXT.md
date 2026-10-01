@@ -27,8 +27,26 @@ cost and drift; an Exchange is the in-flight run that produces it. The
 assistant row carries the Exchange's state (`exchange_status`:
 `pending → completed | interrupted | error`) while it streams; the guard
 bounces a second submit against a live Exchange, and a hard failure leaves
-it `pending` until the staleness window declares it lost.
+it `pending` until the staleness window declares it lost. Every settled
+Exchange accounts its spend — the provider's report when one arrived,
+otherwise an Estimated row. An Exchange ending without completing
+Abandons its arrival.
 _Avoid_: generation, request, job
+
+**Abandoned**:
+Marked on an Exchange's user Message when the Exchange ended without
+completing (stop, disconnect, timeout, provider error). The mark registers
+the arrival in the Thread — a still-untitled Thread takes its title from a
+short preview of the arrival text — and its text becomes the Resume
+Draft. Historical: a retry that completes the Turn does not clear it.
+_Avoid_: hidden, orphaned, dead
+
+**Resume Draft**:
+An Abandoned Exchange's arrival text owed back to the input: owed when
+the Thread's newest user Message is its abandoned arrival and no Exchange
+completed after it; consumed by a completing retry. Prefill is
+interrupt-recovery only — sending clears intent.
+_Avoid_: restore, recovery text
 
 **Thread**:
 An ordered sequence of Turns under one title. Its full history is resent to
@@ -196,4 +214,12 @@ _Avoid_: turn cost, delta cost
 **Running total**:
 Cumulative Thread cost to date: the sum of Marginal costs of all Turns.
 _Avoid_: total spend (keep the column name canonical), cumulative cost
+
+**Estimated spend**:
+What an Exchange settles when the provider's usage report never arrived:
+locally counted input tokens plus the text that made it out, priced by
+model and marked `estimated` on the usage row. Marginal and Running
+totals count it the same as provider-reported spend — an interrupted
+Exchange still accounts for what it spent.
+_Avoid_: fallback cost, projected cost
 

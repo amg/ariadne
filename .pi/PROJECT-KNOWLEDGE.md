@@ -14,6 +14,23 @@ Everything user-facing — features, tech stack, quick start, environment
 variables, deployment, project structure — lives in the root `README.md`.
 The README is the single source of project truth; do not replicate it here.
 
+## Chat exchange lifecycle
+
+Since 2026-10-01 every chat Exchange settles clean, interrupted ones
+included: provider-reported spend when the usage report arrived,
+otherwise an estimated row (locally counted input + emitted text,
+`estimated = true`) with finish reason `interrupted`/`timeout`/`error`.
+An Exchange ending without completing flags its arrival row `abandoned`
+(messages migration 015) and titles a still-untitled Thread from a short
+preview of the arrival text (50 chars, the rename cap). Spend surfaces
+are purpose-built: `message_usage` is chat-inference telemetry only,
+rewrite/judge spend lives in `message_expansion_costs`, embedding cost
+rides the arrival row; `sumThreadSpend()` is the single source of thread
+spend totals. `POST /api/threads/:id/stop` stops the live Exchange
+through the in-process exchange registry (single-replica assumption);
+`GET /api/threads/:id/draft` owes interrupted arrival text back to the
+input until a completed retry consumes it.
+
 ## Knowledge Map
 
 - **`CONTEXT.md`** (repo root) — the domain vocabulary. Code uses these
