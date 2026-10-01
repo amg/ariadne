@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
+import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { findResumeDraft } from '@queries/messages/findResumeDraft';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -15,6 +16,7 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import { editMessage } from '@services/messageService';
 import { getModelConfig } from '@services/modelConfigService';
 import { useTestDb } from '@test/test-db';
 import type { UIMessage } from 'ai';
@@ -318,6 +320,64 @@ describe('submitChat', () => {
       type: 'success',
       data: { finishReason: 'stop' },
     });
+    expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
+  });
+
+  it('edits fork: the abandoned arrival keeps tracking pre-edit cost, the retry exchanges the forked row', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const original = await assertSuccess(
+      await submitChat({ userId, threadId: thread.id, content: 'original question PAUSE:200' }),
+    );
+    const reader = original.stream.getReader();
+    let sawText = false;
+    while (!sawText) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value && value.type === 'text-delta') sawText = true;
+    }
+    original.abort();
+    await original.outcome;
+
+    // The edit forks: abandoned arrival kept intact, edited text inserted.
+    const originalUserRow = (await listMessagesByThread({ threadId: thread.id })).find(
+      (row) => row.role === 'user',
+    );
+    const edit = await editMessage({
+      userId,
+      threadId: thread.id,
+      messageId: originalUserRow?.id as string,
+      content: 'a reworded question',
+    });
+    expect(edit.type).toBe('success');
+
+    // The retry exchanges the forked row — its live gate runs for the
+    // first time there — and completes.
+    const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
+    await drain(retry);
+    expect(await retry.outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'stop' },
+    });
+
+    // History keeps the abandoned arrival before the forked arrival.
+    const rows = await listMessagesByThread({ threadId: thread.id });
+    expect(rows.map((row) => [row.role, row.abandoned])).toEqual([
+      ['user', true],
+      ['user', false],
+      ['assistant', false],
+    ]);
+    expect(rows.find((row) => row.abandoned)?.content).toBe('original question PAUSE:200');
+
+    // Both arrivals carry arrival rows: the old one replayed, the forked
+    // one judged by the retry's gate pass.
+    const userIds = rows.filter((row) => row.role === 'user').map((row) => row.id);
+    const arrivals = await listMessageEmbeddingsByMessageIds({ messageIds: userIds });
+    expect(new Set(arrivals.map((row) => row.messageId))).toEqual(new Set(userIds));
+
+    // Nothing is owed back: the forked row is not abandoned.
     expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
   });
 

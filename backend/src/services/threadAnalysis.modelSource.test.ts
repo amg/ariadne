@@ -4,7 +4,7 @@ import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSe
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
-import { getMessages, updateMessage } from '@services/messageService';
+import { editMessage, getMessages } from '@services/messageService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { useTestDb } from '@test/test-db';
@@ -177,7 +177,7 @@ describe('the live chain runs one per embedding model', () => {
     expect(bubbleOf(userMessageIds[1] as string)?.verdict).toBe('fire');
   });
 
-  it('an edit invalidates every model chain; the current one refills', async () => {
+  it('an edit keeps both chains on the abandoned row; the fork refills under the current model', async () => {
     const { threadId, userMessageIds } = await seedThread('cross-model edit', TOPIC_SPECS);
 
     modelState.current = PRIMARY;
@@ -187,21 +187,24 @@ describe('the live chain runs one per embedding model', () => {
 
     const lastUser = userMessageIds[userMessageIds.length - 1];
     if (!lastUser) throw new Error('seed too short');
-    await updateMessage({
+    const edit = await editMessage({
       userId: USER_ID,
       threadId,
       messageId: lastUser,
       content: `${TOPIC_SPECS[TOPIC_SPECS.length - 1]?.user ?? ''} — revised${PAD}`,
     });
+    expect(edit.type).toBe('success');
+    if (edit.type !== 'success') throw new Error('expected success');
+    const forkedId = edit.data.id;
 
-    // The shredded tail drops under BOTH models — an edit invalidates
-    // every chain's reading of the edited arrival and everything after.
+    // Both chains keep the abandoned arrival — its reading never changed,
+    // so every model's analysis is still correct for it.
     for (const modelId of [PRIMARY, SECONDARY]) {
-      const { logs, segments } = await readChain(threadId, modelId);
-      expect(logs.map((log) => log.messageId)).toEqual(userMessageIds.slice(0, -1));
-      expect(segments.map((segment) => segment.startMessageId)).not.toContain(lastUser);
+      const { logs } = await readChain(threadId, modelId);
+      expect(logs.map((log) => log.messageId)).toEqual(userMessageIds);
     }
 
+    // The refill judges the forked arrival under the current model…
     await insertMessage({
       threadId,
       role: 'assistant',
@@ -209,9 +212,9 @@ describe('the live chain runs one per embedding model', () => {
     });
     expect((await runLiveGate({ threadId })).type).toBe('success');
     const { logs: refilled } = await readChain(threadId, SECONDARY);
-    expect(refilled.map((log) => log.messageId)).toEqual(userMessageIds);
-    // The retired chain keeps its gap until its own model walks again.
+    expect(refilled.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
+    // …while the retired chain keeps it out until its own model walks again.
     const { logs: retired } = await readChain(threadId, PRIMARY);
-    expect(retired.map((log) => log.messageId)).toEqual(userMessageIds.slice(0, -1));
+    expect(retired.map((log) => log.messageId)).toEqual(userMessageIds);
   });
 });

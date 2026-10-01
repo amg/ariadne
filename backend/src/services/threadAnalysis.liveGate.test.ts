@@ -7,7 +7,7 @@ import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSe
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
-import { getMessages, updateMessage } from '@services/messageService';
+import { editMessage, getMessages } from '@services/messageService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { useTestDb } from '@test/test-db';
@@ -601,47 +601,51 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
   });
 });
 
-describe('edit invalidation — the chain re-fills from the edit', async () => {
-  it('an edit drops its arrival row and everything after; the refill rebuilds them', async () => {
+describe('edit forks — the abandoned arrival keeps its chain', () => {
+  it('an edit abandons its arrival intact; the refill judges the forked arrival', async () => {
     const { threadId, userMessageIds } = await seedThread('edit chain', TOPIC_SPECS);
     assertSuccess(await runLiveGate({ threadId }));
     const lastUser = userMessageIds[userMessageIds.length - 1];
     if (!lastUser) throw new Error('seed too short');
+    const originalContent = TOPIC_SPECS[TOPIC_SPECS.length - 1]?.user ?? '';
 
-    // Edit the last user message. The exchange drops the assistant reply
-    // after it, then the live signals; the walk re-fills them from the
-    // rewritten reading.
-    const editedContent = `${TOPIC_SPECS[TOPIC_SPECS.length - 1]?.user ?? ''} — revised${PAD}`;
-    await updateMessage({
+    // The edit forks: the arrival is abandoned, never rewritten.
+    const editedContent = `${originalContent} — revised${PAD}`;
+    const edit = await editMessage({
       userId: USER_ID,
       threadId,
       messageId: lastUser,
       content: editedContent,
     });
+    expect(edit.type).toBe('success');
+    if (edit.type !== 'success') throw new Error('expected success');
+    const forkedId = edit.data.id;
+    expect(forkedId).not.toBe(lastUser);
 
+    // The abandoned arrival keeps every chain row — its reading was never
+    // touched, so its analysis is still correct for it.
     const { logs: logsAfterEdit, segments: segmentsAfterEdit } = await readChain(threadId);
-    expect(logsAfterEdit.map((log) => log.messageId)).toEqual(
-      userMessageIds.slice(0, userMessageIds.length - 1),
-    );
-    expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).not.toContain(lastUser);
-    // The edited arrival itself lost its signal… until it returns.
+    expect(logsAfterEdit.map((log) => log.messageId)).toEqual(userMessageIds);
+    expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).toContain(lastUser);
     const storedAfterEdit = await listMessageEmbeddingsByMessageIds({
       messageIds: userMessageIds,
     });
-    expect(storedAfterEdit.map((row) => row.messageId)).toEqual(
-      userMessageIds.slice(0, userMessageIds.length - 1),
-    );
+    expect(new Set(storedAfterEdit.map((row) => row.messageId))).toEqual(new Set(userMessageIds));
+    // The forked arrival is not judged yet — it waits for the next pass.
+    expect(await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] })).toEqual([]);
 
-    // Reply again and the refill judges the rewritten arrival end-to-end.
+    // Reply again and the refill judges the forked arrival end-to-end.
     await insertMessage({ threadId, role: 'assistant', content: `revised reply${PAD}` });
     assertSuccess(await runLiveGate({ threadId }));
     const { logs: logsAfterRefill } = await readChain(threadId);
-    expect(logsAfterRefill.map((log) => log.messageId)).toEqual(userMessageIds);
-    const editedRow = await listMessageEmbeddingsByMessageIds({ messageIds: [lastUser] });
-    expect(editedRow).toHaveLength(1);
+    expect(logsAfterRefill.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
+    const forkedRows = await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] });
+    expect(forkedRows).toHaveLength(1);
 
     const messages = await getMessages({ userId: USER_ID, threadId });
-    expect(messages?.find((message) => message.id === lastUser)?.content).toBe(editedContent);
+    // The old text stays with its arrival; the forked row carries the edit.
+    expect(messages?.find((message) => message.id === lastUser)?.content).toBe(originalContent);
+    expect(messages?.find((message) => message.id === forkedId)?.content).toBe(editedContent);
   });
 });
 

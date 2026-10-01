@@ -1,4 +1,4 @@
-import { updateMessage } from '@services/messageService';
+import { editMessage } from '@services/messageService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -27,9 +27,11 @@ function sendUpdateError(reply: FastifyReply, error: Extract<Result<never>, { ty
 }
 
 /**
- * Edits the thread's last user message. Empty strings are rejected up front
- * so an edit can never blank a bubble out — retry (chat regenerate) is the
- * recovery path for replies, not deletion.
+ * Edits the thread's last user message — a fork: the old arrival is
+ * abandoned (text and arrival spend stay) and the edited text lands as a
+ * new user row. Empty strings are rejected up front so an edit can never
+ * blank a bubble out — retry (chat regenerate) is the recovery path for
+ * replies, not deletion.
  */
 export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
   fastify.patch(
@@ -45,7 +47,7 @@ export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'content must be a non-empty string' });
       }
 
-      const result = await updateMessage({
+      const result = await editMessage({
         userId: REQUEST_USER_ID,
         threadId: id,
         messageId,

@@ -22,8 +22,13 @@ otherwise an estimated row (locally counted input + emitted text,
 `estimated = true`) with finish reason `interrupted`/`timeout`/`error`.
 An Exchange ending without completing flags its arrival row `abandoned`
 (messages migration 015) and titles a still-untitled Thread from a short
-preview of the arrival text (50 chars, the rename cap). Spend surfaces
-are purpose-built: `message_usage` is chat-inference telemetry only,
+preview of the arrival text (50 chars, the rename cap). Editing the last
+user prompt forks instead of rewriting: the old arrival row is abandoned
+untouched (text and arrival analysis stay, keeping pre-edit costs
+tracked) and the edited text lands as a new arrival row, which the retry
+exchanges and the live gate judges there (already-analysed arrivals
+play back — never re-embedded or re-judged). Spend surfaces are
+purpose-built: `message_usage` is chat-inference telemetry only,
 rewrite/judge spend lives in `message_expansion_costs`, embedding cost
 rides the arrival row; `sumThreadSpend()` is the single source of thread
 spend totals. `POST /api/threads/:id/stop` stops the live Exchange

@@ -1,13 +1,11 @@
 import { env } from '@config/env';
 import type { Message, MessageFinishReason, MessageUsage } from '@db/types';
-import { deleteMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/deleteMessageEmbeddingsByMessageIds';
 import { deleteMessage } from '@queries/messages/deleteMessage';
+import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread';
-import { updateMessageContent } from '@queries/messages/updateMessageContent';
-import { deleteSegmentDriftLogsByMessageIds } from '@queries/segmentDriftLogs/deleteSegmentDriftLogsByMessageIds';
+import { markMessageAbandoned } from '@queries/messages/markMessageAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
-import { deleteThreadSegmentsByStartMessageIds } from '@queries/threadSegments/deleteThreadSegmentsByStartMessageIds';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
@@ -89,15 +87,18 @@ type UpdateMessageProps = {
 const MAX_MESSAGE_CONTENT_LENGTH = 10_000;
 
 /**
- * The single writer for persisted message content — prompts only. The
- * thread's last user message is editable; saving is a rewrite-and-resend
- * affordance, so any assistant replies following the edited prompt are
- * deleted (usage rows cascade). Assistant replies themselves are never
- * edited — retry (chat regenerate) is their recovery path. "not_last"
- * (409) and "thread_not_found" (404) keep foreign/unknown ids
+ * The edit fork — prompts only. The thread's last user message is
+ * editable, and an edit ABANDONS its arrival rather than rewriting it:
+ * the old row keeps its text and its arrival analysis (still correct for
+ * the untouched reading), so its spend keeps tracking the pre-edit costs;
+ * the edited text lands as a NEW user row, which the retry exchanges and
+ * the live gate judges. Replies following the old prompt are dropped
+ * (usage rows cascade). Assistant replies themselves are never edited —
+ * retry (chat regenerate) is their recovery path. "not_last" (409) and
+ * "thread_not_found" (404) keep foreign/unknown ids
  * indistinguishable from permission failures.
  */
-export async function updateMessage({
+export async function editMessage({
   userId,
   threadId,
   messageId,
@@ -138,22 +139,30 @@ export async function updateMessage({
     await deleteMessage({ messageId: row.id });
   }
 
-  // Live chain invalidation: the arrival signal for the edited row and
-  // everything after it came from the old reading. Arrival embeddings,
-  // drift logs and segment starts drop here; the chain re-fills itself the
-  // next time an arrival lands or the analysis surface reads it.
-  const invalidatedRows = rows.slice(lastUserIndex);
-  const invalidatedUserIds = invalidatedRows
-    .filter((row) => row.role === 'user')
-    .map((row) => row.id);
-  await deleteMessageEmbeddingsByMessageIds({
-    messageIds: invalidatedRows.map((row) => row.id),
-  });
-  await deleteSegmentDriftLogsByMessageIds({ messageIds: invalidatedUserIds });
-  await deleteThreadSegmentsByStartMessageIds({ startMessageIds: invalidatedUserIds });
+  // The abandoned arrival keeps its text and arrival analysis intact, and
+  // its arrival spend (embedding/rewrite/judge) keeps tracking pre-edit cost.
+  await markMessageAbandoned({ messageId });
 
-  await updateMessageContent({ messageId, content: normalized });
-  return ok(messageRowToMessageWithUsage({ ...lastUser, content: normalized }));
+  // The fork: the edited text lands as a new user row — the arrival the
+  // retry exchanges and the live gate judges.
+  const forked = await insertMessage({ threadId, role: 'user', content: normalized });
+  return ok(
+    messageRowToMessageWithUsage({
+      ...forked,
+      usageModel: null,
+      usageProviderId: null,
+      usagePromptTokens: null,
+      usageCompletionTokens: null,
+      usageCachedInputTokens: null,
+      usageCacheWriteTokens: null,
+      usageReasoningTokens: null,
+      usageEstimatedReasoningTokens: null,
+      usageCostUsd: null,
+      usageFinishReason: null,
+      usageLatencyMs: null,
+      usageEstimated: null,
+    }),
+  );
 }
 
 type GetMessagesProps = {

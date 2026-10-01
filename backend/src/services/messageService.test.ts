@@ -6,7 +6,7 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { SYSTEM_PROMPT } from '@services/aiService/config';
-import { getMessages, updateMessage } from '@services/messageService';
+import { editMessage, getMessages } from '@services/messageService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
@@ -78,8 +78,8 @@ describe('messageService', () => {
     });
   });
 
-  describe('updateMessage', () => {
-    it('edits the last user message and drops the reply generated from the old prompt', async () => {
+  describe('editMessage', () => {
+    it('forks the edit: abandons the old arrival and inserts the edited text as a new one', async () => {
       const { userId, threadId } = await createRandomThread();
       const user = await insertMessage({ threadId: threadId, role: 'user', content: 'first' });
       const assistant = await insertMessage({
@@ -101,22 +101,29 @@ describe('messageService', () => {
         latencyMs: 42,
       });
 
-      const result = await updateMessage({
+      const result = await editMessage({
         userId,
         threadId,
         messageId: user.id,
         content: '  rewritten prompt  ',
       });
 
+      // The response carries the forked row, not the old one.
       expect(result).toMatchObject({
         type: 'success',
-        data: { id: user.id, role: 'user', content: 'rewritten prompt' },
+        data: { role: 'user', content: 'rewritten prompt' },
       });
+      if (result.type !== 'success') throw new Error('expected success');
+      expect(result.data.id).not.toBe(user.id);
 
-      // The stale reply is gone (usage cascaded); thread ends at the prompt,
-      // ready for the client to immediately retry the exchange.
+      // The old arrival stays — original text intact, flagged abandoned so
+      // its arrival spend keeps tracking the pre-edit costs; the stale
+      // reply is gone (usage cascaded); the forked row ends the thread.
       const rows = await listMessagesByThread({ threadId });
-      expect(rows.map((row) => [row.role, row.content])).toEqual([['user', 'rewritten prompt']]);
+      expect(rows.map((row) => [row.role, row.content, row.abandoned])).toEqual([
+        ['user', 'first', true],
+        ['user', 'rewritten prompt', false],
+      ]);
       expect(await getMessageUsageByMessageId({ messageId: assistant.id })).toBeUndefined();
     });
 
@@ -124,8 +131,8 @@ describe('messageService', () => {
       const { userId, threadId } = await createRandomThread();
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
-      const empty = await updateMessage({ userId, threadId, messageId: message.id, content: '' });
-      const blank = await updateMessage({
+      const empty = await editMessage({ userId, threadId, messageId: message.id, content: '' });
+      const blank = await editMessage({
         userId,
         threadId,
         messageId: message.id,
@@ -151,7 +158,7 @@ describe('messageService', () => {
       const { userId, threadId } = await createRandomThread();
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
-      const result = await updateMessage({
+      const result = await editMessage({
         userId,
         threadId,
         messageId: message.id,
@@ -177,13 +184,13 @@ describe('messageService', () => {
         content: 'answer two',
       });
 
-      const editEarlierUser = await updateMessage({
+      const editEarlierUser = await editMessage({
         userId,
         threadId,
         messageId: earlier.id,
         content: 'rewritten',
       });
-      const editAssistant = await updateMessage({
+      const editAssistant = await editMessage({
         userId,
         threadId,
         messageId: reply.id,
@@ -213,21 +220,21 @@ describe('messageService', () => {
       });
 
       // Unknown thread id.
-      const unknownThread = await updateMessage({
+      const unknownThread = await editMessage({
         userId,
         threadId: randomUUID(),
         messageId: message.id,
         content: 'x',
       });
       // Foreign thread id.
-      const foreignThread = await updateMessage({
+      const foreignThread = await editMessage({
         userId,
         threadId: foreign.threadId,
         messageId: foreignMessage.id,
         content: 'x',
       });
       // Unknown message id in a valid thread.
-      const unknownMessage = await updateMessage({
+      const unknownMessage = await editMessage({
         userId,
         threadId,
         messageId: randomUUID(),

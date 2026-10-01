@@ -26,11 +26,12 @@ import { estimateChatPromptTokens } from './usageMap';
  *   1. verify thread ownership,
  *   2. resolve the user turn (insert it on `submitChat`, reuse the persisted
  *      last user row on `retryLastExchange`),
- *   3. run the live thread-health gate on the arriving user Message
- *      (`submitChat` only): expansion → embed → the shared two-channel
- *      verdict → persist, awaited before inference; a pipeline failure
- *      fails the whole exchange. `regenerate`/`resume-stream` carry no new
- *      arrival and skip it;
+ *   3. run the live thread-health gate on the arriving user Message:
+ *      expansion → embed → the shared two-channel verdict → persist,
+ *      awaited before inference; a pipeline failure fails the whole
+ *      exchange. Retries re-run the gate too — already-analysed
+ *      arrivals replay (never re-embedded/re-judged), while a freshly
+ *      forked arrival (an edit) is gated for the first time there;
  *   4. `streamText` over the full thread history, with inter-token idle
  *      timeout watched by the exchange,
  *   5. `ChatExchange` persists text + usage as the stream settles.
@@ -312,12 +313,25 @@ export async function retryLastExchange({
   const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
   if (!userMessage) return err('nothing_to_regenerate');
 
-  return ok(
-    await startExchange({
-      userId,
-      threadId,
-      precedingRows: rows.slice(0, userIndex),
-      userMessage,
-    }),
-  );
+  // The exchanged arrival is gated: already-analysed arrivals replay
+  // (never re-embedded, never re-judged — cheap and idempotent), while a
+  // freshly forked arrival — an edit abandoned the old text there and
+  // inserted this row — is gated for the first time here.
+  const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
+  if (gate.type === 'error') return gate;
+
+  const handle = await startExchange({
+    userId,
+    threadId,
+    precedingRows: rows.slice(0, userIndex),
+    userMessage,
+  });
+  if (gate.data.verdict !== null && gate.data.messageId !== null) {
+    handle.threadVerdict = {
+      messageId: gate.data.messageId,
+      verdict: gate.data.verdict,
+      fireChannel: gate.data.fireChannel,
+    };
+  }
+  return ok(handle);
 }

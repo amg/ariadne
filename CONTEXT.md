@@ -48,6 +48,14 @@ completed after it; consumed by a completing retry. Prefill is
 interrupt-recovery only — sending clears intent.
 _Avoid_: restore, recovery text
 
+**Edit**:
+Forking the last user prompt. The old arrival row is abandoned untouched
+— its text and arrival analysis stay, keeping pre-edit costs tracked —
+and the edited text lands as a new arrival row. The retry exchanges the
+new arrival, and the live thread-health gate acts there. Only the newest
+prompt is editable: every earlier one owes the conversation its reading.
+_Avoid_: message update, in-place rewrite
+
 **Thread**:
 An ordered sequence of Turns under one title. Its full history is resent to
 the model on every Turn.
