@@ -36,6 +36,12 @@ export interface MessagesTable {
   role: 'user' | 'assistant' | 'system';
   content: string;
   /**
+   * Set on an exchange's arrival row when the exchange ended without
+   * completing, so the abandoned arrival registers in the thread
+   * (partial title + resume draft) instead of being swallowed.
+   */
+  abandoned: Generated<boolean>;
+  /**
    * Lifecycle of an assistant row's exchange: `pending` while the reply
    * streams, terminal once it settles. Non-assistant rows keep the
    * terminal default.

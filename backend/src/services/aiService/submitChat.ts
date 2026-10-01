@@ -3,12 +3,14 @@ import type { Message } from '@db/types';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { markMessageAbandoned } from '@queries/messages/markMessageAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { runLiveGate } from '@services/threadAnalysis';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, type ResultError, err, ok } from '../../types/result';
+import { renameThread } from '../threadService';
 import {
   NOT_CONFIGURED_MESSAGE,
   SYSTEM_PROMPT,
@@ -66,6 +68,16 @@ type RetryLastExchangeProps = {
 };
 
 const STREAM_ERROR_MESSAGE = 'The assistant hit an error while generating the reply.';
+
+/** Abandoned threads title from the arrival text; capped at the rename limit. */
+const ABANDONED_TITLE_MAX_CHARS = 50;
+
+/** Short preview of the arrival text that titles a still-untitled thread. */
+function abandonedTitlePreview(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= ABANDONED_TITLE_MAX_CHARS) return trimmed;
+  return `${trimmed.slice(0, ABANDONED_TITLE_MAX_CHARS - 1).trimEnd()}\u2026`;
+}
 
 /** System prompt + prior turns (user/assistant only) + the new user turn. */
 function buildModelMessages(
@@ -142,6 +154,7 @@ async function startExchange({
 
   const controller = new AbortController();
   const modelMessages = buildModelMessages(precedingRows, userMessage);
+
   const exchange = new ChatExchange({
     assistantMessageId: assistantMessage.id,
     model: config.model,
@@ -151,6 +164,23 @@ async function startExchange({
     idleTimeoutMs: config.idleTimeoutMs,
     // Fires on the idle deadline; user stop / client disconnect reuse the controller.
     onIdleTimeout: () => controller.abort(),
+  });
+
+  // An exchange that ends without completing abandons its arrival: flags the
+  // user row immediately, and titles a still-untitled thread from the run's
+  // own text so the shared listing picks it up instead of swallowing it.
+  // Best effort — the outcome and the spend settlement are authoritative.
+  void exchange.outcome.then(async (result) => {
+    if (result.type === 'success' && result.data.finishReason !== 'interrupted') return;
+    try {
+      await markMessageAbandoned({ messageId: userMessage.id });
+      const thread = await findThreadByIdAndUser({ userId, threadId });
+      if (thread && !thread.title) {
+        await renameThread({ userId, threadId, title: abandonedTitlePreview(userMessage.content) });
+      }
+    } catch {
+      // Titling/flagging must not fail the exchange.
+    }
   });
 
   const streamResult = streamText({

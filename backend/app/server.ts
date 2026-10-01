@@ -11,6 +11,8 @@ import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages
 import { setupModelsRefreshRoute } from '@routes/models';
 import {
   setupThreadAnalysisRoute,
+  setupThreadDraftRoute,
+  setupThreadStopRoute,
   setupThreadSummaryRoute,
   setupThreadsDeleteRoute,
   setupThreadsGenerateTitleRoute,
@@ -86,6 +88,8 @@ setupMessagesGetRoute(app);
 setupMessagesPatchRoute(app);
 setupModelsRefreshRoute(app);
 setupChatPostRoute(app);
+setupThreadStopRoute(app);
+setupThreadDraftRoute(app);
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';

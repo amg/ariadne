@@ -198,6 +198,7 @@ export async function getMessages({
     role: 'system',
     content: SYSTEM_PROMPT,
     exchangeStatus: 'completed',
+    abandoned: false,
     createdAt: thread.createdAt,
     usage: null,
     driftVerdict: null,

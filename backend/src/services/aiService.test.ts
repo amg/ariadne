@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
+import { findResumeDraft } from '@queries/messages/findResumeDraft';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
@@ -90,6 +92,18 @@ async function readEstimatedSpend(messageId: string) {
 async function drain(handle: ChatStreamHandle): Promise<void> {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
     // Consuming the stream lets the exchange settle its persistence.
+  }
+}
+
+/** The abandon flag lands in an async outcome hook; wait for it. */
+async function waitForAbandonedUserRow(threadId: string): Promise<string> {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const rows = await listMessagesByThread({ threadId });
+    const userRow = rows.find((row) => row.role === 'user' && row.abandoned);
+    if (userRow) return userRow.id;
+    if (Date.now() > deadline) throw new Error('the arrival was never abandoned');
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
@@ -243,6 +257,68 @@ describe('submitChat', () => {
 
     // A deliberate stop settles the exchange as interrupted, releasing the thread.
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
+
+    // The abandoned arrival registers in the thread: the user row is
+    // flagged, and its text is owed back to the input as the resume draft.
+    const userRow = rows.find((row) => row.role === 'user');
+    expect(await waitForAbandonedUserRow(threadId)).toBe(userRow?.id);
+    const draft = await findResumeDraft({ threadId });
+    expect(draft?.messageId).toBe(userRow?.id);
+    expect(draft?.content).toBe('stop me please PAUSE:200');
+    // The thread already has its title — the interruption leaves it alone.
+    expect((await findThreadByIdAndUser({ userId, threadId }))?.title).toBe('AI thread');
+  });
+
+  it('titles a still-untitled thread from the abandoned arrival text', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const handle = await assertSuccess(
+      await submitChat({
+        userId,
+        threadId: thread.id,
+        content: `${'abcd '.repeat(12).trim()}`,
+      }),
+    );
+    handle.abort();
+    const outcome = await handle.outcome;
+    expect(outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'interrupted' },
+    });
+
+    await waitForAbandonedUserRow(thread.id);
+    // Over the char cap: clipped at the boundary and ellipsized.
+    expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBe(
+      `${'abcd '.repeat(10).trim()}\u2026`,
+    );
+  });
+
+  it('clears the resume draft once the exchange completes', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const interrupted = await assertSuccess(
+      await submitChat({ userId, threadId: thread.id, content: 'retry me please PAUSE:200' }),
+    );
+    interrupted.abort();
+    await interrupted.outcome;
+    await waitForAbandonedUserRow(thread.id);
+    expect((await findResumeDraft({ threadId: thread.id }))?.content).toBe(
+      'retry me please PAUSE:200',
+    );
+
+    // Retrying the failed exchange completes it; the completed reply
+    // consumes the draft the interrupted run offered.
+    const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
+    await drain(retry);
+    expect(await retry.outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'stop' },
+    });
+    expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
   });
 
   it('settles a before-first-token stop without stranding the row as pending', async () => {

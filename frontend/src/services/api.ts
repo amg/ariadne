@@ -188,6 +188,28 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
 }
 
+export type ResumeDraft = { messageId: string; text: string };
+
+/**
+ * The arrival text of the thread's newest exchange when it was abandoned
+ * (interrupted or failed) — the input prefills from it; null when nothing
+ * is owed.
+ */
+export async function fetchResumeDraft(threadId: string): Promise<ResumeDraft | null> {
+  const res = await fetch(`/api/threads/${threadId}/draft`);
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`Failed to fetch resume draft: ${res.statusText}`);
+  return res.json();
+}
+
+/** Explicit user stop of the thread's live exchange; false when none runs. */
+export async function stopThreadExchange(threadId: string): Promise<boolean> {
+  const res = await fetch(`/api/threads/${threadId}/stop`, { method: 'POST' });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`Failed to stop exchange: ${res.statusText}`);
+  return true;
+}
+
 export function fetchMessages(threadId: string): Promise<Message[]> {
   const url = `/api/threads/${threadId}/messages`;
   return coalesceGet(url, async () => {

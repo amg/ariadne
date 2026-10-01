@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { type ChatStreamHandle, retryLastExchange, submitChat } from '@services/aiService';
+import {
+  type ChatStreamHandle,
+  clearActiveExchange,
+  registerActiveExchange,
+  retryLastExchange,
+  submitChat,
+} from '@services/aiService';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
 import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
@@ -66,7 +72,7 @@ function sendExchangeError(
 }
 
 /** Streams an exchange handle to the client; a disconnect aborts the provider. */
-function createStreamResponse(reply: FastifyReply, handle: ChatStreamHandle) {
+function createStreamResponse(reply: FastifyReply, threadId: string, handle: ChatStreamHandle) {
   // Client disconnect (user stop / closed tab) aborts the provider stream, which
   // persists the partial text as 'interrupted'. Use the *response* raw socket:
   // under Fastify v5 + current Node the IncomingMessage 'close'/'aborted' events
@@ -74,6 +80,7 @@ function createStreamResponse(reply: FastifyReply, handle: ChatStreamHandle) {
   let finished = false;
   void handle.outcome.finally(() => {
     finished = true;
+    clearActiveExchange(threadId, handle);
   });
   reply.raw.on('close', () => {
     if (!finished) handle.abort();
@@ -136,7 +143,8 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
         if (result.type === 'error') {
           return sendExchangeError(reply, result);
         }
-        return createStreamResponse(reply, result.data);
+        registerActiveExchange(threadId, result.data);
+        return createStreamResponse(reply, threadId, result.data);
       }
 
       const content = extractLastUserText(request.body?.messages);
@@ -148,7 +156,8 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
       if (result.type === 'error') {
         return sendExchangeError(reply, result);
       }
-      return createStreamResponse(reply, result.data);
+      registerActiveExchange(threadId, result.data);
+      return createStreamResponse(reply, threadId, result.data);
     },
   );
 }

@@ -3,7 +3,9 @@ import { env } from '@config/env';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
 import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
+import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
+import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
@@ -120,5 +122,24 @@ describe('getThreadSummary', () => {
     expect(summary?.models).toEqual([
       { modelId: 'provider/model-a', roles: ['chat'], pricing: null },
     ]);
+  });
+
+  it('counts only visible rows: deleting a message deletes its spend with it', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addChatExchange(threadId, '0.0000052500');
+
+    const assistant = (await listMessagesByThread({ threadId })).find(
+      (row) => row.role === 'assistant',
+    );
+    expect(assistant).toBeDefined();
+
+    const before = await getThreadSummary({ userId, threadId });
+    expect(before?.totalCostUsd).toBe('0.0000052500');
+
+    // Spend rides its message row: the hard delete cascades the ledger row,
+    // so the thread total only ever reflects what the user can still see.
+    await deleteMessage({ messageId: assistant?.id as string });
+    const after = await getThreadSummary({ userId, threadId });
+    expect(after?.totalCostUsd).toBe('0.0000000000');
   });
 });
