@@ -1,6 +1,7 @@
-import type { MessageFinishReason } from '@db/types';
+import type { MessageExchangeStatus, MessageFinishReason } from '@db/types';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
+import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { updateMessageContent } from '@queries/messages/updateMessageContent';
 import type { FinishReason, LanguageModelUsage } from 'ai';
 import { type Result, err, ok } from '../../types/result';
@@ -97,14 +98,14 @@ export class ChatExchange {
   async completeNatural(event: NaturalFinishEvent): Promise<void> {
     this.clearIdleTimer();
     try {
-      await this.persistText();
-
       // Provider-side failure → partial text kept, no usage row, bubble error.
       if (event.finishReason === 'error' || event.finishReason === 'other') {
+        await this.settleText('error');
         this.resolveOutcome(err('provider_error', 'The provider aborted the stream.'));
         return;
       }
 
+      await this.settleText('completed');
       const finishReason =
         event.finishReason !== undefined ? SDK_FINISH_REASON_MAP[event.finishReason] : 'stop';
       const usagePersisted = await this.persistUsage(event, finishReason);
@@ -119,7 +120,9 @@ export class ChatExchange {
   /** Aborted stream (onAbort): user stop, client disconnect or idle timeout. */
   async completeAbort(): Promise<void> {
     this.clearIdleTimer();
-    await this.persistText().catch(() => {});
+    // The idle guard fired the abort: the stream died on its own, nobody chose to stop it.
+    const exchangeStatus: MessageExchangeStatus = this.idleFired ? 'error' : 'interrupted';
+    await this.settleText(exchangeStatus).catch(() => {});
     if (this.idleFired) {
       this.resolveOutcome(err('stream_timeout', 'The stream went idle between tokens.'));
       return;
@@ -133,7 +136,7 @@ export class ChatExchange {
   /** Safety net (onError) so the outcome promise always settles. */
   async completeError(error: unknown): Promise<void> {
     this.clearIdleTimer();
-    await this.persistText().catch(() => {});
+    await this.settleText('error').catch(() => {});
     this.resolveOutcome(
       err(
         this.idleFired ? 'stream_timeout' : 'provider_error',
@@ -165,19 +168,24 @@ export class ChatExchange {
       : (this.lastChunkAt ?? this.firstTokenAt) - this.firstTokenAt;
   }
 
-  private async persistText(): Promise<void> {
-    // If we have neither text nor reasoning, nothing to update.
-    if (this.assistantText === '' && this.assistantReasoning === '') return;
-
-    // We only persist the final generated text right now.
-    // Reasoning is considered ephemeral and dropped after the stream finishes,
-    // though the frontend cache preserves it visually until page reload.
-    // (To persist reasoning, updateMessageContent/DB schema would need a reasoning column).
-    if (this.assistantText === '') return;
-
-    await updateMessageContent({
+  /**
+   * Persists the final text and settles the row's exchange state in the
+   * same write when text exists; a before-first-token abort has no
+   * content to persist, so the exchange-state settle is the write.
+   */
+  private async settleText(exchangeStatus: MessageExchangeStatus): Promise<void> {
+    // Reasoning is ephemeral (dropped at settlement), so only text drives the content write.
+    if (this.assistantText !== '') {
+      await updateMessageContent({
+        messageId: this.deps.assistantMessageId,
+        content: this.assistantText,
+        exchangeStatus,
+      });
+      return;
+    }
+    await updateExchangeStatus({
       messageId: this.deps.assistantMessageId,
-      content: this.assistantText,
+      exchangeStatus,
     });
   }
 

@@ -33,6 +33,10 @@ export type EnvConfig = {
   AI_STREAM_IDLE_TIMEOUT_MS: number;
   ENABLE_REASONING: boolean;
 
+  // Exchange lifecycle
+  /** How long an assistant row may stay `pending` before being declared lost. */
+  EXCHANGE_STALENESS_MS: number;
+
   // Titling Service
   AI_TITLING_TIMEOUT_MS: number | undefined;
   TITLING_MODEL: string | undefined;
@@ -58,10 +62,12 @@ function getString(key: string, fallback: string): string {
 }
 
 /**
- * Helper to get a number from env with fallback.
+ * Helper to get a number from env with fallback. Unset and unparseable
+ * values (an empty string parses to NaN) both fall back.
  */
 function getNumber(key: string, fallback: number): number {
-  return Number.parseInt(process.env[key] ?? String(fallback), 10);
+  const parsed = Number.parseInt(process.env[key] ?? String(fallback), 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 
 function getBoolean(key: string, fallback: boolean): boolean {
@@ -145,6 +151,14 @@ export const env: EnvConfig = {
   get ENABLE_REASONING() {
     const value = process.env.ENABLE_REASONING;
     return value !== 'false';
+  },
+
+  // Exchange lifecycle: a `pending` assistant row older than this window
+  // belongs to an exchange whose process died before settling it. The
+  // window should sit well above the longest real exchange (~3x the
+  // observed maximum settled latency).
+  get EXCHANGE_STALENESS_MS() {
+    return getNumber('EXCHANGE_STALENESS_MS', 300_000);
   },
 
   // Titling Service

@@ -32,6 +32,25 @@ describe('insertMessage', () => {
     expect(message.createdAt).toBeInstanceOf(Date);
   });
 
+  it('defaults the exchange status to completed and accepts an explicit one', async () => {
+    const threadId = await createRandomThread();
+
+    const plain = await insertMessage({
+      threadId: threadId,
+      role: 'assistant',
+      content: 'settled by default',
+    });
+    expect(plain.exchangeStatus).toBe('completed');
+
+    const pending = await insertMessage({
+      threadId: threadId,
+      role: 'assistant',
+      content: '',
+      exchangeStatus: 'pending',
+    });
+    expect(pending.exchangeStatus).toBe('pending');
+  });
+
   it('round-trips unicode content', async () => {
     const threadId = await createRandomThread();
     const content = 'Héllo 🌍 —日本語—';

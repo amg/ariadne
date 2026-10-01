@@ -34,8 +34,22 @@ export interface MessagesTable {
   threadId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /**
+   * Lifecycle of an assistant row's exchange: `pending` while the reply
+   * streams, terminal once it settles. Non-assistant rows keep the
+   * terminal default.
+   */
+  exchangeStatus: Generated<MessageExchangeStatus>;
   createdAt: Generated<Date>;
 }
+
+/**
+ * The recorded end of an assistant exchange. `pending` rows belong to a
+ * live or lost stream; `interrupted` = stopped or disconnected on
+ * purpose, `error` = the exchange failed.
+ */
+export const EXCHANGE_STATUSES = ['pending', 'completed', 'interrupted', 'error'] as const;
+export type MessageExchangeStatus = (typeof EXCHANGE_STATUSES)[number];
 
 export interface MessageUsageTable {
   messageId: string; // UUID FK -> messages.id (1:1, PK)

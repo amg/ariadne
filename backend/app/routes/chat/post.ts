@@ -45,6 +45,12 @@ function sendExchangeError(
     reply.code(409).send({ error: 'The thread has no exchange to retry.' });
     return;
   }
+  if (result.code === 'exchange_in_flight') {
+    reply
+      .code(409)
+      .send({ error: result.message ?? 'An exchange is already running in this thread.' });
+    return;
+  }
   // Failure-swap classes the UI can act on (vs the generic 500).
   if (result.code === 'provider_not_configured') {
     reply.code(503).send({ error: result.message ?? 'AI provider is not configured.' });
@@ -60,14 +66,16 @@ function sendExchangeError(
 }
 
 /** Streams an exchange handle to the client; a disconnect aborts the provider. */
-function createStreamResponse(request: FastifyRequest, handle: ChatStreamHandle) {
-  // Client disconnect (user stop / closed tab) aborts the provider stream,
-  // which persists the partial text as 'interrupted'.
+function createStreamResponse(reply: FastifyReply, handle: ChatStreamHandle) {
+  // Client disconnect (user stop / closed tab) aborts the provider stream, which
+  // persists the partial text as 'interrupted'. Use the *response* raw socket:
+  // under Fastify v5 + current Node the IncomingMessage 'close'/'aborted' events
+  // don't fire for streaming responses, but the ServerResponse 'close' does.
   let finished = false;
   void handle.outcome.finally(() => {
     finished = true;
   });
-  request.raw.on('close', () => {
+  reply.raw.on('close', () => {
     if (!finished) handle.abort();
   });
 
@@ -128,7 +136,7 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
         if (result.type === 'error') {
           return sendExchangeError(reply, result);
         }
-        return createStreamResponse(request, result.data);
+        return createStreamResponse(reply, result.data);
       }
 
       const content = extractLastUserText(request.body?.messages);
@@ -140,7 +148,7 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
       if (result.type === 'error') {
         return sendExchangeError(reply, result);
       }
-      return createStreamResponse(request, result.data);
+      return createStreamResponse(reply, result.data);
     },
   );
 }

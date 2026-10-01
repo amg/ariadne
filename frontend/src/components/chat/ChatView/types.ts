@@ -14,3 +14,12 @@ export interface DisplayRow {
 }
 
 export type ChatViewStatus = 'submitted' | 'streaming' | 'ready' | 'error';
+
+/**
+ * A failed submit's draft, returned for the input. The nonce rises with
+ * every restore so an identical text repeated still re-fills.
+ */
+export interface RestoredDraft {
+  text: string;
+  nonce: number;
+}

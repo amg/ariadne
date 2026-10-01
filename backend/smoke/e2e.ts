@@ -109,6 +109,66 @@ async function testInterruption(base: string, threadId: string) {
   if (!interruptedAssistant) throw new Error('interrupted assistant row missing');
 }
 
+/**
+ * In-flight guard: while a PAUSE exchange holds the thread on an open
+ * connection, a second submit is bounced with 409; once that connection
+ * closes the exchange settles interrupted and the thread retries cleanly.
+ */
+async function testInFlightGuard(base: string, threadId: string) {
+  const running = await fetch(`${base}/api/threads/${threadId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [
+        { id: 'u-3', role: 'user', parts: [{ type: 'text', text: 'hold still PAUSE:3000' }] },
+      ],
+    }),
+  });
+  if (!running.ok) throw new Error(`running exchange failed: ${running.status}`);
+  const sseReader = running.body?.pipeThrough(new TextDecoderStream()).getReader();
+  if (sseReader) {
+    try {
+      for (;;) {
+        const { value, done } = await sseReader.read();
+        if (done || value?.includes('"Mock ')) break;
+      }
+    } catch {
+      // Stream closed early.
+    }
+  }
+
+  const second = await fetch(`${base}/api/threads/${threadId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ id: 'u-4', role: 'user', parts: [{ type: 'text', text: 'second send' }] }],
+    }),
+  });
+  log('second submit status', String(second.status));
+  if (second.status !== 409) throw new Error(`expected 409, got ${second.status}`);
+  log('second submit body', await second.json());
+
+  // Closing the connection aborts the running exchange (the deliberate
+  // tab-close kill surface); the thread must be released again afterwards.
+  await sseReader?.cancel();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const retry = await fetch(`${base}/api/threads/${threadId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trigger: 'regenerate-message', messages: [] }),
+  });
+  log('retry after close status', String(retry.status));
+  if (!retry.ok) throw new Error(`retry failed: ${retry.status}`);
+  await retry.text();
+
+  const rows = await logMessages(base, threadId, 'after-guard');
+  const recovered = rows.filter((message) => message.role === 'assistant').pop();
+  if (!recovered || recovered.usage === null) {
+    throw new Error('recovered exchange has no usage row');
+  }
+}
+
 async function main() {
   // 1. Provision DB and configure env before importing anything that pools.
   process.env.DATABASE_URL = await ensureSmokeDatabase();
@@ -186,6 +246,10 @@ async function main() {
 
   // 6. Interruption flow: abort mid-stream and verify persisted partial text.
   await testInterruption(base, thread.id);
+
+  // 7. Concurrency guard: a running exchange bounces a second submit, and
+  //    the thread recovers once the running connection closes.
+  await testInFlightGuard(base, thread.id);
 
   await app.close();
   await mock.stop();

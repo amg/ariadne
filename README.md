@@ -63,6 +63,7 @@ DB_PORT=5432
 DEEPINFRA_API_KEY=your-key   # DeepInfra API key (required)
 DEFAULT_MODEL=Qwen/Qwen3.5-9B
 AI_STREAM_IDLE_TIMEOUT_MS=5000
+EXCHANGE_STALENESS_MS=300000 # pending assistant rows older than this are declared lost
 
 # Thread Analysis (live drift gate)
 THREAD_ANALYSIS_MODE=heuristic  # off | heuristic | always (default: heuristic)
