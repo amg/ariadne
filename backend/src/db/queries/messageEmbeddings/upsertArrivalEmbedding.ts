@@ -1,15 +1,16 @@
 import { db } from '@db/db';
-import type { MessageEmbedding, MessageEmbeddingStored, NewArrivalEmbedding } from '@db/types';
+import type { MessageEmbedding, NewArrivalEmbedding } from '@db/types';
 import { sql } from 'kysely';
 import { toDecimalLiteral, toMessageEmbedding, toVectorText } from './embeddingMapping';
 
 /**
- * Persist-upon-use write for an *arrival* embedding: the arriving user
- * Message's judged signal, embedded before inference. The row
- * keys to the user Message (turn rows key to the assistant); on conflict
- * the stored row is replaced (provenance change or invalidation re-fill).
- * `expanded_text` records the rewrite the vector came from; the per-step
- * costs ride their own columns and stay out of `message_usage`.
+ * Persist-upon-arrival write for an *arrival* embedding: the arriving user
+ * Message's judged signal, embedded before reasoning. That row keys on the
+ * user Message (turn rows key on the assistant). On conflict, the stored
+ * row is replaced (provenance change or re-population via discard).
+ * `expanded_text` records the rewrite that generated the vector. The
+ * embedding step's spend rides along on that row as well (`embeddingCostUsd`).
+ * The rewrite/judge spend lives in `message_expansion_costs`.
  */
 export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<MessageEmbedding> {
   const result = await db
@@ -21,8 +22,6 @@ export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<
       expandedText: row.rewrittenText ?? null,
       expandOutcome: row.expandOutcome ?? null,
       embeddingCostUsd: toDecimalLiteral(row.embeddingCostUsd ?? null),
-      rewriteCostUsd: toDecimalLiteral(row.rewriteCostUsd ?? null),
-      judgeCostUsd: toDecimalLiteral(row.judgeCostUsd ?? null),
     })
     .onConflict((oc) =>
       oc.column('messageId').doUpdateSet({
@@ -31,8 +30,6 @@ export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<
         expandedText: (eb) => eb.ref('excluded.expandedText'),
         expandOutcome: (eb) => eb.ref('excluded.expandOutcome'),
         embeddingCostUsd: (eb) => eb.ref('excluded.embeddingCostUsd'),
-        rewriteCostUsd: (eb) => eb.ref('excluded.rewriteCostUsd'),
-        judgeCostUsd: (eb) => eb.ref('excluded.judgeCostUsd'),
       }),
     )
     .returningAll()

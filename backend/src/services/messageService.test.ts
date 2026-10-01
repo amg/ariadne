@@ -73,6 +73,7 @@ describe('messageService', () => {
         costUsd: '0.0000006500',
         finishReason: 'stop',
         latencyMs: 42,
+        estimated: false,
       });
     });
   });

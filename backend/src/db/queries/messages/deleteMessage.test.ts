@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { getExpansionCostByMessageId } from '@queries/messageExpansionCosts/getExpansionCostByMessageId';
+import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
@@ -49,10 +51,20 @@ describe('deleteMessage', () => {
       finishReason: 'stop',
       latencyMs: 42,
     });
+    // Expansion spends cascade too.
+    await upsertExpansionCost({
+      messageId: assistant.id,
+      kind: 'rewrite',
+      model: 'Qwen/Qwen3.5-9B',
+      costUsd: '0.0000000100',
+    });
 
     await deleteMessage({ messageId: assistant.id });
 
     expect(await getMessageUsageByMessageId({ messageId: assistant.id })).toBeUndefined();
+    expect(
+      await getExpansionCostByMessageId({ messageId: assistant.id, kind: 'rewrite' }),
+    ).toBeUndefined();
   });
 
   it('returns undefined for an unknown id', async () => {

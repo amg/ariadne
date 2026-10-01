@@ -1,4 +1,4 @@
-import { type Message, updateMessage } from '@/services/api';
+import { type Message, fetchResumeDraft, stopThreadExchange, updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import type { UIMessage } from 'ai';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -80,6 +80,23 @@ export default function ChatController({
         setRestoredDraft((prev) => ({ text: draft, nonce: (prev?.nonce ?? 0) + 1 }));
       },
     });
+  }, [threadId]);
+
+  // The thread's newest abandoned/failed exchange offers its arrival text
+  // back for the input; fetched once per mount, a local draft wins.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchResumeDraft(threadId)
+      .then((draft) => {
+        if (cancelled || !draft) return;
+        setRestoredDraft((prev) => prev ?? { text: draft.text, nonce: 0 });
+      })
+      .catch(() => {
+        // No draft owed, or the API was unavailable — the input stays as-is.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [threadId]);
 
   // Preserve reasoning across renders (even after stream completes)
@@ -192,7 +209,10 @@ export default function ChatController({
       errorMessage={chat.error?.message ?? null}
       restoredDraft={restoredDraft}
       onSend={send}
-      onStop={() => chat.stop()}
+      onStop={() => {
+        chat.stop();
+        void stopThreadExchange(threadId).catch(() => {});
+      }}
       onRetryLast={() => retryLast()}
       onEditMessage={editMessage}
     />

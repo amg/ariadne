@@ -5,7 +5,8 @@ export type MessageFinishReason =
   | 'content_filter'
   | 'tool_calls'
   | 'timeout'
-  | 'interrupted';
+  | 'interrupted'
+  | 'error';
 
 /** The deployment feature-flag surfaces the chrome is driven from. */
 export interface AppConfig {
@@ -106,12 +107,16 @@ export const DEFAULT_THREAD_TITLE = 'New Chat';
 
 export const TITLE_GENERATING_SENTINEL = 'New Chat ...';
 
-/** Telemetry for one assistant message (backend `message_usage`, 1:1). */
+/** Telemetry for one assistant message (backend `message_usage` chat row). */
 export interface MessageUsage {
   model: string;
-  providerId: string;
-  promptTokens: number;
-  completionTokens: number;
+  /** Null when no provider response exists (estimated spends). */
+  providerId: string | null;
+  /** Null when the exchange ended before the provider reported tokens. */
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** True when the tokens and cost were counted locally, not provider-reported. */
+  estimated: boolean;
   /** Provider-reported reasoning tokens (DeepInfra reports 0 even when reasoning). */
   reasoningTokens: number | null;
   /** Our estimate from reasoning content length (NULL when no reasoning). */
@@ -181,6 +186,28 @@ export async function renameThread(threadId: string, title: string): Promise<Thr
 export async function deleteThread(threadId: string): Promise<void> {
   const res = await fetch(`/api/threads/${threadId}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
+}
+
+export type ResumeDraft = { messageId: string; text: string };
+
+/**
+ * The arrival text of the thread's newest exchange when it was abandoned
+ * (interrupted or failed) — the input prefills from it; null when nothing
+ * is owed.
+ */
+export async function fetchResumeDraft(threadId: string): Promise<ResumeDraft | null> {
+  const res = await fetch(`/api/threads/${threadId}/draft`);
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`Failed to fetch resume draft: ${res.statusText}`);
+  return res.json();
+}
+
+/** Explicit user stop of the thread's live exchange; false when none runs. */
+export async function stopThreadExchange(threadId: string): Promise<boolean> {
+  const res = await fetch(`/api/threads/${threadId}/stop`, { method: 'POST' });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`Failed to stop exchange: ${res.statusText}`);
+  return true;
 }
 
 export function fetchMessages(threadId: string): Promise<Message[]> {

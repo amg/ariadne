@@ -17,7 +17,7 @@ export interface MessageWithUsageRow {
 }
 
 /**
- * All messages of a thread with their message_usage rows left-joined,
+ * All messages of a thread with their chat-spend rows left-joined,
  * oldest first. Threads without messages yield an empty list.
  */
 export async function listMessagesWithUsageByThread({
@@ -25,7 +25,7 @@ export async function listMessagesWithUsageByThread({
 }: ListMessagesWithUsageByThreadProps): Promise<MessageWithUsageRow[]> {
   return (await db
     .selectFrom('messages')
-    .leftJoin('messageUsage', 'messages.id', 'messageUsage.messageId')
+    .leftJoin('messageUsage', 'messageUsage.messageId', 'messages.id')
     .select([
       'messages.id as id',
       'messages.role as role',

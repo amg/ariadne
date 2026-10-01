@@ -11,6 +11,7 @@ export interface Database {
   threads: ThreadsTable;
   messages: MessagesTable;
   messageUsage: MessageUsageTable;
+  messageExpansionCosts: MessageExpansionCostsTable;
   messageEmbeddings: MessageEmbeddingsTable;
   threadSegments: ThreadSegmentsTable;
   segmentDriftLogs: SegmentDriftLogsTable;
@@ -35,6 +36,12 @@ export interface MessagesTable {
   role: 'user' | 'assistant' | 'system';
   content: string;
   /**
+   * Set on an exchange's arrival row when the exchange ended without
+   * completing, so the abandoned arrival registers in the thread
+   * (partial title + resume draft) instead of being swallowed.
+   */
+  abandoned: Generated<boolean>;
+  /**
    * Lifecycle of an assistant row's exchange: `pending` while the reply
    * streams, terminal once it settles. Non-assistant rows keep the
    * terminal default.
@@ -51,10 +58,23 @@ export interface MessagesTable {
 export const EXCHANGE_STATUSES = ['pending', 'completed', 'interrupted', 'error'] as const;
 export type MessageExchangeStatus = (typeof EXCHANGE_STATUSES)[number];
 
+/**
+ * The chat exchange's inference telemetry, linked 1:1 to `messages`.
+ * `estimated` flags rows the exchange counted locally because the
+ * provider never reported usage (the exchange ended early); every other
+ * column is filled on both paths. The analyzer pipeline's spend lives
+ * elsewhere: embedding cost rides the arrival embedding row, and the
+ * rewrite and judge steps carry their own rows in
+ * `message_expansion_costs`.
+ */
 export interface MessageUsageTable {
-  messageId: string; // UUID FK -> messages.id (1:1, PK)
+  messageId: string; // UUID FK -> messages.id (PK)
+  /** True when tokens and cost were counted locally, not provider-reported. */
+  estimated: Generated<boolean>;
   model: string;
-  providerId: string;
+  /** NULL when no provider response exists (estimated spends). */
+  providerId: string | null;
+  /** Estimates count these locally, so the columns stay NOT NULL. */
   promptTokens: number;
   completionTokens: number;
   /** NULL when the provider doesn't report cache telemetry. */
@@ -65,8 +85,29 @@ export interface MessageUsageTable {
   /** Our estimate from reasoning content length (NULL when no reasoning). */
   estimatedReasoningTokens: number | null;
   costUsd: string; // numeric(14,10) — Kysely selects numeric as string
-  finishReason: string;
+  finishReason: MessageFinishReason;
   latencyMs: number | null;
+  createdAt: Generated<Date>;
+}
+
+/**
+ * The analyzer arrival pipeline's billed inference spend: the rewrite
+ * (expansion) step and its trigger judge. One row per (message, kind);
+ * the embedding step's cost rides the arrival embedding row instead.
+ * Model attribution is fixed by the environment's pipeline models; the
+ * provider response id is not persisted for these calls.
+ */
+export const EXPANSION_COST_KINDS = ['rewrite', 'judge'] as const;
+export type ExpansionCostKind = (typeof EXPANSION_COST_KINDS)[number];
+
+export interface MessageExpansionCostsTable {
+  messageId: string; // UUID FK -> messages.id (PK together with `kind`)
+  kind: ExpansionCostKind;
+  model: string;
+  /** NULL when the provider reported no token counts. */
+  promptTokens: number | null;
+  completionTokens: number | null;
+  costUsd: string; // numeric(14,10) — Kysely selects numeric as string
   createdAt: Generated<Date>;
 }
 
@@ -96,10 +137,8 @@ export interface MessageEmbeddingsTable {
    * its own).
    */
   expandOutcome: ExpandOutcome | null;
-  /** Per-step spend recorded for audit — never written to `message_usage`. numeric(14,10) → string. */
+  /** The arrival's embedding spend recorded for audit. numeric(14,10) → string. */
   embeddingCostUsd: string | null;
-  rewriteCostUsd: string | null;
-  judgeCostUsd: string | null;
   createdAt: Generated<Date>;
 }
 
@@ -177,6 +216,9 @@ export type NewMessage = Insertable<MessagesTable>;
 export type MessageUsage = Selectable<MessageUsageTable>;
 export type NewMessageUsage = Insertable<MessageUsageTable>;
 
+export type MessageExpansionCost = Selectable<MessageExpansionCostsTable>;
+export type NewMessageExpansionCost = Insertable<MessageExpansionCostsTable>;
+
 export type ModelConfig = Selectable<ModelConfigsTable>;
 export type NewModelConfig = Insertable<ModelConfigsTable>;
 
@@ -210,9 +252,8 @@ export type NewArrivalEmbedding = {
   rewrittenText?: string | null;
   /** The recorded end of the arrival's try at a rewrite; pass through unchanged on re-writes. */
   expandOutcome?: ExpandOutcome | null;
+  /** The arrival's embedding spend; the rewrite step never touches it. */
   embeddingCostUsd?: number | null;
-  rewriteCostUsd?: number | null;
-  judgeCostUsd?: number | null;
 };
 
 export type ThreadSegment = Selectable<ThreadSegmentsTable>;
@@ -222,9 +263,9 @@ export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;
 export type NewSegmentDriftLog = Insertable<SegmentDriftLogsTable>;
 
 /**
- * Synthetic + provider finish states persisted on `message_usage`
- *. `interrupted` = user stop; `timeout` = inter-token
- * idle guard.
+ * Synthetic + provider finish states persisted on `message_usage`.
+ * `interrupted` = user stop; `timeout` = inter-token idle guard;
+ * `error` = the exchange failed (provider abort or stream error).
  */
 export const FINISH_REASONS = [
   'stop',
@@ -233,5 +274,6 @@ export const FINISH_REASONS = [
   'tool_calls',
   'interrupted',
   'timeout',
+  'error',
 ] as const;
 export type MessageFinishReason = (typeof FINISH_REASONS)[number];

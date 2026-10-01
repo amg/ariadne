@@ -1,4 +1,5 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { getExpansionCostByMessageId } from '@queries/messageExpansionCosts/getExpansionCostByMessageId';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
@@ -451,7 +452,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     );
   });
 
-  it('keys arrival rows to user Messages with their per-step costs, never message_usage', async () => {
+  it('keys arrival rows to user Messages; embedding spend rides the arrival row', async () => {
     const { threadId, userMessageIds, assistantMessageIds } = await seedThread(
       'agents and cost',
       TOPIC_SPECS,
@@ -467,17 +468,19 @@ describe('runLiveGate — the fill-forward walk', () => {
     for (const messageId of userMessageIds) {
       const row = byMessage.get(messageId);
       expect(row?.modelId).toBe(EMBEDDING_MODEL_ID);
-      expect(row?.embeddingCostUsd).not.toBeNull();
       // Raw fast paths: the raw message itself was embedded (no rewrite
-      // text) and neither the judge nor the rewriter billed anything.
+      // text) and neither the judge nor the rewriter billed anything —
+      // only the embedding step spends, and its cost rides the arrival row.
       expect(row?.rewrittenText).toBeNull();
-      expect(row?.rewriteCostUsd).toBeNull();
-      expect(row?.judgeCostUsd).toBeNull();
+      expect(Number(row?.embeddingCostUsd)).toBeGreaterThan(0);
+      expect(await getExpansionCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
+      expect(await getExpansionCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
     }
     for (const messageId of assistantMessageIds) {
       expect(byMessage.get(messageId)?.modelId).toBe(EMBEDDING_MODEL_ID);
     }
     for (const messageId of assistantMessageIds) {
+      // The live lane bills no chat inference; turn rows never carry one.
       expect(await getMessageUsageByMessageId({ messageId })).toBeUndefined();
     }
   });

@@ -17,4 +17,9 @@ export {
   type ContextDependenceVerdict,
   type JudgeContextDependenceInput,
 } from './judge';
+export {
+  stopThreadExchange,
+  registerActiveExchange,
+  clearActiveExchange,
+} from './exchangeRegistry';
 export { retryLastExchange, submitChat, type ChatStreamHandle } from './submitChat';

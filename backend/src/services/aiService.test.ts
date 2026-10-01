@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
+import { findResumeDraft } from '@queries/messages/findResumeDraft';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
@@ -58,9 +60,50 @@ async function newestAssistantRow(threadId: string) {
   return undefined;
 }
 
+/**
+ * Aborts carry no provider usage block, yet the ledger still accounts the
+ * exchange. Reads the estimated spend row and verifies its identity fields
+ * and its fallback-priced cost over the tokens it stored.
+ */
+async function readEstimatedSpend(messageId: string) {
+  const usage = await getMessageUsageByMessageId({ messageId });
+  if (!usage) {
+    expect(usage, 'estimated spend row').toBeDefined();
+    return usage;
+  }
+  expect(usage.estimated).toBe(true);
+  expect(usage.providerId).toBeNull();
+  expect(usage.model).toBe(env.DEFAULT_MODEL);
+  const config = await getModelConfig(env.DEFAULT_MODEL);
+  expect(Number(usage.costUsd)).toBe(
+    computeCostUsd({
+      pricing: {
+        input: config?.inputPricePerMillion ?? null,
+        output: config?.outputPricePerMillion ?? null,
+        cachedRateMultiplier: config?.cachedRateMultiplier ?? null,
+      },
+      promptTokens: usage.promptTokens ?? 0,
+      completionTokens: usage.completionTokens ?? 0,
+    }),
+  );
+  return usage;
+}
+
 async function drain(handle: ChatStreamHandle): Promise<void> {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
     // Consuming the stream lets the exchange settle its persistence.
+  }
+}
+
+/** The abandon flag lands in an async outcome hook; wait for it. */
+async function waitForAbandonedUserRow(threadId: string): Promise<string> {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    const rows = await listMessagesByThread({ threadId });
+    const userRow = rows.find((row) => row.role === 'user' && row.abandoned);
+    if (userRow) return userRow.id;
+    if (Date.now() > deadline) throw new Error('the arrival was never abandoned');
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
@@ -144,7 +187,9 @@ describe('submitChat', () => {
     // config fallback (modelConfigService FALLBACK_CONFIG — the single
     // fallback source: DB → hard-coded default model config).
     const fallbackConfig = await getModelConfig(env.DEFAULT_MODEL);
-    const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
+    const usage = await getMessageUsageByMessageId({
+      messageId: handle.assistantMessageId,
+    });
     expect(usage).toBeDefined();
     // 1 message in history + the new one → base 4 + 2
     expect(usage?.promptTokens).toBe(MOCK_CACHE.basePromptTokens + 2);
@@ -193,7 +238,7 @@ describe('submitChat', () => {
     const outcome = await handle.outcome;
     expect(outcome).toMatchObject({
       type: 'success',
-      data: { finishReason: 'interrupted', usagePersisted: false },
+      data: { finishReason: 'interrupted', usagePersisted: true },
     });
 
     // Partial text persisted (first token only, before the pause).
@@ -201,12 +246,79 @@ describe('submitChat', () => {
     const assistantRow = rows.find((row) => row.role === 'assistant');
     expect(assistantRow?.content).toBe('Mock ');
 
-    // Usage block never arrived → no usage row.
-    const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
-    expect(usage).toBeUndefined();
+    // No provider usage block arrived, yet the exchange still accounts
+    // its spend: an estimated ledger row from the locally counted input
+    // tokens and the text that made it out.
+    const usage = await readEstimatedSpend(handle.assistantMessageId);
+    expect(usage?.finishReason).toBe('interrupted');
+    expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.completionTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.latencyMs ?? -1).toBeGreaterThanOrEqual(0);
 
     // A deliberate stop settles the exchange as interrupted, releasing the thread.
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
+
+    // The abandoned arrival registers in the thread: the user row is
+    // flagged, and its text is owed back to the input as the resume draft.
+    const userRow = rows.find((row) => row.role === 'user');
+    expect(await waitForAbandonedUserRow(threadId)).toBe(userRow?.id);
+    const draft = await findResumeDraft({ threadId });
+    expect(draft?.messageId).toBe(userRow?.id);
+    expect(draft?.content).toBe('stop me please PAUSE:200');
+    // The thread already has its title — the interruption leaves it alone.
+    expect((await findThreadByIdAndUser({ userId, threadId }))?.title).toBe('AI thread');
+  });
+
+  it('titles a still-untitled thread from the abandoned arrival text', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const handle = await assertSuccess(
+      await submitChat({
+        userId,
+        threadId: thread.id,
+        content: `${'abcd '.repeat(12).trim()}`,
+      }),
+    );
+    handle.abort();
+    const outcome = await handle.outcome;
+    expect(outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'interrupted' },
+    });
+
+    await waitForAbandonedUserRow(thread.id);
+    // Over the char cap: clipped at the boundary and ellipsized.
+    expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBe(
+      `${'abcd '.repeat(10).trim()}\u2026`,
+    );
+  });
+
+  it('clears the resume draft once the exchange completes', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const interrupted = await assertSuccess(
+      await submitChat({ userId, threadId: thread.id, content: 'retry me please PAUSE:200' }),
+    );
+    interrupted.abort();
+    await interrupted.outcome;
+    await waitForAbandonedUserRow(thread.id);
+    expect((await findResumeDraft({ threadId: thread.id }))?.content).toBe(
+      'retry me please PAUSE:200',
+    );
+
+    // Retrying the failed exchange completes it; the completed reply
+    // consumes the draft the interrupted run offered.
+    const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
+    await drain(retry);
+    expect(await retry.outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'stop' },
+    });
+    expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
   });
 
   it('settles a before-first-token stop without stranding the row as pending', async () => {
@@ -222,12 +334,19 @@ describe('submitChat', () => {
     const outcome = await handle.outcome;
     expect(outcome).toMatchObject({
       type: 'success',
-      data: { finishReason: 'interrupted', usagePersisted: false },
+      data: { finishReason: 'interrupted', usagePersisted: true },
     });
 
     const assistantRow = await newestAssistantRow(threadId);
     expect(assistantRow?.content).toBe('');
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
+
+    // The prompt was billed even though no output token made it out: the
+    // estimated row accounts the input alone.
+    const usage = await readEstimatedSpend(handle.assistantMessageId);
+    expect(usage?.finishReason).toBe('interrupted');
+    expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
+    expect(usage?.completionTokens).toBe(0);
 
     // The settled row must not trip the in-flight guard on the next exchange.
     const next = await assertSuccess(
@@ -255,6 +374,11 @@ describe('submitChat', () => {
       expect(assistantRow?.content).toBe('Mock ');
       // The watchdog's abort is a failure, not a deliberate stop.
       expect(assistantRow?.exchangeStatus).toBe('error');
+
+      // The failed exchange still settles its estimated spend, tagged
+      // with the timeout finish.
+      const usage = await readEstimatedSpend(handle.assistantMessageId);
+      expect(usage?.finishReason).toBe('timeout');
     } finally {
       restoreIdleTimeout(savedIdleTimeout);
     }

@@ -1,5 +1,5 @@
 import { env } from '@config/env';
-import { sumAnalyzerCostsByThread } from '@queries/messageEmbeddings/sumAnalyzerCostsByThread';
+import { sumThreadSpend } from '@queries/messageUsage/sumThreadSpend';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
 import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
@@ -36,9 +36,8 @@ export interface ThreadSummary {
   totalCostUsd: string;
   cachedCostUsd: string;
   /**
-   * Composition of `totalCostUsd`: chat spend from `message_usage`,
-   * plus the analyzer pipeline's embedding, rewrite, and judge spend
-   * persisted on arrival embedding rows.
+   * Composition of `totalCostUsd`: the chat exchanges' spend plus the
+   * analyzer pipeline's embedding, rewrite, and judge spend.
    */
   costBreakdown: {
     chat: string;
@@ -220,13 +219,12 @@ export async function getThreadSummary(args: {
   const stats = aggregateStats(messages);
   const primaryModel = findPrimaryModel(stats.modelCounts);
 
-  // Analyzer pipeline spend (embeddings, rewrites, judge calls) persists
-  // on arrival embedding rows rather than `message_usage`, so it is
-  // summed on its own and folded into the thread's total.
-  const analyzerTotals = await sumAnalyzerCostsByThread({ threadId });
-  const embeddingCost = round10(Number.parseFloat(analyzerTotals.embeddingCostUsd));
-  const rewriteCost = round10(Number.parseFloat(analyzerTotals.rewriteCostUsd));
-  const judgeCost = round10(Number.parseFloat(analyzerTotals.judgeCostUsd));
+  // The thread's full spend: the chat exchanges' usage rows plus the
+  // arrival pipeline's embedding, rewrite, and judge spend.
+  const spendTotals = await sumThreadSpend({ threadId });
+  const embeddingCost = round10(Number.parseFloat(spendTotals.embedding));
+  const rewriteCost = round10(Number.parseFloat(spendTotals.rewrite));
+  const judgeCost = round10(Number.parseFloat(spendTotals.judge));
   const grandTotalCost = round10(stats.totalCost + embeddingCost + rewriteCost + judgeCost);
 
   // Get context window, pricing, and cached rate from DB cache (or fallback)

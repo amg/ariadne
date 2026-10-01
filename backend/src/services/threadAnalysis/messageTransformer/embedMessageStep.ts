@@ -32,8 +32,8 @@ export const embedMessageStep: MessageStep = {
     const text = stored?.rewrittenText ?? arrival.content;
     const embedded = await embedText(formattedProspectiveTurn(text));
     if (embedded.type === 'error') return embedded;
+    // The step's spend rides the arrival row.
     const embeddingCostUsd = await computeEmbeddingCostUsd(embedded.data.promptTokens);
-
     await upsertArrivalEmbedding({
       messageId: userMessageId,
       embedding: embedded.data.embedding,
@@ -41,14 +41,7 @@ export const embedMessageStep: MessageStep = {
       rewrittenText: stored?.rewrittenText ?? null,
       expandOutcome: stored?.expandOutcome ?? null,
       embeddingCostUsd,
-      rewriteCostUsd: toCostNumber(stored?.rewriteCostUsd),
-      judgeCostUsd: toCostNumber(stored?.judgeCostUsd),
     });
     return ok(undefined);
   },
 };
-
-/** Stored numeric string → number; null or absent → null. */
-function toCostNumber(value: string | null | undefined): number | null {
-  return value === null || value === undefined ? null : Number(value);
-}

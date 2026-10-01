@@ -1,7 +1,9 @@
 export { setupThreadAnalysisRoute } from './analysis';
 export { setupThreadsDeleteRoute } from './delete';
+export { setupThreadDraftRoute } from './draft';
 export { setupThreadsGetRoute } from './get';
 export { setupThreadsPatchRoute } from './patch';
 export { setupThreadsPostRoute } from './post';
 export { setupThreadSummaryRoute } from './summary';
+export { setupThreadStopRoute } from './stop';
 export { setupThreadsGenerateTitleRoute } from './generate-title';
