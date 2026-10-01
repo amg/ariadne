@@ -35,11 +35,33 @@ import {
 
 let mock: MockInferenceServer;
 const savedIdleTimeout = process.env.AI_STREAM_IDLE_TIMEOUT_MS;
+const savedStalenessMs = process.env.EXCHANGE_STALENESS_MS;
 
-// Restores the idle timeout env: '' parses to NaN and falls back to the default.
+// Restores the idle timeout env: unset restores as '' (env numbers treat
+// unparseable values as absent).
 function restoreIdleTimeout(saved: string | undefined) {
   if (saved === undefined) process.env.AI_STREAM_IDLE_TIMEOUT_MS = '';
   else process.env.AI_STREAM_IDLE_TIMEOUT_MS = saved;
+}
+
+function setStalenessMs(value: string | undefined) {
+  if (value === undefined) process.env.EXCHANGE_STALENESS_MS = '';
+  else process.env.EXCHANGE_STALENESS_MS = value;
+}
+
+/** The thread's newest assistant row, or undefined when it has none. */
+async function newestAssistantRow(threadId: string) {
+  const rows = await listMessagesByThread({ threadId });
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i]?.role === 'assistant') return rows[i];
+  }
+  return undefined;
+}
+
+async function drain(handle: ChatStreamHandle): Promise<void> {
+  for await (const _message of readUIMessageStream({ stream: handle.stream })) {
+    // Consuming the stream lets the exchange settle its persistence.
+  }
 }
 
 beforeAll(async () => {
@@ -49,6 +71,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   restoreIdleTimeout(savedIdleTimeout);
+  setStalenessMs(savedStalenessMs);
   await mock.stop();
 });
 
@@ -114,6 +137,9 @@ describe('submitChat', () => {
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.content)).toEqual(['Hello world', 'Mock reply to: Hello world']);
 
+    // The exchange settled its lifecycle state on the assistant row.
+    expect((await newestAssistantRow(threadId))?.exchangeStatus).toBe('completed');
+
     // Usage row: cache telemetry passed through, cost priced from the model
     // config fallback (modelConfigService FALLBACK_CONFIG — the single
     // fallback source: DB → hard-coded default model config).
@@ -178,6 +204,37 @@ describe('submitChat', () => {
     // Usage block never arrived → no usage row.
     const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
     expect(usage).toBeUndefined();
+
+    // A deliberate stop settles the exchange as interrupted, releasing the thread.
+    expect(assistantRow?.exchangeStatus).toBe('interrupted');
+  });
+
+  it('settles a before-first-token stop without stranding the row as pending', async () => {
+    const { userId, threadId } = await createRandomThread();
+
+    const handle = await assertSuccess(
+      await submitChat({ userId, threadId, content: 'stopped before any token' }),
+    );
+    // Never consuming the stream means no token is ever recorded; the stop
+    // aborts with nothing to persist but the exchange state.
+    handle.abort();
+
+    const outcome = await handle.outcome;
+    expect(outcome).toMatchObject({
+      type: 'success',
+      data: { finishReason: 'interrupted', usagePersisted: false },
+    });
+
+    const assistantRow = await newestAssistantRow(threadId);
+    expect(assistantRow?.content).toBe('');
+    expect(assistantRow?.exchangeStatus).toBe('interrupted');
+
+    // The settled row must not trip the in-flight guard on the next exchange.
+    const next = await assertSuccess(
+      await submitChat({ userId, threadId, content: 'all clear again' }),
+    );
+    await drain(next);
+    await expect(next.outcome).resolves.toMatchObject({ type: 'success' });
   });
 
   it('aborts on the inter-token idle deadline with stream_timeout', async () => {
@@ -196,8 +253,110 @@ describe('submitChat', () => {
       const rows = await listMessagesByThread({ threadId });
       const assistantRow = rows.find((row) => row.role === 'assistant');
       expect(assistantRow?.content).toBe('Mock ');
+      // The watchdog's abort is a failure, not a deliberate stop.
+      expect(assistantRow?.exchangeStatus).toBe('error');
     } finally {
       restoreIdleTimeout(savedIdleTimeout);
+    }
+  });
+});
+
+describe('exchange in-flight guard', () => {
+  /** Starts a paused exchange: first token out, stream suspended between tokens. */
+  async function startRunningExchange(threadId: string, userId: string) {
+    const handle = await assertSuccess(
+      await submitChat({ userId, threadId, content: 'hold still PAUSE:20000' }),
+    );
+    const reader = handle.stream.getReader();
+    let sawText = false;
+    while (!sawText) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value && value.type === 'text-delta') sawText = true;
+    }
+    return handle;
+  }
+
+  it('rejects a second submit or retry while an exchange is pending', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const running = await startRunningExchange(threadId, userId);
+
+    try {
+      const second = await submitChat({ userId, threadId, content: 'double bill' });
+      expect(second).toEqual({
+        type: 'error',
+        code: 'exchange_in_flight',
+        message: 'An exchange is already running in this thread.',
+      });
+
+      const retry = await retryLastExchange({ userId, threadId });
+      expect(retry).toMatchObject({ type: 'error', code: 'exchange_in_flight' });
+    } finally {
+      running.abort();
+      await running.outcome;
+    }
+  });
+
+  it('lets a retry regenerate a thread ending in a stale pending row', async () => {
+    setStalenessMs('60000');
+    try {
+      const { userId, threadId } = await createRandomThread();
+      const userMessage = await insertMessage({
+        threadId,
+        role: 'user',
+        content: 'orphan prompt',
+        createdAt: new Date(Date.now() - 130_000),
+      });
+      const orphan = await insertMessage({
+        threadId,
+        role: 'assistant',
+        content: '',
+        exchangeStatus: 'pending',
+        // Dated beyond the staleness window: its exchange's process is gone.
+        createdAt: new Date(Date.now() - 120_000),
+      });
+
+      const handle = await assertSuccess(await retryLastExchange({ userId, threadId }));
+      await drain(handle);
+      await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
+
+      // The stale pending row was discarded by the retry like any failed reply.
+      const rows = await listMessagesByThread({ threadId });
+      expect(rows.map((row) => row.id)).toEqual([userMessage.id, handle.assistantMessageId]);
+      expect(rows[1]?.exchangeStatus).toBe('completed');
+      expect(rows.some((row) => row.id === orphan.id)).toBe(false);
+    } finally {
+      setStalenessMs(savedStalenessMs);
+    }
+  });
+
+  it('releases a thread whose pending row outlived the staleness window', async () => {
+    setStalenessMs('60000');
+    try {
+      const { userId, threadId } = await createRandomThread();
+      const orphan = await insertMessage({
+        threadId,
+        role: 'assistant',
+        content: '',
+        exchangeStatus: 'pending',
+        createdAt: new Date(Date.now() - 120_000),
+      });
+      await insertMessage({ threadId, role: 'user', content: 'life after the crash' });
+
+      const handle = await assertSuccess(
+        await submitChat({ userId, threadId, content: 'recovered' }),
+      );
+      await drain(handle);
+      await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
+
+      // The orphaned row settled as interrupted instead of blocking forever.
+      const orphaned = await newestAssistantRow(orphan.threadId);
+      const rows = await listMessagesByThread({ threadId });
+      expect(rows.find((row) => row.id === orphan.id)?.exchangeStatus).toBe('interrupted');
+      expect(orphaned?.id).toBe(handle.assistantMessageId);
+      expect(orphaned?.exchangeStatus).toBe('completed');
+    } finally {
+      setStalenessMs(savedStalenessMs);
     }
   });
 });
@@ -217,9 +376,7 @@ describe('retryLastExchange', () => {
     const { userId, threadId } = await createRandomThread();
 
     const first = await assertSuccess(await submitChat({ userId, threadId, content: 'retry me' }));
-    for await (const _message of readUIMessageStream({ stream: first.stream })) {
-      // Drain so persistence settles before the retry re-lists the thread.
-    }
+    await drain(first);
     await expect(first.outcome).resolves.toMatchObject({ type: 'success' });
 
     const retry = await assertSuccess(await retryLastExchange({ userId, threadId }));
@@ -228,6 +385,7 @@ describe('retryLastExchange', () => {
       messages.push(message);
     }
     await expect(retry.outcome).resolves.toMatchObject({ type: 'success' });
+    expect((await newestAssistantRow(threadId))?.exchangeStatus).toBe('completed');
 
     const streamed = messages[messages.length - 1];
     expect(streamed?.id).toBe(retry.assistantMessageId);

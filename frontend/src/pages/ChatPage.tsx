@@ -2,7 +2,7 @@ import { ChatController } from '@/components/chat';
 import AnalysisTab from '@/components/chat/AnalysisTab';
 import { type Message, type ThreadAnalysisMode, fetchMessages } from '@/services/api';
 import type { Thread } from '@/services/api';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   useLoaderData,
   useOutletContext,
@@ -21,6 +21,20 @@ export async function loader({ params }: LoaderProps) {
     threadId: params.threadId ?? '',
     messages: params.threadId ? await fetchMessages(params.threadId) : [],
   };
+}
+
+/**
+ * Refetch the thread when the tab regains attention: rows that settled
+ * in another browser tab appear as soon as this one is looked at.
+ */
+function useRefetchOnTabFocus(revalidate: () => void) {
+  useEffect(() => {
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') revalidate();
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => document.removeEventListener('visibilitychange', handleVisible);
+  }, [revalidate]);
 }
 
 /** The center area's two surfaces — bubbles vs the live reading. */
@@ -75,6 +89,7 @@ export default function ChatPage() {
     refreshThreadSummary: () => Promise<void>;
   }>();
   const revalidator = useRevalidator();
+  useRefetchOnTabFocus(revalidator.revalidate);
   const [searchParams, setSearchParams] = useSearchParams();
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
 
@@ -119,7 +134,6 @@ export default function ChatPage() {
           threadId={threadId}
           rows={rows}
           onSettle={handleSettle}
-          isNewChat={title === null}
           onGenerateTitle={() => {
             if (title === null) {
               generateTitle(threadId);

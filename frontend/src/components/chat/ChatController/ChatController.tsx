@@ -1,9 +1,10 @@
 import { type Message, updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import type { UIMessage } from 'ai';
-import { DefaultChatTransport } from 'ai';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatView from '../ChatView';
+import type { RestoredDraft } from '../ChatView/types';
+import { getThreadChat, sendThreadMessage, subscribeToThreadChat } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 import {
   extractReasoning,
@@ -17,28 +18,26 @@ type ChatControllerProps = {
   threadId: string;
   rows: Message[];
   onSettle: () => void;
-  isNewChat?: boolean;
   onGenerateTitle?: () => void;
 };
 
 /**
- * Owns the live AI exchange for one thread: `useChat` transport, optimistic
- * + streaming rows merged over the settled loader rows, and send/stop.
- * Renders the pure ChatView. (The page only wires router glue.)
+ * Owns the live AI exchange for one thread: the thread's registry chat
+ * object, optimistic + streaming rows merged over the settled loader rows,
+ * and send/stop. Renders the pure ChatView. (The page only wires router
+ * glue.) The chat object outlives this view — unmounting never stops the
+ * exchange, and remounting reattaches to the live or settled stream.
  */
 export default function ChatController({
   threadId,
   rows,
   onSettle,
-  isNewChat,
   onGenerateTitle,
 }: ChatControllerProps) {
-  // One transport per thread; the Outlet is keyed by threadId (AppLayout),
-  // so useChat state is rebuilt on navigation and never leaks across threads.
-  const transport = useMemo(
-    () => new DefaultChatTransport({ api: `/api/threads/${threadId}/chat` }),
-    [threadId],
-  );
+  // The chat object lives in the per-tab registry (module level), keyed by
+  // thread; useChat attaches to it externally instead of owning one, so no
+  // effect here can stop the exchange on unmount.
+  const chat = useChat({ chat: getThreadChat(threadId) });
 
   const [droppedIds, setDroppedIds] = useState<Set<string>>(new Set());
 
@@ -46,46 +45,42 @@ export default function ChatController({
   // (the SDK keeps it out of message.parts), so the verdict is held here and
   // applied to the pending user bubble before the reply grows.
   const [streamVerdict, setStreamVerdict] = useState<StreamVerdict | null>(null);
+  const [restoredDraft, setRestoredDraft] = useState<RestoredDraft | null>(null);
   const messagesRef = useRef<UiMessageLike[]>([]);
 
-  // Keep track of the latest isNewChat value without re-triggering useChat options
-  const isNewChatRef = useRef(isNewChat);
+  // Settlement handlers keep the render's identity; the registry
+  // subscription is tied to the thread alone.
+  const settleRef = useRef({ onSettle, onGenerateTitle });
   useMemo(() => {
-    isNewChatRef.current = isNewChat;
-  }, [isNewChat]);
+    settleRef.current = { onSettle, onGenerateTitle };
+  }, [onSettle, onGenerateTitle]);
 
-  const chat = useChat({
-    id: threadId,
-    transport,
-    // The verdict flows `onData` as the stream's first event: map it to the
-    // pending arrival (the last user message) so the bubble tints before the
-    // reply starts growing. The verdict rides the gun-pipeline exchange, and
-    // only `submit-message` triggers that — the last pending user row IS the
-    // judged arrival.
-    onData: (part) => {
-      if ((part as { type?: string }).type !== 'data-thread-verdict') return;
-      const payload = readVerdictData(part as { data?: unknown });
-      const arrival = lastUserMessage(messagesRef.current);
-      if (!payload || !arrival) return;
-      setStreamVerdict({ ...payload, userMessageId: arrival.id });
-    },
-    // After every stream (including user stop) refetch rows so usage
-    // metadata and persisted ids replace the optimistic/streaming state.
-    onFinish: () => {
-      setStreamVerdict(null);
-      onSettle();
-      if (onGenerateTitle) {
-        onGenerateTitle();
-      }
-    },
-    onError: () => {
-      setStreamVerdict(null);
-      onSettle();
-      if (onGenerateTitle) {
-        onGenerateTitle();
-      }
-    },
-  });
+  // The registry fans exchange events to whichever view is subscribed.
+  useEffect(() => {
+    return subscribeToThreadChat(threadId, {
+      // The verdict flows `onData` as the stream's first event: map it to the
+      // pending arrival (the last user message) so the bubble tints before the
+      // reply starts growing.
+      onData: (part) => {
+        if (part.type !== 'data-thread-verdict') return;
+        const payload = readVerdictData(part);
+        const arrival = lastUserMessage(messagesRef.current);
+        if (!payload || !arrival) return;
+        setStreamVerdict({ ...payload, userMessageId: arrival.id });
+      },
+      // After every stream end (including user stop) refetch rows so usage
+      // metadata and persisted ids replace the optimistic/streaming state.
+      onSettle: () => {
+        setStreamVerdict(null);
+        settleRef.current.onSettle();
+        settleRef.current.onGenerateTitle?.();
+      },
+      // A failed submit puts the draft back in the input; recovery is a resend.
+      onFailedSubmit: (draft) => {
+        setRestoredDraft((prev) => ({ text: draft, nonce: (prev?.nonce ?? 0) + 1 }));
+      },
+    });
+  }, [threadId]);
 
   // Preserve reasoning across renders (even after stream completes)
   const reasoningCache = useRef<Map<string, string>>(new Map());
@@ -126,8 +121,9 @@ export default function ChatController({
   );
 
   const send = (content: string) => {
-    if (!content.trim() || chat.status === 'submitted' || chat.status === 'streaming') return;
-    chat.sendMessage({ role: 'user', parts: [{ type: 'text', text: content.trim() }] });
+    const trimmed = content.trim();
+    if (!trimmed || chat.status === 'submitted' || chat.status === 'streaming') return;
+    sendThreadMessage(threadId, trimmed);
   };
 
   /**
@@ -194,6 +190,7 @@ export default function ChatController({
       rows={display}
       status={chat.status}
       errorMessage={chat.error?.message ?? null}
+      restoredDraft={restoredDraft}
       onSend={send}
       onStop={() => chat.stop()}
       onRetryLast={() => retryLast()}

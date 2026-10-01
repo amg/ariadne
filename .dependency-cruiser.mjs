@@ -29,11 +29,11 @@ export default {
     {
       name: 'frontend-purity-ai-sdk-in-glue-or-controller-only',
       comment:
-        '@ai-sdk/react is sanctioned in glue + ChatController (the sole streaming component), nowhere else.',
+        '@ai-sdk/react is sanctioned in glue + the ChatController folder (the streaming component and its per-tab chat registry), nowhere else.',
       severity: 'error',
       from: {
         path: '^frontend/src/',
-        pathNot: `${FRONTEND_GLUE}|components/chat/ChatController/ChatController\\.tsx`,
+        pathNot: `${FRONTEND_GLUE}|components/chat/ChatController/`,
       },
       to: { path: '(^|/)@ai-sdk/react' },
     },

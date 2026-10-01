@@ -103,6 +103,23 @@ export function pendingVerdictFor(
   return { verdict: liveVerdict.verdict, fireChannel: liveVerdict.fireChannel };
 }
 
+/**
+ * While an exchange runs, a trailing assistant DB row is its unsettled
+ * counterpart: content persists only at settlement, so the row arrives
+ * empty wherever the loader refetches mid-stream. The live chat state is
+ * the latest state of that exchange — the empty row hides until the stream
+ * speaks for itself.
+ */
+function hideUnsettledExchangeRow(
+  rows: Message[],
+  status: 'submitted' | 'streaming' | 'ready' | 'error',
+): Message[] {
+  if (status === 'ready' || status === 'error') return rows;
+  return rows.filter(
+    (row, index) => !(index === rows.length - 1 && row.role === 'assistant' && row.content === ''),
+  );
+}
+
 export function mergeDisplayRows(
   rows: Message[],
   chatMessages: UiMessageLike[],
@@ -110,8 +127,10 @@ export function mergeDisplayRows(
   reasoningCache: Map<string, string>,
   liveVerdict: StreamVerdict | null,
 ): DisplayRow[] {
+  const settledRows = hideUnsettledExchangeRow(rows, status);
+
   const sdkMessages = new Map(chatMessages.map((m) => [m.id, m]));
-  const usageById = new Map(rows.map((row) => [row.id, row.usage ?? null]));
+  const usageById = new Map(settledRows.map((row) => [row.id, row.usage ?? null]));
 
   const isStreamingAssistant =
     status === 'streaming' && chatMessages[chatMessages.length - 1]?.role === 'assistant';
@@ -119,7 +138,7 @@ export function mergeDisplayRows(
     ? chatMessages[chatMessages.length - 1]?.id
     : null;
 
-  const settled = rows.map((row) =>
+  const settled = settledRows.map((row) =>
     buildSettledRow(
       row,
       sdkMessages.get(row.id),
@@ -128,7 +147,7 @@ export function mergeDisplayRows(
     ),
   );
 
-  const rowCountByKey = countByKey(rows);
+  const rowCountByKey = countByKey(settledRows);
   const shownByKey = new Map<string, number>();
   const pending: DisplayRow[] = [];
 

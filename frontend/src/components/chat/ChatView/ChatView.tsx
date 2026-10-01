@@ -6,7 +6,7 @@ import { ArrowDown, Send, Square } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
 import { MessageRow } from './MessageRow';
-import type { ChatViewStatus, DisplayRow } from './types';
+import type { ChatViewStatus, DisplayRow, RestoredDraft } from './types';
 
 const FOLLOW_BOTTOM_PX = 80;
 
@@ -35,6 +35,8 @@ type ChatViewProps = {
   rows: DisplayRow[];
   status: ChatViewStatus;
   errorMessage?: string | null;
+  /** A failed submit's draft; restoring puts it back in the input. */
+  restoredDraft?: RestoredDraft | null;
   onSend: (content: string) => void;
   onStop: () => void;
   /** Regenerates the last exchange server-side (works on stuck/failed replies). */
@@ -47,13 +49,27 @@ export default function ChatView({
   rows,
   status,
   errorMessage,
+  restoredDraft,
   onSend,
   onStop,
   onRetryLast,
   onEditMessage,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const busy = status === 'submitted' || status === 'streaming';
+
+  // The draft never dies on a failed submit: it returns to the input, and
+  // recovery is a resend.
+  useEffect(() => {
+    if (!restoredDraft) return;
+    // External system sync (the registry's failed-submit notification lands
+    // in state, this writes it into the DOM input and focuses it) — the only
+    // shape that can restore AND focus a live input element.
+    // eslint-disable-next-line react/set-state-in-effect
+    setInput(restoredDraft.text);
+    inputRef.current?.focus();
+  }, [restoredDraft]);
 
   // Always show thinking bubble during "submitted" phase (while drift evaluation runs).
   // During "streaming", only show if no assistant row with content exists yet.
@@ -179,6 +195,7 @@ export default function ChatView({
         {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
         <form className="flex gap-2" onSubmit={handleSubmit}>
           <Input
+            ref={inputRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Type your message..."

@@ -1,12 +1,14 @@
+import { env } from '@config/env';
 import type { Message } from '@db/types';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { runLiveGate } from '@services/threadAnalysis';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
-import { type Result, err, ok } from '../../types/result';
+import { type Result, type ResultError, err, ok } from '../../types/result';
 import {
   NOT_CONFIGURED_MESSAGE,
   SYSTEM_PROMPT,
@@ -86,6 +88,40 @@ type StartExchangeProps = {
   userMessage: Message;
 };
 
+/**
+ * One exchange per thread at a time, and the lazy half of staleness
+ * recovery. A newest assistant row still `pending` means an exchange is
+ * live and a second start would bill another inference over the same
+ * history — bounce it. A pending row older than the staleness window
+ * belongs to a dead process: settle it as interrupted here so the thread
+ * moves on; callers rely on this running on every start.
+ *
+ * Check-before-insert, not serialization: two starts racing the whole way
+ * (two submits meeting across the live gate's latency, today a same-tab
+ * race only) both pass it. Atomic enforcement belongs on the pending
+ * insert itself — the tracked index hardening lands before multi-replica
+ * deployment.
+ */
+async function guardOrSettleStaleExchange(
+  rows: Awaited<ReturnType<typeof listMessagesByThread>>,
+): Promise<ResultError | null> {
+  let newestAssistant: (typeof rows)[number] | undefined;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i]?.role === 'assistant') {
+      newestAssistant = rows[i];
+      break;
+    }
+  }
+  if (!newestAssistant || newestAssistant.exchangeStatus !== 'pending') return null;
+
+  const ageMs = Date.now() - newestAssistant.createdAt.getTime();
+  if (ageMs > env.EXCHANGE_STALENESS_MS) {
+    await updateExchangeStatus({ messageId: newestAssistant.id, exchangeStatus: 'interrupted' });
+    return null;
+  }
+  return err('exchange_in_flight', 'An exchange is already running in this thread.');
+}
+
 /** Shared tail of both entry points: assistant row + provider stream. */
 async function startExchange({
   userId,
@@ -98,6 +134,9 @@ async function startExchange({
     threadId,
     role: 'assistant',
     content: '',
+    // Marks the exchange running until settlement flips it; the guard in
+    // submitChat/retryLastExchange bounces concurrent starts on this row.
+    exchangeStatus: 'pending',
   });
 
   const controller = new AbortController();
@@ -172,6 +211,9 @@ export async function submitChat({
   }
 
   const precedingRows = await listMessagesByThread({ threadId });
+  const inFlight = await guardOrSettleStaleExchange(precedingRows);
+  if (inFlight) return inFlight;
+
   const userMessage = await insertMessage({ threadId, role: 'user', content });
 
   // The live gate judges the arriving message before inference: the
@@ -215,6 +257,9 @@ export async function retryLastExchange({
   let rows = await listMessagesByThread({ threadId });
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
+
+  const inFlight = await guardOrSettleStaleExchange(rows);
+  if (inFlight) return inFlight;
 
   if (last.role === 'assistant') {
     // Discard the stale/failed reply; usage cascades with the row.

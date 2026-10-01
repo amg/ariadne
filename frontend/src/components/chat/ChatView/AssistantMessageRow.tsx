@@ -18,7 +18,10 @@ export function AssistantMessageRow({
   onRetryLast: () => void;
 }) {
   const { message, usage, streaming, reasoning } = row;
-  const isStuckEmpty = !streaming && message.content === '';
+  // A stuck-empty row shows its retry inside the bubble (the "No reply
+  // generated" card), so the meta retry only appears when the bubble carries
+  // something itself — text, or reasoning a stop left behind.
+  const isStuckEmpty = !streaming && message.content === '' && !(reasoning ?? '').trim();
   const showRetry = isLast && !busy && !isStuckEmpty;
 
   return (

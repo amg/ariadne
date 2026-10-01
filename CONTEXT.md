@@ -18,7 +18,17 @@ _Avoid_: post, entry, chat line
 One user Message plus the assistant Message that responds to it. The unit
 of cost attribution and of drift measurement. A Turn "enters" when its user
 Message arrives.
-_Avoid_: exchange, round, step, request
+_Avoid_: round, step, request
+
+**Exchange**:
+The live execution of one Turn — the streaming exchange itself, from the
+moment inference starts until it settles. A Turn is the settled unit of
+cost and drift; an Exchange is the in-flight run that produces it. The
+assistant row carries the Exchange's state (`exchange_status`:
+`pending → completed | interrupted | error`) while it streams; the guard
+bounces a second submit against a live Exchange, and a hard failure leaves
+it `pending` until the staleness window declares it lost.
+_Avoid_: generation, request, job
 
 **Thread**:
 An ordered sequence of Turns under one title. Its full history is resent to
