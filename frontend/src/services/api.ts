@@ -46,7 +46,7 @@ export interface LiveAnalysisSegment {
   segmentId: string;
   startMessageId: string;
   arrivalCount: number;
-  closed: boolean;
+  closedByChannel: 'immediate' | 'slow' | null;
   createdAt: string;
 }
 

@@ -43,8 +43,12 @@ export function SegmentTable({ view }: { view: LiveAnalysisView }) {
                 <tr className="border-b border-border/50 bg-card/40">
                   <td colSpan={2} className="px-2 py-1.5 text-xs text-muted-foreground">
                     Segment #{segment.index} ·{' '}
-                    {segment.closed ? (
-                      <span className="text-purple-400">closed by fire</span>
+                    {segment.closedByChannel !== null ? (
+                      <span className="text-purple-400">
+                        {segment.closedByChannel === 'immediate'
+                          ? 'fast topic change'
+                          : 'slow topic drift'}
+                      </span>
                     ) : (
                       <span className="text-emerald-400">open</span>
                     )}

@@ -707,7 +707,7 @@ describe('the analysis surface reads the persisted chain', () => {
       TOPIC_SPECS.length - 1,
     );
     expect(view.data.segments.length).toBe(view.data.points.length);
-    expect(view.data.segments[view.data.segments.length - 1]?.closed).toBe(false);
+    expect(view.data.segments[view.data.segments.length - 1]?.closedByChannel).toBe(null);
   });
 
   it('lists a boundary arrival under the segment it opens, not the one it burned', async () => {

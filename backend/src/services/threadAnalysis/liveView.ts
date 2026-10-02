@@ -70,7 +70,7 @@ export interface LiveAnalysisSegment {
   /** Number of arrivals that landed in the segment's span (muted included). */
   arrivalCount: number;
   /** True when a fired arrival closed this segment. */
-  closed: boolean;
+  closedByChannel: 'immediate' | 'slow' | null;
   createdAt: string;
 }
 
@@ -183,7 +183,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       turnNumber,
       segmentIndex: memberSegmentIndex(turnNumber),
       verdict: log.verdict as GateVerdict,
-      fireChannel: log.fireChannel as 'immediate' | 'slow' | null,
+      fireChannel: log.fireChannel,
       driftP: log.driftP,
       mu: log.mu,
       sigma: log.sigma,
@@ -206,12 +206,13 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   }
   const segmentView: LiveAnalysisSegment[] = segments.map((segment, index) => {
     const next = segments[index + 1];
+    const nextLog = next ? logs.find((log) => log.messageId === next.startMessageId) : undefined;
     return {
       index: index + 1,
       segmentId: segment.id,
       startMessageId: segment.startMessageId,
       arrivalCount: arrivalCountBySegment.get(index + 1) ?? 0,
-      closed: next !== undefined,
+      closedByChannel: next ? (nextLog?.fireChannel as 'immediate' | 'slow') : null,
       createdAt: segment.createdAt.toISOString(),
     };
   });
