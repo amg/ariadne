@@ -9,6 +9,7 @@ import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { runLiveGate } from '@services/threadAnalysis';
+import { validateMessageContent } from '@services/validation';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, type ResultError, err, errBudgetExceeded, ok } from '../../types/result';
@@ -296,6 +297,10 @@ export async function submitChat({
   threadId,
   content,
 }: SubmitChatProps): Promise<Result<ChatStreamHandle>> {
+  const contentResult = validateMessageContent(content);
+  if (contentResult.type === 'error') return contentResult;
+  const normalized = contentResult.data;
+
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
 
@@ -321,7 +326,7 @@ export async function submitChat({
   const inFlight = await guardOrSettleStaleExchange(precedingRows);
   if (inFlight) return inFlight;
 
-  const userMessage = await insertMessage({ threadId, role: 'user', content });
+  const userMessage = await insertMessage({ threadId, role: 'user', content: normalized });
 
   // The live gate judges the arriving message before inference: the
   // pipeline persists every step as it completes, so a failure leaves the

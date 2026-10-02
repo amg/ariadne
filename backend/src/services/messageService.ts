@@ -8,6 +8,7 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
+import { validateMessageContent } from './validation';
 
 /** Usage as served on the GET payload (identity columns implied by the row). */
 export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
@@ -82,9 +83,6 @@ type UpdateMessageProps = {
   content: string;
 };
 
-/** Hard cap on a single message edit — far beyond any realistic prompt. */
-const MAX_MESSAGE_CONTENT_LENGTH = 10_000;
-
 /**
  * The edit fork — prompts only. The thread's last user message is
  * editable, and an edit ABANDONS its arrival rather than rewriting it:
@@ -105,16 +103,9 @@ export async function editMessage({
   messageId,
   content,
 }: UpdateMessageProps): Promise<Result<MessageWithUsage>> {
-  const normalized = content.trim();
-  if (normalized.length === 0) {
-    return err('invalid_content', 'Message content cannot be empty.');
-  }
-  if (normalized.length > MAX_MESSAGE_CONTENT_LENGTH) {
-    return err(
-      'invalid_content',
-      `Message content exceeds ${MAX_MESSAGE_CONTENT_LENGTH} characters.`,
-    );
-  }
+  const contentResult = validateMessageContent(content);
+  if (contentResult.type === 'error') return contentResult;
+  const normalized = contentResult.data;
 
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
