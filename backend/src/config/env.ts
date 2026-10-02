@@ -223,11 +223,13 @@ export const env: EnvConfig = {
   // Expansion-trigger judge and rewrite calls run on small, cheap models —
   // classification and bounded rephrasing, never answering. Overridable so
   // each can be repointed independently when a better small model appears.
+  // Empty values fall back to the pinned default: deployments pass these
+  // through compose as `VAR=${VAR:-}`, so "" is indistinguishable from unset.
   get JUDGE_MODEL() {
-    return getString('JUDGE_MODEL', 'Qwen/Qwen3.5-9B');
+    return process.env.JUDGE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
   },
   get REWRITE_MODEL() {
-    return getString('REWRITE_MODEL', 'Qwen/Qwen3.5-9B');
+    return process.env.REWRITE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
   },
 
   // CORS (required for SuperTokens - defaults to local dev)
