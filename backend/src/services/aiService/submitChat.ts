@@ -1,9 +1,10 @@
 import { env } from '@config/env';
 import type { Message } from '@db/types';
-import { deleteMessage } from '@queries/messages/deleteMessage';
+import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
+import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import { markMessageAbandoned } from '@queries/messages/markMessageAbandoned';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { runLiveGate } from '@services/threadAnalysis';
@@ -19,7 +20,7 @@ import {
   resolveInferenceConfig,
 } from './config';
 import { ChatExchange, type ChatOutcome } from './exchange';
-import { estimateChatPromptTokens } from './usageMap';
+import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
 
 /**
  * Per-call service boundary. Flow:
@@ -80,14 +81,23 @@ function abandonedTitlePreview(content: string): string {
   return `${trimmed.slice(0, ABANDONED_TITLE_MAX_CHARS - 1).trimEnd()}\u2026`;
 }
 
-/** System prompt + prior turns (user/assistant only) + the new user turn. */
+/** System prompt + prior turns (user/assistant only) + the new user turn.
+ * Abandoned turns stay out of inference memory — no history to learn from.
+ * Empty assistant rows (interrupted before first token) stay in the DB/UI
+ * but are skipped in the model context.
+ */
 function buildModelMessages(
   history: Awaited<ReturnType<typeof listMessagesByThread>>,
   userMessage: Message,
 ): ModelMessage[] {
   return [
     ...history
-      .filter((row) => row.role === 'user' || row.role === 'assistant')
+      .filter(
+        (row) =>
+          (row.role === 'user' || row.role === 'assistant') &&
+          !row.abandoned &&
+          (row.role === 'user' || row.content !== ''),
+      )
       .map((row) => ({ role: row.role, content: row.content })),
     { role: userMessage.role, content: userMessage.content },
   ];
@@ -116,24 +126,69 @@ type StartExchangeProps = {
  * insert itself — the tracked index hardening lands before multi-replica
  * deployment.
  */
-async function guardOrSettleStaleExchange(
+/**
+ * Settles a crashed exchange: status + estimated spend (no abandonment
+ * flags — interruption/failure never abandons). Best effort: a racing
+ * process may have settled first.
+ */
+async function settleCrashedExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
-): Promise<ResultError | null> {
-  let newestAssistant: (typeof rows)[number] | undefined;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'assistant') {
-      newestAssistant = rows[i];
+  assistantMessage: (typeof rows)[number],
+  assistantIndex: number,
+): Promise<void> {
+  await updateExchangeStatus({ messageId: assistantMessage.id, exchangeStatus: 'interrupted' });
+
+  let promptRow: (typeof rows)[number] | undefined;
+  let promptIndex = -1;
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    if (rows[i]?.role === 'user') {
+      promptRow = rows[i];
+      promptIndex = i;
       break;
     }
   }
+  const promptTokens = promptRow
+    ? estimateChatPromptTokens(
+        SYSTEM_PROMPT,
+        buildModelMessages(rows.slice(0, promptIndex), promptRow),
+      )
+    : 0;
+  try {
+    await insertMessageUsage(
+      await buildEstimatedUsageRow({
+        messageId: assistantMessage.id,
+        model: resolveInferenceConfig().model,
+        promptTokens,
+        streamedText: assistantMessage.content,
+        finishReason: 'interrupted',
+        latencyMs: null,
+      }),
+    );
+  } catch {
+    // A racing process may have settled first.
+  }
+}
+
+async function guardOrSettleStaleExchange(
+  rows: Awaited<ReturnType<typeof listMessagesByThread>>,
+): Promise<ResultError | null> {
+  let newestAssistantIndex = -1;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i]?.role === 'assistant') {
+      newestAssistantIndex = i;
+      break;
+    }
+  }
+  const newestAssistant = newestAssistantIndex >= 0 ? rows[newestAssistantIndex] : undefined;
   if (!newestAssistant || newestAssistant.exchangeStatus !== 'pending') return null;
 
   const ageMs = Date.now() - newestAssistant.createdAt.getTime();
-  if (ageMs > env.EXCHANGE_STALENESS_MS) {
-    await updateExchangeStatus({ messageId: newestAssistant.id, exchangeStatus: 'interrupted' });
-    return null;
+  if (ageMs <= env.EXCHANGE_STALENESS_MS) {
+    return err('exchange_in_flight', 'An exchange is already running in this thread.');
   }
-  return err('exchange_in_flight', 'An exchange is already running in this thread.');
+
+  await settleCrashedExchange(rows, newestAssistant, newestAssistantIndex);
+  return null;
 }
 
 /** Shared tail of both entry points: assistant row + provider stream. */
@@ -167,20 +222,22 @@ async function startExchange({
     onIdleTimeout: () => controller.abort(),
   });
 
-  // An exchange that ends without completing abandons its arrival: flags the
-  // user row immediately, and titles a still-untitled thread from the run's
-  // own text so the shared listing picks it up instead of swallowing it.
-  // Best effort — the outcome and the spend settlement are authoritative.
+  // An exchange ending without completing stays in the thread: the user
+  // arrival and its partial reply likely remain, the partial joins the
+  // context of whatever comes next, and the user decides its fate — reword
+  // (an explicit replacement), edit (a fork), or build on top. A still-
+  // untitled thread titles from the arrival text so the listing stays
+  // navigable. Best effort — the outcome and spend settlement are
+  // authoritative.
   void exchange.outcome.then(async (result) => {
     if (result.type === 'success' && result.data.finishReason !== 'interrupted') return;
     try {
-      await markMessageAbandoned({ messageId: userMessage.id });
       const thread = await findThreadByIdAndUser({ userId, threadId });
       if (thread && !thread.title) {
         await renameThread({ userId, threadId, title: abandonedTitlePreview(userMessage.content) });
       }
     } catch {
-      // Titling/flagging must not fail the exchange.
+      // Titling must not fail the exchange.
     }
   });
 
@@ -272,11 +329,12 @@ export async function submitChat({
 
 /**
  * User-initiated retry of the last inference (useChat `regenerate` trigger).
- * The server is authoritative — the client's message list is ignored:
- * - thread ends with an assistant row: that row (and its usage, via FK
- *   cascade) is deleted and the reply is generated from scratch;
- * - thread ends with a user row: the reply is (re)generated for the existing
- *   user turn without inserting another one.
+ * The server is authoritative — the client's message list is ignored. The
+ * retry revives the newest user turn it re-exchanges (a turn of exchange-
+ * debris returns to the live conversation) and flags the stale assistant
+ * rows beneath it abandoned in place — the rows stay, their usage keeps
+ * tracking what the failed run burned, and the regenerate lands beneath
+ * them.
  */
 export async function retryLastExchange({
   userId,
@@ -290,19 +348,16 @@ export async function retryLastExchange({
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
-  let rows = await listMessagesByThread({ threadId });
+  const rows = await listMessagesByThread({ threadId });
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
 
   const inFlight = await guardOrSettleStaleExchange(rows);
   if (inFlight) return inFlight;
 
-  if (last.role === 'assistant') {
-    // Discard the stale/failed reply; usage cascades with the row.
-    await deleteMessage({ messageId: last.id });
-    rows = rows.slice(0, -1);
-  }
-
+  // The target is the newest user turn — revived: an abandoned arrival
+  // re-joining the live conversation, its stale assistant rows overrun by
+  // the regenerate.
   let userIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     if (rows[i]?.role === 'user') {
@@ -312,6 +367,17 @@ export async function retryLastExchange({
   }
   const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
   if (!userMessage) return err('nothing_to_regenerate');
+
+  await setMessagesAbandoned({ messageIds: [userMessage.id], abandoned: false });
+  // Stale answers stay — flagged abandoned with their usage rows intact,
+  // the honest cost of the failed run; the regenerate lands beneath them.
+  await setMessagesAbandoned({
+    messageIds: rows
+      .slice(userIndex + 1)
+      .filter((row) => row.role === 'assistant' && !row.abandoned)
+      .map((row) => row.id),
+    abandoned: true,
+  });
 
   // The exchanged arrival is gated: already-analysed arrivals replay
   // (never re-embedded, never re-judged — cheap and idempotent), while a

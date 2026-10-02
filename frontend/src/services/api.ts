@@ -136,6 +136,11 @@ export interface Message {
   usage: MessageUsage | null;
   /** Live-gate verdict on user arrivals; null elsewhere and when off. */
   driftVerdict?: MessageDriftVerdict | null;
+  /**
+   * Rows of a forked-away or failed exchange: kept for usage tracking but
+   * hidden from the chat stream and live analysis.
+   */
+  abandoned?: boolean;
 }
 
 /**

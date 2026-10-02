@@ -109,13 +109,21 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
 
   const params = { ...DEFAULT_ANALYZE_OPTIONS, embeddingModelId: EMBEDDING_MODEL_ID };
 
-  const [messageRows, segments, logs] = await Promise.all([
+  const [messageRows, allSegments, allLogs] = await Promise.all([
     listMessagesByThread({ threadId }),
     listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
     listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
   ]);
 
-  const messages = messageRows.map((row) => ({
+  // Abandoned arrivals stay out of the reading: their rows, segments and
+  // drift logs stay stored (usage keeps tracking them) but the view only
+  // composes the live thread.
+  const abandonedIds = new Set(messageRows.filter((row) => row.abandoned).map((row) => row.id));
+  const liveRows = messageRows.filter((row) => !row.abandoned);
+  const segments = allSegments.filter((segment) => !abandonedIds.has(segment.startMessageId));
+  const logs = allLogs.filter((log) => !abandonedIds.has(log.messageId));
+
+  const messages = liveRows.map((row) => ({
     id: row.id,
     threadId: row.threadId,
     role: row.role,

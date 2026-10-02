@@ -30,31 +30,51 @@ bounces a second submit against a live Exchange, and a hard failure leaves
 it `pending` until the staleness window declares it lost. Every settled
 Exchange accounts its spend — the provider's report when one arrived,
 otherwise an Estimated row. An Exchange ending without completing
-Abandons its arrival.
+(interruption, failure, timeout, crash) abandons nothing; only deliberate
+user actions (edit, retry) flag rows abandoned.
 _Avoid_: generation, request, job
 
 **Abandoned**:
-Marked on an Exchange's user Message when the Exchange ended without
-completing (stop, disconnect, timeout, provider error). The mark registers
-the arrival in the Thread — a still-untitled Thread takes its title from a
-short preview of the arrival text — and its text becomes the Resume
-Draft. Historical: a retry that completes the Turn does not clear it.
+Marked only by deliberate user actions: (1) an edit abandons the old
+arrival + every reply grown from its text; (2) a retry/regenerate flags
+stale assistant rows abandoned in place. Interruption, failure, timeout,
+and crash abandon nothing — user prompt and partial assistant reply stay
+live in the thread (empty assistant rows are skipped in model context
+but remain in DB/UI). A still-untitled Thread titles from a short preview
+of the arrival text. Abandoned rows stay in the Thread with their usages
+intact (spend keeps tracking them) but vanish from the chat stream and
+the live analysis. A retry revives the user arrival it re-exchanges; the
+mark is otherwise historical.
 _Avoid_: hidden, orphaned, dead
 
 **Resume Draft**:
-An Abandoned Exchange's arrival text owed back to the input: owed when
-the Thread's newest user Message is its abandoned arrival and no Exchange
-completed after it; consumed by a completing retry. Prefill is
-interrupt-recovery only — sending clears intent.
+Dormant (dead code): no path abandons the newest user row anymore (edits
+always insert the fork behind). Previously: an Abandoned Exchange's
+arrival text owed back to the input; owed when the Thread's newest user
+Message was its abandoned arrival and no Exchange completed after it;
+consumed by a completing retry. The `findResumeDraft` query and `/draft`
+endpoint remain in place but are no longer invoked by the interruption
+path.
 _Avoid_: restore, recovery text
 
 **Edit**:
-Forking the last user prompt. The old arrival row is abandoned untouched
-— its text and arrival analysis stay, keeping pre-edit costs tracked —
-and the edited text lands as a new arrival row. The retry exchanges the
-new arrival, and the live thread-health gate acts there. Only the newest
-prompt is editable: every earlier one owes the conversation its reading.
+Forking the last user prompt — a deliberate user action that abandons.
+The old arrival row and every reply grown from its text are abandoned in
+place — text, arrival analysis and spend stay, the usages keep tracking
+what the thread burned — and the edited text lands as a new arrival row.
+The retry exchanges the new arrival, and the live thread-health gate
+acts there. Only the newest prompt is editable: every earlier one owes
+the conversation its reading.
 _Avoid_: message update, in-place rewrite
+
+**Retry**:
+The user's *regenerate* of an Exchange — a deliberate user action that
+abandons. The server picks the newest user Message (abandoned or not),
+revives it, flags the stale assistant rows beneath it abandoned in place,
+and grows the fresh reply beneath those — nothing is ever deleted, every
+burnt usage keeps counting. The client's message list serves only the
+SDK's last-message guard.
+_Avoid_: resend, re-run
 
 **Thread**:
 An ordered sequence of Turns under one title. Its full history is resent to

@@ -260,18 +260,16 @@ describe('submitChat', () => {
     // A deliberate stop settles the exchange as interrupted, releasing the thread.
     expect(assistantRow?.exchangeStatus).toBe('interrupted');
 
-    // The abandoned arrival registers in the thread: the user row is
-    // flagged, and its text is owed back to the input as the resume draft.
+    // Interruption abandons nothing: user row stays non-abandoned, no resume draft.
     const userRow = rows.find((row) => row.role === 'user');
-    expect(await waitForAbandonedUserRow(threadId)).toBe(userRow?.id);
+    expect(userRow?.abandoned).toBe(false);
     const draft = await findResumeDraft({ threadId });
-    expect(draft?.messageId).toBe(userRow?.id);
-    expect(draft?.content).toBe('stop me please PAUSE:200');
+    expect(draft).toBeUndefined();
     // The thread already has its title — the interruption leaves it alone.
     expect((await findThreadByIdAndUser({ userId, threadId }))?.title).toBe('AI thread');
   });
 
-  it('titles a still-untitled thread from the abandoned arrival text', async () => {
+  it('titles a still-untitled thread from the interrupted arrival text', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
     const thread = await insertThread({ userId });
@@ -290,14 +288,20 @@ describe('submitChat', () => {
       data: { finishReason: 'interrupted' },
     });
 
-    await waitForAbandonedUserRow(thread.id);
+    // Wait for the title preview to settle (it's set in the outcome handler).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Title preview still lands from the arrival text; no abandonment.
+    const rows = await listMessagesByThread({ threadId: thread.id });
+    const userRow = rows.find((row) => row.role === 'user');
+    expect(userRow?.abandoned).toBe(false);
     // Over the char cap: clipped at the boundary and ellipsized.
     expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBe(
       `${'abcd '.repeat(10).trim()}\u2026`,
     );
   });
 
-  it('clears the resume draft once the exchange completes', async () => {
+  it('an interrupted exchange leaves no resume draft; retrying completes it', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
     const thread = await insertThread({ userId });
@@ -307,13 +311,10 @@ describe('submitChat', () => {
     );
     interrupted.abort();
     await interrupted.outcome;
-    await waitForAbandonedUserRow(thread.id);
-    expect((await findResumeDraft({ threadId: thread.id }))?.content).toBe(
-      'retry me please PAUSE:200',
-    );
+    // Interruption abandons nothing: no draft created.
+    expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
 
-    // Retrying the failed exchange completes it; the completed reply
-    // consumes the draft the interrupted run offered.
+    // Retrying the interrupted exchange completes it beneath the partial reply.
     const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
     await drain(retry);
     expect(await retry.outcome).toMatchObject({
@@ -341,10 +342,12 @@ describe('submitChat', () => {
     original.abort();
     await original.outcome;
 
+    // Interruption abandons nothing: user row stays non-abandoned.
+    const rowsBeforeEdit = await listMessagesByThread({ threadId: thread.id });
+    const originalUserRow = rowsBeforeEdit.find((row) => row.role === 'user');
+    expect(originalUserRow?.abandoned).toBe(false);
+
     // The edit forks: abandoned arrival kept intact, edited text inserted.
-    const originalUserRow = (await listMessagesByThread({ threadId: thread.id })).find(
-      (row) => row.role === 'user',
-    );
     const edit = await editMessage({
       userId,
       threadId: thread.id,
@@ -362,10 +365,11 @@ describe('submitChat', () => {
       data: { finishReason: 'stop' },
     });
 
-    // History keeps the abandoned arrival before the forked arrival.
+    // History keeps the abandoned turn before the forked exchange.
     const rows = await listMessagesByThread({ threadId: thread.id });
     expect(rows.map((row) => [row.role, row.abandoned])).toEqual([
       ['user', true],
+      ['assistant', true],
       ['user', false],
       ['assistant', false],
     ]);
@@ -504,11 +508,17 @@ describe('exchange in-flight guard', () => {
       await drain(handle);
       await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
 
-      // The stale pending row was discarded by the retry like any failed reply.
+      // The stale pending row survives as flagged abandoned; the fresh
+      // answer lands beneath it.
       const rows = await listMessagesByThread({ threadId });
-      expect(rows.map((row) => row.id)).toEqual([userMessage.id, handle.assistantMessageId]);
-      expect(rows[1]?.exchangeStatus).toBe('completed');
-      expect(rows.some((row) => row.id === orphan.id)).toBe(false);
+      expect(rows.map((row) => row.id)).toEqual([
+        userMessage.id,
+        orphan.id,
+        handle.assistantMessageId,
+      ]);
+      expect(rows[1]?.abandoned).toBe(true);
+      expect(rows[2]?.exchangeStatus).toBe('completed');
+      expect(rows.some((row) => row.id === orphan.id)).toBe(true);
     } finally {
       setStalenessMs(savedStalenessMs);
     }
@@ -556,7 +566,7 @@ describe('retryLastExchange', () => {
     expect(empty).toEqual({ type: 'error', code: 'nothing_to_regenerate' });
   });
 
-  it('replaces a stale assistant reply (row + usage cascade) with a fresh exchange', async () => {
+  it('keeps the stale reply abandoned and answers fresh beneath it', async () => {
     const { userId, threadId } = await createRandomThread();
 
     const first = await assertSuccess(await submitChat({ userId, threadId, content: 'retry me' }));
@@ -574,17 +584,17 @@ describe('retryLastExchange', () => {
     const streamed = messages[messages.length - 1];
     expect(streamed?.id).toBe(retry.assistantMessageId);
 
+    // The stale answer stays — flagged abandoned — with the fresh answer
+    // beneath it; both exchanges' spend keep tracking on their rows.
     const rows = await listMessagesByThread({ threadId });
-    expect(rows.map((row) => row.role)).toEqual(['user', 'assistant']);
-    expect(rows[1]?.id).toBe(retry.assistantMessageId);
-    expect(rows[1]?.id).not.toBe(first.assistantMessageId);
-    const text = rows[1]?.content ?? '';
+    expect(rows.map((row) => row.role)).toEqual(['user', 'assistant', 'assistant']);
+    expect(rows[1]?.id).toBe(first.assistantMessageId);
+    expect(rows[1]?.abandoned).toBe(true);
+    expect(rows[2]?.id).toBe(retry.assistantMessageId);
+    expect(rows[2]?.abandoned).toBe(false);
+    const text = rows[2]?.content ?? '';
     expect(text).toContain('retry me');
-
-    // Old usage row cascaded with the deleted message; fresh reply has its own.
-    expect(
-      await getMessageUsageByMessageId({ messageId: first.assistantMessageId }),
-    ).toBeUndefined();
+    expect(await getMessageUsageByMessageId({ messageId: first.assistantMessageId })).toBeDefined();
     expect(await getMessageUsageByMessageId({ messageId: retry.assistantMessageId })).toBeDefined();
   });
 
