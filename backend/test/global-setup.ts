@@ -1,49 +1,26 @@
-import { promises as fs, existsSync, readFileSync } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDbFromPool } from '@db/db';
 import { type Kysely, sql } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
-import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
 /**
  * Database resolution order:
- *   1. `TEST_DATABASE_URL` env var — explicit, always wins.
- *   2. A disposable testcontainers Postgres (same image as prod) when a
- *      Docker environment is available (typical dev host / CI).
- *   3. Sandbox fallback: reuse the dev `chat_db` Postgres published on the
- *      Docker host, reached via this container's default gateway. Uses a
+ *   1. `TEST_DATABASE_URL` env var — explicit, always wins; the database
+ *      must already exist at that URL.
+ *   2. Sandbox fallback: reuse the dev Postgres published on the Docker
+ *      host, reached via this container's default gateway. Uses a
  *      dedicated `chatbot_test` database only — dev data is never touched.
  */
 const TEST_DATABASE_URL_ENV = 'TEST_DATABASE_URL';
 const DB_URL_ENV = 'VITEST_TEST_DATABASE_URL';
 
-const POSTGRES_IMAGE = 'pgvector/pgvector:pg16';
 const TEST_DB_NAME = 'chatbot_test';
 const FALLBACK_USER = 'postgres';
 const FALLBACK_PASSWORD = 'postgrespassword'; // dev-only credentials (docker-compose.yml)
 const FALLBACK_PORT = 5432;
-
-async function startPostgresContainer(): Promise<StartedTestContainer> {
-  return new GenericContainer(POSTGRES_IMAGE)
-    .withEnvironment({
-      POSTGRES_USER: FALLBACK_USER,
-      POSTGRES_PASSWORD: FALLBACK_PASSWORD,
-      POSTGRES_DB: TEST_DB_NAME,
-    })
-    .withExposedPorts(5432)
-    .withWaitStrategy(Wait.forLogMessage('database system is ready to accept connections', 2))
-    .start();
-}
-
-function dockerLikelyAvailable(): boolean {
-  return Boolean(
-    process.env.DOCKER_HOST ||
-      process.env.TESTCONTAINERS_HOST_OVERRIDE ||
-      existsSync('/var/run/docker.sock'),
-  );
-}
 
 /** Default-route gateway IP of this container's network (Linux only). */
 function detectGatewayIp(): string | undefined {
@@ -80,7 +57,7 @@ async function ensureSandboxDatabase(gateway: string): Promise<string> {
     }
   } catch (error) {
     throw new Error(
-      `No Docker environment and no reachable Postgres at ${gateway}:${FALLBACK_PORT} ` +
+      `No reachable Postgres at ${gateway}:${FALLBACK_PORT} ` +
         `(started docker compose db? or set ${TEST_DATABASE_URL_ENV}). ` +
         `Original error: ${String(error)}`,
     );
@@ -94,22 +71,15 @@ function redactUrl(url: string): string {
   return url.replace(/:[^:@/]+@/, ':***@');
 }
 
-export default async function globalSetup(): Promise<() => Promise<void>> {
-  let container: StartedTestContainer | undefined;
+export default async function globalSetup(): Promise<void> {
   let databaseUrl = process.env[TEST_DATABASE_URL_ENV];
   let mode = `explicit ${TEST_DATABASE_URL_ENV}`;
-
-  if (!databaseUrl && dockerLikelyAvailable()) {
-    container = await startPostgresContainer();
-    databaseUrl = `postgres://${FALLBACK_USER}:${FALLBACK_PASSWORD}@${container.getHost()}:${container.getMappedPort(5432)}/${TEST_DB_NAME}`;
-    mode = 'testcontainers';
-  }
 
   if (!databaseUrl) {
     const gateway = detectGatewayIp();
     if (!gateway) {
       throw new Error(
-        `No Docker environment found and no network gateway to fall back to. Start Docker or set ${TEST_DATABASE_URL_ENV} to a real Postgres URL.`,
+        `No network gateway found to reach the sandbox database. Set ${TEST_DATABASE_URL_ENV} to a real Postgres URL.`,
       );
     }
     databaseUrl = await ensureSandboxDatabase(gateway);
@@ -140,8 +110,4 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   } finally {
     await db.destroy();
   }
-
-  return async () => {
-    await container?.stop();
-  };
 }

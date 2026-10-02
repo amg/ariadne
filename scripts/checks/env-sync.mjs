@@ -25,8 +25,6 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Vars owned by libraries/test-harnesses, not our config surface. */
 const EXEMPT = new Set([
-  'DOCKER_HOST', // testcontainers
-  'TESTCONTAINERS_HOST_OVERRIDE', // testcontainers
   'VITEST_TEST_DATABASE_URL', // vitest global-setup publishes, db.ts consumes
   'NODE_ENV', // runtime/provisioning-owned (Docker, npm scripts), not app config
   'FORCE_COLOR', // terminal convention (colorette, npm scripts), not app config

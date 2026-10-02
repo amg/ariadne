@@ -40,7 +40,6 @@
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.20.2",
     "@types/pg": "^8.23.1",
-    "testcontainers": "^12.1.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
