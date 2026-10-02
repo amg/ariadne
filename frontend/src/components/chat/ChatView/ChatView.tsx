@@ -1,6 +1,6 @@
 import { MessageMetaRow } from '@/components/metadata';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { chatStatusText } from '@/services/utils';
 import { ArrowDown, Send, Square } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -56,7 +56,7 @@ export default function ChatView({
   onEditMessage,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === 'submitted' || status === 'streaming';
 
   // The draft never dies on a failed submit: it returns to the input, and
@@ -140,8 +140,41 @@ export default function ChatView({
     if (!input.trim() || busy) return;
     onSend(input.trim());
     setInput('');
+    // Reset textarea height
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     // Always show the user's own message, even after scrolling up.
     scrollToBottom();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Shift+Enter inserts a newline (default behavior)
+    if (event.key === 'Enter' && event.shiftKey) {
+      return;
+    }
+    // Enter alone sends the message
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (!input.trim() || busy) return;
+      onSend(input.trim());
+      setInput('');
+      // Reset textarea height
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+      }
+      scrollToBottom();
+    }
+  };
+
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    setInput(value);
+    // Auto-grow the textarea up to max-h-[120px] (~5 lines)
+    const textarea = event.target;
+    textarea.style.height = 'auto';
+    const newHeight = Math.min(textarea.scrollHeight, 120);
+    textarea.style.height = `${newHeight}px`;
   };
 
   return (
@@ -194,12 +227,14 @@ export default function ChatView({
       <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
         {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
         <form className="flex gap-2" onSubmit={handleSubmit}>
-          <Input
+          <Textarea
             ref={inputRef}
             value={input}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
             placeholder="Type your message..."
-            className="flex-1"
+            className="flex-1 resize-none"
+            rows={1}
             autoFocus
           />
           {busy ? (

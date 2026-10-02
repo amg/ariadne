@@ -2,6 +2,7 @@
   "$schema": "https://unpkg.com/knip/schema.json",
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["hadolint"],
+  "ignore": [".pi/agent/extensions/**"],
   "workspaces": {
     "backend": {
       "ignore": ["src/db/migrations/**"]
