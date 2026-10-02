@@ -20,10 +20,20 @@ type ThreadParams = {
  * fresh flag flip) catches up the moment the tab asks. Provider failures
  * during the fill never block the reading — what was already persisted is
  * returned, with `pending` marking the gap the tab renders as loading.
+ *
+ * Bounded backfill: at most 20 arrivals filled per request — leftovers
+ * catch up on the next read; the live lane during exchanges is exempt
+ * (bounded by the chat cap itself).
  */
+const ANALYSIS_BACKFILL_LIMIT = 20;
+
 export async function setupThreadAnalysisRoute(fastify: FastifyInstance) {
   fastify.get(
     '/api/threads/:id/analysis',
+    {
+      // Deployment-wide cap: 10/min (shared, no auth yet).
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
     async (request: FastifyRequest<{ Params: ThreadParams }>, reply: FastifyReply) => {
       const { id: threadId } = request.params;
       if (!isValidUuid(threadId)) {
@@ -42,8 +52,8 @@ export async function setupThreadAnalysisRoute(fastify: FastifyInstance) {
         return reply.send(view.data);
       }
 
-      // Fill missing arrival signals forward (skip everything persisted).
-      const filled = await runLiveGate({ threadId });
+      // Fill missing arrival signals forward, bounded to 20 per request.
+      const filled = await runLiveGate({ threadId, limit: ANALYSIS_BACKFILL_LIMIT });
       if (filled.type === 'error') {
         request.log.warn({ code: filled.code }, 'analysis backfill failed; serving stored signals');
       }

@@ -76,6 +76,9 @@ typings/
 .env
 .env.test
 .env*.local
+# Environment-specific configs (templates are committed)
+.env.dev
+.env.prod
 
 # parcel-bundler cache
 .cache

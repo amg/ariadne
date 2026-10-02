@@ -6,7 +6,22 @@
 
 export type ResultSuccess<T> = { type: 'success'; data: T };
 
-export type ResultError = { type: 'error'; code: string; message?: string };
+/** Budget exceeded error — always includes retryAfter (seconds until UTC midnight). */
+export type BudgetExceededError = {
+  type: 'error';
+  code: 'budget_exceeded';
+  message: string;
+  retryAfter: number;
+};
+
+/** Standard error — just code + optional message. */
+export type StandardError = {
+  type: 'error';
+  code: string;
+  message?: string;
+};
+
+export type ResultError = StandardError | BudgetExceededError;
 
 export type Result<T> = ResultSuccess<T> | ResultError;
 
@@ -14,10 +29,23 @@ export function ok<T>(data: T): ResultSuccess<T> {
   return { type: 'success', data };
 }
 
-export function err(code: string, message?: string): ResultError {
-  const result: ResultError = { type: 'error', code };
+export function err(code: string, message?: string): StandardError {
+  const result: StandardError = { type: 'error', code };
   if (message !== undefined) {
     result.message = message;
   }
   return result;
+}
+
+/** Specialized error constructor for budget exceeded (includes retryAfter). */
+export function errBudgetExceeded(
+  retryAfterSeconds: number,
+  message?: string,
+): BudgetExceededError {
+  return {
+    type: 'error',
+    code: 'budget_exceeded',
+    message: message ?? 'Daily spend budget exceeded. Try again after UTC midnight.',
+    retryAfter: retryAfterSeconds,
+  };
 }

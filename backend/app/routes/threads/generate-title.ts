@@ -17,6 +17,10 @@ type GenerateTitleBody = {
 export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
   fastify.post(
     '/api/threads/:id/generate-title',
+    {
+      // Deployment-wide cap: 5/min (shared, no auth yet).
+      config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const params = request.params as GenerateTitleParams;
 

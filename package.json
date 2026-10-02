@@ -13,6 +13,8 @@
     "test": "npm run test --workspaces --if-present",
     "analyze:thread": "npm run analyze:thread --workspace=backend --",
     "build:frontend": "npm run build --workspace=frontend",
+    "migrate": "npm run migrate --workspace=backend",
+    "migrate:prod": "npm run migrate:prod --workspace=backend",
     "audit:deps": "knip",
     "audit:boundaries": "depcruise frontend/src backend/src",
     "audit:env": "node scripts/checks/env-sync.mjs",

@@ -12,6 +12,7 @@ description: Defines code quality standards, complexity limits, testing governan
     - *UI components*: Explicit `switch` cases for visual variants and divergent markup. Object maps only for simple scaling attributes (e.g., `size`).
 *   **Naming**: Name things by outcome and result, not by mechanism. Be explicit about nullability.
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
+*   **Type safety**: Use TypeScript types and interfaces to enforce contracts via structural typing. Avoid `any`; prefer `unknown` at external boundaries with runtime validation. Use discriminated unions for variant types. Let inference handle locals; annotate function signatures explicitly. Avoid type assertions — when unavoidable (third-party libs, narrowing edge cases), add an inline comment explaining why. Consider branded types for non-interchangeable IDs (thread IDs, user IDs).
 
 ## 2. Testing Governance
 *   **Database rules**: the DB-specific rules (no database mocks, real-Postgres tests, isolation, permitted boundary mocks) live in the **db** skill — load it before writing or modifying database tests.

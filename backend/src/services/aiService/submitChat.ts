@@ -2,6 +2,7 @@ import { env } from '@config/env';
 import type { Message } from '@db/types';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
+import { secondsUntilUtcMidnight, sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
@@ -10,7 +11,7 @@ import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { runLiveGate } from '@services/threadAnalysis';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
-import { type Result, type ResultError, err, ok } from '../../types/result';
+import { type Result, type ResultError, err, errBudgetExceeded, ok } from '../../types/result';
 import { renameThread } from '../threadService';
 import {
   NOT_CONFIGURED_MESSAGE,
@@ -301,6 +302,19 @@ export async function submitChat({
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
+  }
+
+  // Global daily spend budget gate — checked before any Exchange starts.
+  // Unset DAILY_SPEND_BUDGET_USD = fail open, no gate.
+  const budget = env.DAILY_SPEND_BUDGET_USD;
+  if (budget !== undefined) {
+    const dailyTotal = await sumDailySpend();
+    if (Number(dailyTotal) >= budget) {
+      return errBudgetExceeded(
+        secondsUntilUtcMidnight(),
+        'Daily spend budget exceeded. Try again after UTC midnight.',
+      );
+    }
   }
 
   const precedingRows = await listMessagesByThread({ threadId });
