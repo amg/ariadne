@@ -22,10 +22,15 @@ import {
   useNavigate,
   useRouteLoaderData,
 } from 'react-router';
+import { redirect } from 'react-router';
 import { toast } from 'sonner';
+import Session, { SessionAuth } from 'supertokens-auth-react/recipe/session';
 
 export async function loader() {
-  // Config failure degrades quietly: treat the analysis surface as on.
+  if (!(await Session.doesSessionExist())) {
+    return redirect('/auth');
+  }
+  // Config failure degrades quietly: treat the analysis surface as on.: treat the analysis surface as on.
   let threadAnalysisMode: ThreadAnalysisMode = 'heuristic';
   try {
     threadAnalysisMode = (await fetchConfig()).threadAnalysisMode;
@@ -36,7 +41,7 @@ export async function loader() {
 }
 
 // Framework entry for the app chrome: reads route state, delegates to the pure shell.
-export default function AppLayout() {
+function AppLayoutComponent() {
   const { threads, threadAnalysisMode } = useRouteLoaderData('root') as {
     threads: Thread[];
     threadAnalysisMode: ThreadAnalysisMode;
@@ -220,5 +225,13 @@ export default function AppLayout() {
         }}
       />
     </AppShell>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <SessionAuth>
+      <AppLayoutComponent />
+    </SessionAuth>
   );
 }

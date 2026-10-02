@@ -1,9 +1,8 @@
 import { autoTitleThread } from '@services/titlingService';
-import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 import { httpStatusFor } from '../../../src/types/errorCodes';
-
-const REQUEST_USER_ID = DEFAULT_USER_ID;
 
 type GenerateTitleParams = {
   id: string;
@@ -19,13 +18,15 @@ export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
     '/api/threads/:id/generate-title',
     {
       // Deployment-wide cap: 5/min (shared, no auth yet).
+      preHandler: verifySession(),
       config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const userId = (request as SessionRequest).session?.getUserId() as string;
       const params = request.params as GenerateTitleParams;
 
       const body = (request.body ?? {}) as GenerateTitleBody;
-      const outcome = await autoTitleThread(REQUEST_USER_ID, params.id, body.forced === true);
+      const outcome = await autoTitleThread(userId, params.id, body.forced === true);
 
       if (outcome.type === 'titled') {
         return reply.send({ success: true, title: outcome.title });

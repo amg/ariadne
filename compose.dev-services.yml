@@ -1,0 +1,41 @@
+# Infrastructure services only — for local development with `npm run dev`.
+# Run with: docker compose -f compose.dev-services.yml --env-file .env.dev up -d
+# Then: npm run dev
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: chat_db_dev
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+      POSTGRES_DB: ${DB_NAME:-chatbot_dev}
+    # Loopback only — accessible from host for local dev
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - chat-network-dev
+
+  supertokens:
+    image: supertokens/supertokens-postgresql:12.2
+    container_name: chat_supertokens_dev
+    depends_on:
+      - db
+    # Expose to host for local backend
+    ports:
+      - "3567:3567"
+    environment:
+      POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-chatbot_dev}"
+    networks:
+      - chat-network-dev
+    restart: unless-stopped
+
+volumes:
+  pgdata_dev:
+
+networks:
+  chat-network-dev:
+    driver: bridge

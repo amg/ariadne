@@ -7,8 +7,14 @@ import AppLayout, { loader as rootLoader } from '@/pages/AppLayout';
 import EmptyPage from '@/pages/EmptyPage';
 import { fetchThreads } from '@/services/api';
 import { createBrowserRouter, redirect } from 'react-router';
+import { EmailPasswordPreBuiltUI } from 'supertokens-auth-react/recipe/emailpassword/prebuiltui';
+import { getRoutingComponent } from 'supertokens-auth-react/ui';
 
 export const router = createBrowserRouter([
+  {
+    path: '/auth/*',
+    Component: () => getRoutingComponent([EmailPasswordPreBuiltUI]),
+  },
   {
     id: 'root',
     path: '/',

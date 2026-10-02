@@ -25,6 +25,12 @@ import Fastify, { LogController } from 'fastify';
 import type { FastifyBaseLogger } from 'fastify';
 import { logger } from '../src/logger';
 
+import { initAuth } from '@services/authService';
+import supertokens from 'supertokens-node';
+import { errorHandler, plugin } from 'supertokens-node/framework/fastify';
+
+initAuth();
+
 // ── Dev console — the logger singleton (`src/logger.ts`) renders one
 // scannable line per request via the onResponse hook below:
 //   POST /api/threads/…/generate-title → 502 5666ms
@@ -63,10 +69,16 @@ const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
   .filter(Boolean);
 app.register(cors, {
   origin: configuredOrigins.length > 0 ? configuredOrigins : DEFAULT_ORIGINS,
+  allowedHeaders: ['Content-Type', ...supertokens.getAllCORSHeaders()],
+  credentials: true,
 });
 
 // Standard security headers on API responses.
 app.register(helmet);
+
+// SuperTokens auth routes (must be awaited - registers /auth/* routes)
+await app.register(plugin);
+app.setErrorHandler(errorHandler());
 
 // Coarse global limit (amp + abuse); the billable chat route tightens its own
 // window via route `config.rateLimit`. Local dev stayed comfortably under both.

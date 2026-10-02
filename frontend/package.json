@@ -26,6 +26,8 @@
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
+    "supertokens-auth-react": "^0.51.3",
+    "supertokens-web-js": "^0.16.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7"
   },

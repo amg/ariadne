@@ -24,6 +24,20 @@ services:
     networks:
       - chat-network-prod
 
+
+  supertokens:
+    image: supertokens/supertokens-postgresql:12.2
+    container_name: chat_supertokens_prod
+    depends_on:
+      - db
+    # No published ports - backend accesses it internally
+    environment:
+      POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}"
+      API_KEYS: ${SUPERTOKENS_API_KEY}
+    networks:
+      - chat-network-prod
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -47,6 +61,8 @@ services:
       - JUDGE_MODEL=${JUDGE_MODEL}
       - REWRITE_MODEL=${REWRITE_MODEL}
       - DAILY_SPEND_BUDGET_USD=${DAILY_SPEND_BUDGET_USD}
+      - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
+      - SUPERTOKENS_API_KEY=${SUPERTOKENS_API_KEY}
     # No published ports — backend is internal only
     depends_on:
       - db
