@@ -1,8 +1,9 @@
 /**
- * Production migration script — explicitly loads .env.prod before running migrations.
- * Usage: npm run migrate:prod
+ * Production migration script — loads .env.prod (via ENV_FILE) before
+ * running migrations.
+ * Usage: ENV_FILE=.env.prod npm run migrate:prod
  */
-import 'dotenv/config';
+import '@config/dotenv';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';

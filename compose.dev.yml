@@ -1,57 +1,28 @@
-# Development deployment — loopback access, separate from prod.
-# DB only on loopback `127.0.0.1:5432`, separate volume and container
-# names so dev and prod coexist on the same host.
+# Development infrastructure — PostgreSQL + SuperTokens only.
+# Backend and frontend run on the host via `npm run dev` (reads .env
+# directly); this stack provides only the shared services. Dev and
+# staging share `.env`, so their published ports collide: only run one
+# local stack at a time.
 #
 # Usage:
-#   docker compose -f compose.dev.yml --env-file .env.dev up -d
-#   npm run migrate (defaults to dev)
+#   docker compose -f compose.staging.yml --env-file .env down  # if up
+#   docker compose -f compose.dev.yml --env-file .env up -d
+#   npm run migrate
+#   npm run dev
 
 services:
   db:
     image: pgvector/pgvector:pg16
     container_name: chat_db_dev
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
-      POSTGRES_DB: ${DB_NAME:-chatbot_dev}
-    # Loopback only — not accessible from other containers
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    # Loopback only — accessible from host for local dev
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - pgdata_dev:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - chat-network-dev
-
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: chat_backend_dev
-    environment:
-      - PORT=${PORT:-3001}
-      - HOST=${HOST:-0.0.0.0}
-      - DEBUG=${DEBUG:-false}
-      - DATABASE_URL=postgres://${DB_USER:-postgres}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-chatbot_dev}
-      - DEEPINFRA_API_KEY=${DEEPINFRA_API_KEY}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-Qwen/Qwen3.5-9B}
-      - TITLING_MODEL=${TITLING_MODEL}
-      - MOCK_AI_BASE_URL=${MOCK_AI_BASE_URL}
-      - AI_STREAM_IDLE_TIMEOUT_MS=${AI_STREAM_IDLE_TIMEOUT_MS:-5000}
-      - EXCHANGE_STALENESS_MS=${EXCHANGE_STALENESS_MS:-300000}
-      - AI_TITLING_TIMEOUT_MS=${AI_TITLING_TIMEOUT_MS:-5000}
-      - ENABLE_REASONING=${ENABLE_REASONING:-true}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
-      - THREAD_ANALYSIS_MODE=${THREAD_ANALYSIS_MODE:-heuristic}
-      - JUDGE_MODEL=${JUDGE_MODEL:-Qwen/Qwen3.5-9B}
-      - REWRITE_MODEL=${REWRITE_MODEL:-Qwen/Qwen3.5-9B}
-      - DAILY_SPEND_BUDGET_USD=${DAILY_SPEND_BUDGET_USD}
-      - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
-      - SUPERTOKENS_API_KEY=${SUPERTOKENS_API_KEY}
-    ports:
-      - "${PORT:-3001}:3001"
-    depends_on:
-      - db
     restart: unless-stopped
     networks:
       - chat-network-dev
@@ -61,27 +32,14 @@ services:
     container_name: chat_supertokens_dev
     depends_on:
       - db
+    # Expose to host for local backend
     ports:
       - "3567:3567"
     environment:
-      POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-chatbot_dev}"
-      # API_KEYS: ${SUPERTOKENS_API_KEY}
+      POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}"
     networks:
       - chat-network-dev
     restart: unless-stopped
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: chat_frontend_dev
-    ports:
-      - "${FRONTEND_PORT:-5173}:8080"
-    depends_on:
-      - backend
-    restart: unless-stopped
-    networks:
-      - chat-network-dev
 
 volumes:
   pgdata_dev:

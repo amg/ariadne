@@ -22,7 +22,7 @@ import { env } from '@config/env';
  * Everything else (warns, errors, startup lines) passes through
  * pino-pretty's defaults (level-colored label, cyan message).
  *
- * Verbose mode: `DEBUG=true` in backend/.env drops the level to `debug`
+ * Verbose mode: `DEBUG=true` in `.env` drops the level to `debug`
  * (titling's sent prompt + returned text get logged as the exchange
  * above). Strictly non-prod — production ignores the flag, payloads never
  * land in deployed logs.

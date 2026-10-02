@@ -2,15 +2,14 @@
 /**
  * env-sync — cross-checks environment variables between the three places
  * they can silently drift apart (see pitfall report; e0ed2f1 restored a
- * CORS_ORIGINS passthrough that had vanished from compose.debug.yml):
+ * CORS_ORIGINS passthrough that had vanished from the dev compose file):
  *
- *   1. code → .env.example   every process.env.X the backend reads must be
- *                            documented in backend/.env.example (or the root
- *                            .env.example).
- *   2. .env.example → code   declared vars nobody reads are stale config
- *                            docs (checked against backend/.env.example).
- *   3. compose passthrough   the COMPOSE_REQUIRED_PASSTHROUGH list must each
- *                            appear as ${VAR…} in compose.debug.yml.
+ *   1. code → .env.dev.example   every process.env.X the backend reads must be
+ *                                documented in .env.dev.example.
+ *   2. .env.dev.example → code   declared vars nobody reads are stale config
+ *                                docs.
+ *   3. compose passthrough       the COMPOSE_DEV_PASSTHROUGH list must each
+ *                                appear as ${VAR…} in compose.dev.yml.
  *
  * Exit code 1 on drift so the pre-commit gate fails.
  *
@@ -29,35 +28,14 @@ const EXEMPT = new Set([
   'NODE_ENV', // runtime/provisioning-owned (Docker, npm scripts), not app config
   'FORCE_COLOR', // terminal convention (colorette, npm scripts), not app config
   'NO_COLOR', // terminal convention (https://no-color.org), not app config
+  'ENV_FILE', // dotenv loader plumbed by src/config/dotenv.ts, not app config
 ]);
 
 /**
- * Vars that MUST flow host environment → backend container. This list is
- * deliberate: dropping one from compose.debug.yml broke CORS before
- * (e0ed2f1). Add new runtime vars here when they become deployment
- * requirements.
+ * Vars that MUST flow to compose.dev.yml containers (DB + Supertokens only).
+ * Backend runs locally via npm run dev, so it reads .env directly.
  */
-const COMPOSE_REQUIRED_PASSTHROUGH = [
-  'PORT',
-  'HOST',
-  'DB_USER',
-  'DB_PASSWORD',
-  'DB_NAME',
-  'DB_PORT',
-  'DEEPINFRA_API_KEY',
-  'DEFAULT_MODEL',
-  'MOCK_AI_BASE_URL',
-  'AI_STREAM_IDLE_TIMEOUT_MS',
-  'EXCHANGE_STALENESS_MS',
-  'AI_TITLING_TIMEOUT_MS',
-  'ENABLE_REASONING',
-  'CORS_ORIGINS',
-  'THREAD_ANALYSIS_MODE',
-  'JUDGE_MODEL',
-  'REWRITE_MODEL',
-  'TITLING_MODEL',
-  'DEBUG',
-];
+const COMPOSE_DEV_PASSTHROUGH = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_PORT'];
 
 const BACKEND_SCAN_DIRS = ['src', 'app', 'mock', 'smoke', 'test'];
 
@@ -107,19 +85,18 @@ function readDeclaredVars(envExamplePath) {
 
 const errors = [];
 const codeVars = readVarsFromCode();
-const backendDeclared = readDeclaredVars(join(ROOT, 'backend', '.env.example'));
-const rootDeclared = readDeclaredVars(join(ROOT, '.env.example'));
-const composeText = readFileSync(join(ROOT, 'compose.debug.yml'), 'utf8');
+const devDeclared = readDeclaredVars(join(ROOT, '.env.dev.example'));
+const composeText = readFileSync(join(ROOT, 'compose.dev.yml'), 'utf8');
 
-// 1. code → .env.example
+// 1. code → .env.dev.example
 for (const v of [...codeVars].sort()) {
   if (EXEMPT.has(v)) continue;
-  if (!backendDeclared.has(v) && !rootDeclared.has(v)) {
-    errors.push(`env read in backend code but undocumented: ${v} (add it to backend/.env.example)`);
+  if (!devDeclared.has(v)) {
+    errors.push(`env read in backend code but undocumented: ${v} (add it to .env.dev.example)`);
   }
 }
 
-// 2. backend/.env.example → code
+// 2. .env.dev.example → code
 // Allow vars that are documented even if not directly read (for centralized config pattern)
 // Skip this check if vars are centralized in config/env.ts
 const centralConfigPath = join(ROOT, 'backend', 'src', 'config', 'env.ts');
@@ -132,18 +109,18 @@ try {
 }
 
 if (!hasCentralConfig) {
-  for (const v of [...backendDeclared].sort()) {
+  for (const v of [...devDeclared].sort()) {
     if (!codeVars.has(v)) {
-      errors.push(`backend/.env.example declares ${v} but nothing in backend code reads it`);
+      errors.push(`.env.dev.example declares ${v} but nothing in backend code reads it`);
     }
   }
 }
 
-// 3. compose passthrough
-for (const v of COMPOSE_REQUIRED_PASSTHROUGH) {
+// 3. compose.dev.yml passthrough (DB + Supertokens only)
+for (const v of COMPOSE_DEV_PASSTHROUGH) {
   // Check if var is passed through (with or without default)
   if (!new RegExp(`\\$\\{${v}(?::-.*?)?\\}`).test(composeText)) {
-    errors.push(`compose.debug.yml does not pass ${v} through (expected \${${v}…})`);
+    errors.push(`compose.dev.yml does not pass ${v} through (expected \${${v}…})`);
   }
 }
 
@@ -152,5 +129,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `✅ env-sync: ${codeVars.size} vars read in code, ${backendDeclared.size} declared, ${COMPOSE_REQUIRED_PASSTHROUGH.length} compose passthroughs verified`,
+  `✅ env-sync: ${codeVars.size} vars read in code, ${devDeclared.size} declared, ${COMPOSE_DEV_PASSTHROUGH.length} compose passthroughs verified`,
 );

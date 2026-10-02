@@ -5,7 +5,7 @@ All environment variables and their defaults are defined in a single location: `
 ## Philosophy
 
 - **Single Source of Truth**: All environment variables and defaults live in one place
-- **Not in docker-compose**: Defaults are in code, not scattered across configuration files
+- **Not in compose files**: Defaults are in code, not scattered across configuration files
 - **Stateless Singleton**: The `env` object reads directly from `process.env` but provides a unified interface
 - **Type Safe**: Full TypeScript types for all configuration values
 

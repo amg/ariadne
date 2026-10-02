@@ -19,7 +19,7 @@ const DB_URL_ENV = 'VITEST_TEST_DATABASE_URL';
 
 const TEST_DB_NAME = 'chatbot_test';
 const FALLBACK_USER = 'postgres';
-const FALLBACK_PASSWORD = 'postgrespassword'; // dev-only credentials (docker-compose.yml)
+const FALLBACK_PASSWORD = 'postgrespassword'; // dev-only fallback credentials
 const FALLBACK_PORT = 5432;
 
 /** Default-route gateway IP of this container's network (Linux only). */

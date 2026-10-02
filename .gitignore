@@ -72,13 +72,12 @@ typings/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# dotenv environment variables file (local config, not committed)
 .env
-.env.test
-.env*.local
-# Environment-specific configs (templates are committed)
-.env.dev
 .env.prod
+# Template examples (committed)
+# .env.dev.example
+# .env.prod.example
 
 # parcel-bundler cache
 .cache

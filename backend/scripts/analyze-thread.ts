@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import 'dotenv/config';
+import '@config/dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

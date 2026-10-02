@@ -1,6 +1,6 @@
-// Must be the first import: loads backend/.env before any module reads
-// process.env (db.ts resolves the connection at import time).
-import 'dotenv/config';
+// Must be the first import: loads the repo-root .env before any module
+// reads process.env (db.ts resolves the connection at import time).
+import '@config/dotenv';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';

@@ -12,7 +12,7 @@ We use a lightweight markdown format for ADRs. Each ADR should include:
 
 ## Status
 
-All baseline architectural decisions have been accepted. See ADRs 0001–0008:
+All baseline architectural decisions have been accepted. See ADRs 0001–0009:
 0004 supersedes the DI convention of 0001; 0003's storage foundation has
 landed while its extraction/retrieval pipeline is still pending; 0006 is the
 single thread-health drift record — Turn embeddings keyed to messages,
@@ -21,5 +21,7 @@ chart gauge, and the advisory gate-replay shape; 0007 is the live lane's
 message transformer — steps mediated only through the database; 0008 rejects
 per-client rate limiting in the app (no proxy trust, client-IP limiting lives
 at Cloudflare) in favor of one deployment-wide, Postgres-backed daily spend
-budget plus deployment-wide caps on the billed routes, with dev and prod as
-separate hardened stacks.
+budget plus deployment-wide caps on the billed routes; 0009 fixes the
+deployment vocabulary — dev (host app + infra containers), staging (full
+Docker build, disposable data), prod (tunnel-fronted) — one compose file and
+resource-name suffix per tier, two env files, one local stack at a time.

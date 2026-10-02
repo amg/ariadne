@@ -17,24 +17,29 @@ A self-hosted chat application with real-time streaming, per-Turn cost tracking,
 This is how you'll work on the code. The database and auth run in Docker; the app runs on your machine for fast iteration.
 
 ```bash
-# 1. Start infrastructure (PostgreSQL + SuperTokens)
-docker compose -f compose.dev-services.yml --env-file .env.dev up -d
+# 1. Copy the env template (one-time setup)
+cp .env.dev.example .env
+# Edit .env with your API keys and preferences
 
-# 2. Run migrations (creates tables)
+# 2. Start infrastructure (PostgreSQL + SuperTokens)
+docker compose -f compose.dev.yml --env-file .env up -d
+
+# 3. Run migrations (creates tables)
 npm run migrate
 
-# 3. Start the app
+# 4. Start the app
 npm run dev
 ```
 
-Access at `http://localhost:5173`. Backend runs on `3001`, database on `5432`.
+Access at `http://localhost:5173`. Backend runs on `3001`, database on `15432`, SuperTokens on `3567`.
 
-### Full Docker Dev (everything in containers)
+### Staging (full Docker build)
 
-Use this when you want to test the exact Docker build without running locally.
+Use this to exercise the exact container images before they go to prod. Shares `.env` with the dev tier, so they publish the same ports — bring dev infrastructure down before lifting staging, and vice versa. Separate container, volume, and network names, so staging never touches dev or prod data.
 
 ```bash
-docker compose -f compose.dev.yml --env-file .env.dev up -d
+docker compose -f compose.dev.yml --env-file .env down
+docker compose -f compose.staging.yml --env-file .env up -d
 npm run migrate
 ```
 
@@ -50,7 +55,7 @@ cp .env.prod.example .env.prod
 # Edit .env.prod with your credentials (DB password, API keys, spend budget)
 
 # 2. Run migrations
-npm run migrate:prod
+ENV_FILE=.env.prod npm run migrate:prod
 
 # 3. Deploy
 docker compose -f compose.prod.yml --env-file .env.prod up -d
@@ -60,13 +65,23 @@ docker compose -f compose.prod.yml --env-file .env.prod up -d
 
 ## Environment Setup
 
-Three separate env files for three contexts:
+Two env files — one for local dev, one for production. Both are gitignored.
 
-| File | When | What it configures |
-|------|------|-------------------|
-| `backend/.env` | `npm run dev` | Local backend only |
-| `.env.dev` | `compose.dev.yml` | Full dev stack in Docker |
-| `.env.prod` | `compose.prod.yml` | Production deployment |
+| File | Git? | When | What it configures |
+|------|------|------|-------------------|
+| `.env` | ❌ | `npm run dev`, `compose.dev.yml`, `compose.staging.yml` | Local development and staging |
+| `.env.prod` | ❌ | `compose.prod.yml` | Production deployment |
+
+**Setup:**
+```bash
+# Local dev
+cp .env.dev.example .env
+# Edit .env with your keys
+
+# Production
+cp .env.prod.example .env.prod
+# Edit .env.prod with prod credentials
+```
 
 **Required variables** (see `.env.prod.example` for templates):
 - `DATABASE_URL` or `DB_USER`/`DB_PASSWORD`/`DB_NAME` — PostgreSQL connection
@@ -104,7 +119,7 @@ alex-chat-bot/
 │   │   ├── services/   # Business logic (auth, AI, threads)
 │   │   └── config/     # Environment variables
 │   └── mock/           # Mock AI server for testing
-├── compose.*.yml       # Docker Compose files (dev/prod/services-only)
+├── compose.*.yml       # Docker Compose files (dev/staging/prod)
 ├── adrs/               # Architecture Decision Records
 └── docs/               # Deployment guides and technical notes
 ```

@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '@config/dotenv';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';

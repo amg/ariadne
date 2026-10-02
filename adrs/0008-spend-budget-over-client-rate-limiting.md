@@ -61,11 +61,10 @@ auth and without proxy trust, the app has no client identity to key on.
 They are documented in the code exactly as they are: a coarse guard against
 runaway request volume, one bucket per replica.
 
-Dev and prod are separate stacks because they are different deployments:
-`compose.dev.yml` runs only the database on loopback next to `npm run dev`;
-`compose.prod.yml` publishes nothing and joins the existing tunnel network.
-Each reads its own env file (`.env.dev` / `.env.prod`), and migrations run
-against the dev database by default with an explicit switch for prod.
+The budget is a property of a deployment, and the deployments stay
+separate (tier vocabulary and env files: ADR 0009) — so dev and prod each
+carry their own `DAILY_SPEND_BUDGET_USD`, and migrations run against the
+dev database by default with an explicit switch for prod.
 
 ## Consequences
 

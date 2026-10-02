@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import 'dotenv/config';
+import '@config/dotenv';
 import { analyzeThread } from '@services/threadAnalysis';
 import { isValidUuid } from '@services/validation';
 
