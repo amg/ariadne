@@ -96,6 +96,12 @@ export async function fetchThreadAnalysis(threadId: string): Promise<LiveAnalysi
   return res.json();
 }
 
+export async function backfillThreadAnalysis(threadId: string): Promise<LiveAnalysisView> {
+  const res = await fetch(`/api/threads/${threadId}/analysis/backfill`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to backfill thread analysis: ${res.statusText}`);
+  return res.json();
+}
+
 export interface Thread {
   id: string;
   title: string | null;

@@ -46,10 +46,33 @@ export async function setupThreadAnalysisRoute(fastify: FastifyInstance) {
         return reply.code(404).send({ error: 'Thread not found' });
       }
 
+      const view = await buildLiveAnalysisView(threadId);
+      if (view.type === 'error') {
+        return reply.code(502).send({ error: view.message ?? 'Failed to read the live chain.' });
+      }
+      return reply.send(view.data);
+    },
+  );
+
+  fastify.post(
+    '/api/threads/:id/analysis/backfill',
+    {
+      // Throttling for backfill (handled by T-RL-02, placeholder limit here)
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (request: FastifyRequest<{ Params: ThreadParams }>, reply: FastifyReply) => {
+      const { id: threadId } = request.params;
+      if (!isValidUuid(threadId)) {
+        return reply.code(400).send({ error: 'Invalid thread id' });
+      }
+
+      const thread = await findThreadByIdAndUser({ userId: REQUEST_USER_ID, threadId });
+      if (!thread) {
+        return reply.code(404).send({ error: 'Thread not found' });
+      }
+
       if (env.THREAD_ANALYSIS_MODE === 'off') {
-        const view = await buildLiveAnalysisView(threadId);
-        if (view.type === 'error') return reply.code(502).send({ error: view.message });
-        return reply.send(view.data);
+        return reply.code(403).send({ error: 'Thread analysis is disabled' });
       }
 
       // Fill missing arrival signals forward, bounded to 20 per request.

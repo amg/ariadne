@@ -1,4 +1,4 @@
-import { type LiveAnalysisView, fetchThreadAnalysis } from '@/services/api';
+import { type LiveAnalysisView, backfillThreadAnalysis, fetchThreadAnalysis } from '@/services/api';
 import { useEffect, useRef, useState } from 'react';
 import { AnalysisSpinner } from './AnalysisSpinner';
 import { DriftChart } from './DriftChart';
@@ -14,6 +14,7 @@ export default function AnalysisTab({
 }: { threadId: string; refreshKey?: number; onLoaded?: () => void }) {
   const [view, setView] = useState<LiveAnalysisView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
@@ -37,6 +38,19 @@ export default function AnalysisTab({
     };
   }, [threadId, refreshKey]);
 
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    setError(null);
+    try {
+      const updatedView = await backfillThreadAnalysis(threadId);
+      setView(updatedView);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to backfill.');
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   if (error) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-red-400">
@@ -44,7 +58,28 @@ export default function AnalysisTab({
       </div>
     );
   }
-  if (!view || view.pending) return <AnalysisSpinner />;
+  if (!view || backfilling) return <AnalysisSpinner />;
+
+  if (view.pending) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="flex max-w-sm flex-col items-center gap-4 rounded-lg border border-border bg-card/40 p-6 text-center shadow-sm">
+          <h3 className="text-sm font-medium">Analysis Pending</h3>
+          <p className="text-xs text-muted-foreground">
+            This thread has unanalyzed messages. Running the analysis backfill will incur provider
+            API costs.
+          </p>
+          <button
+            type="button"
+            onClick={handleBackfill}
+            className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Proceed
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (view.points.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
