@@ -40,7 +40,7 @@ function extractLastUserText(messages: ChatRequestBody['messages']): string {
 /** Maps exchange startup failures to responses; null means "keep streaming". */
 function sendExchangeError(
   reply: FastifyReply,
-  result: Result<ChatStreamHandle> & { type: 'error' },
+  result: Extract<Result<ChatStreamHandle>, { type: 'error' }>,
 ): void {
   // Unknown thread and foreign thread stay indistinguishable (404).
   if (result.code === 'thread_not_found') {
@@ -55,6 +55,18 @@ function sendExchangeError(
     reply
       .code(409)
       .send({ error: result.message ?? 'An exchange is already running in this thread.' });
+    return;
+  }
+  // Budget exceeded — 429 with Retry-After header (seconds until UTC midnight).
+  if (result.code === 'budget_exceeded') {
+    // Type guard: BudgetExceededError has retryAfter, StandardError doesn't
+    if ('retryAfter' in result) {
+      reply.header('Retry-After', String(result.retryAfter));
+      reply.code(429).send({
+        error: result.message ?? 'Daily spend budget exceeded.',
+        retryAfter: result.retryAfter,
+      });
+    }
     return;
   }
   // Failure-swap classes the UI can act on (vs the generic 500).

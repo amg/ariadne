@@ -71,56 +71,78 @@ THREAD_ANALYSIS_MODE=heuristic  # off | heuristic | always (default: heuristic)
 
 ## Deployment
 
-### Private Server + Cloudflare Tunnel (Recommended)
+### Production Deployment (Cloudflare Tunnel)
 
-Deploy on a home server or VPS and expose securely via Cloudflare Tunnel:
+**Topology:** Every documented deployment runs the app behind Cloudflare. The edge and the tunnel already know client IPs. IP-keyed limiting belongs at the edge; the app carries a global spend budget as the last defense against fund loss.
 
 ```bash
-# 1. Deploy to your server
-git clone <repo>
-docker compose up -d
+# 1. Copy production environment template
+cp .env.prod.example .env.prod
+# Edit .env.prod with your production credentials and API keys
 
-# 2. Set up Cloudflare Tunnel
-# See docs/ideas/CLOUDFLARE-DEPLOYMENT.md for complete guide
+# 2. Run production migrations
+npm run migrate:prod
 
-# 3. Access via your domain
-# https://chat.yourdomain.com
+# 3. Start production services (zero published ports except dedicated DB port)
+docker compose -f compose.prod.yml --env-file .env.prod up -d
+
+# 4. Add tunnel ingress rule in Zero Dashboard (host-side)
+# Route your domain to the frontend container by name
 ```
+
+**Architecture:**
+- Frontend joins external `cloudflare-network` (tunnel resolves by container name)
+- Backend stays internal — no published ports
+- Database publishes on dedicated port (`15432`) for LAN tooling from 50.x/57.x nets
+- Global spend budget enforced via `DAILY_SPEND_BUDGET_USD` (default 5.0 USD)
+- Deployment-wide caps on non-chat billing routes
 
 **Benefits:**
-- ✅ No port forwarding required
+- ✅ Zero exposed attack surface (tunnel ingress only)
+- ✅ No `trustProxy` in codebase — app reads no forwarding headers
+- ✅ Per-replica rate limit fuse (global 100/min, chat 20/min)
+- ✅ Global daily spend budget prevents fund loss
 - ✅ Free SSL/TLS via Cloudflare
-- ✅ DDoS protection
-- ✅ Hidden origin IP
-- ✅ Global CDN
+- ✅ DDoS protection at the edge
 
-**Cost:** ~$1-2/month (domain only, if hosting at home)
-
-**Architecture:** Combined deployment (frontend + backend + database on same server)
-- Simple one-command deployment
-- No CORS configuration needed
-- Perfect for personal/small-scale use
-- Can split later if needed
-
-### Self-Hosted (Local Network)
+### Development Deployment
 
 ```bash
-# Start services
-docker compose up -d
+# 1. Copy development environment template
+cp .env.dev.example .env.dev
 
-# Access from local network
-# http://<server-ip>:5173
+# 2. Start development services (loopback DB access)
+docker compose -f compose.dev.yml --env-file .env.dev up -d
+
+# 3. Run development migrations (defaults to dev database)
+npm run migrate
+
+# Access:
+# Frontend: http://localhost:5173
+# Backend: http://localhost:3001
+# DB: 127.0.0.1:5432 (loopback only)
 ```
 
-**Note:** Only accessible within your network. For external access, use Cloudflare Tunnel or configure port forwarding.
+**Note:** Dev and prod use separate databases, volumes, and container names — they coexist on the same host without conflict.
 
-### Cloud Deployment (AWS/GCP/Azure)
+### Self-Hosted (Local Network - Legacy)
 
-For production cloud deployment:
+The original `docker-compose.yml` remains for simple local network deployments. For production use, migrate to the split compose files above.
 
-- See `docs/ideas/AWS-DEPLOYMENT.md` for AWS-specific guidance
-- All configuration via environment variables (cloud-ready)
-- Combined or split deployment both supported
+### Rate Limiting
+
+The deployment enforces rate limits at two layers:
+
+**Cloudflare Edge (recommended):** IP-keyed limits at the tunnel ingress.
+
+**App-level (per-replica fuse):**
+- Global: 100 requests/minute
+- Chat: 20 requests/minute
+- Generate title: 5 requests/minute
+- Analysis: 10 requests/minute (backfill bounded to 20 arrivals per request)
+- Models refresh: 2 requests/minute
+
+**Global spend budget:** Checked before any chat exchange starts. When `DAILY_SPEND_BUDGET_USD` is set, all provider-metered USD for the current UTC day is summed across cost tables. Over budget → 429 with `Retry-After` header (seconds until UTC midnight). In-flight exchanges may overshoot — allowed by design.
 
 ## Project Structure
 

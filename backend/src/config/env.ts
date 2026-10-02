@@ -37,6 +37,10 @@ export type EnvConfig = {
   /** How long an assistant row may stay `pending` before being declared lost. */
   EXCHANGE_STALENESS_MS: number;
 
+  // Global spend budget (rate limiting ticket)
+  /** Daily spend budget in USD. Unset = no gate, fail open. Default: 5.0 */
+  DAILY_SPEND_BUDGET_USD: number | undefined;
+
   // Titling Service
   AI_TITLING_TIMEOUT_MS: number | undefined;
   TITLING_MODEL: string | undefined;
@@ -159,6 +163,15 @@ export const env: EnvConfig = {
   // observed maximum settled latency).
   get EXCHANGE_STALENESS_MS() {
     return getNumber('EXCHANGE_STALENESS_MS', 300_000);
+  },
+
+  // Global spend budget (rate limiting ticket)
+  /** Daily spend budget in USD. Unset = no gate, fail open by design. */
+  get DAILY_SPEND_BUDGET_USD() {
+    const value = process.env.DAILY_SPEND_BUDGET_USD;
+    if (value === undefined) return undefined;
+    const parsed = Number.parseFloat(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
   },
 
   // Titling Service
