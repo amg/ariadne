@@ -46,6 +46,8 @@ services:
       - JUDGE_MODEL=${JUDGE_MODEL:-Qwen/Qwen3.5-9B}
       - REWRITE_MODEL=${REWRITE_MODEL:-Qwen/Qwen3.5-9B}
       - DAILY_SPEND_BUDGET_USD=${DAILY_SPEND_BUDGET_USD}
+      - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
+      - SUPERTOKENS_API_KEY=${SUPERTOKENS_API_KEY}
     ports:
       - "${PORT:-3001}:3001"
     depends_on:
@@ -53,6 +55,20 @@ services:
     restart: unless-stopped
     networks:
       - chat-network-dev
+
+  supertokens:
+    image: supertokens/supertokens-postgresql:12.2
+    container_name: chat_supertokens_dev
+    depends_on:
+      - db
+    ports:
+      - "3567:3567"
+    environment:
+      POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-devpassword}@db:5432/${DB_NAME:-chatbot_dev}"
+      # API_KEYS: ${SUPERTOKENS_API_KEY}
+    networks:
+      - chat-network-dev
+    restart: unless-stopped
 
   frontend:
     build:

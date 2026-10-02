@@ -1,12 +1,10 @@
 import { env } from '@config/env';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
-import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-
-// Placeholder until page-level auth resolves the user.
-const REQUEST_USER_ID = DEFAULT_USER_ID;
+import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 
 type ThreadParams = {
   id: string;
@@ -32,15 +30,17 @@ export async function setupThreadAnalysisRoute(fastify: FastifyInstance) {
     '/api/threads/:id/analysis',
     {
       // Deployment-wide cap: 10/min (shared, no auth yet).
+      preHandler: verifySession(),
       config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     },
     async (request: FastifyRequest<{ Params: ThreadParams }>, reply: FastifyReply) => {
+      const userId = (request as SessionRequest).session?.getUserId() as string;
       const { id: threadId } = request.params;
       if (!isValidUuid(threadId)) {
         return reply.code(400).send({ error: 'Invalid thread id' });
       }
 
-      const thread = await findThreadByIdAndUser({ userId: REQUEST_USER_ID, threadId });
+      const thread = await findThreadByIdAndUser({ userId: userId, threadId });
       if (!thread) {
         // Unknown thread and foreign thread stay indistinguishable.
         return reply.code(404).send({ error: 'Thread not found' });
@@ -58,15 +58,17 @@ export async function setupThreadAnalysisRoute(fastify: FastifyInstance) {
     '/api/threads/:id/analysis/backfill',
     {
       // Throttling for backfill (handled by T-RL-02, placeholder limit here)
+      preHandler: verifySession(),
       config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     },
     async (request: FastifyRequest<{ Params: ThreadParams }>, reply: FastifyReply) => {
+      const userId = (request as SessionRequest).session?.getUserId() as string;
       const { id: threadId } = request.params;
       if (!isValidUuid(threadId)) {
         return reply.code(400).send({ error: 'Invalid thread id' });
       }
 
-      const thread = await findThreadByIdAndUser({ userId: REQUEST_USER_ID, threadId });
+      const thread = await findThreadByIdAndUser({ userId: userId, threadId });
       if (!thread) {
         return reply.code(404).send({ error: 'Thread not found' });
       }

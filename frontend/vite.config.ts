@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   server: {
@@ -16,6 +16,8 @@ export default defineConfig({
         target: process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3001',
         changeOrigin: true,
       },
+      // Note: SuperTokens auth API is now at /api/auth/* (covered by /api proxy above)
+      // Frontend /auth/* UI is handled by React Router (no proxy needed)
     },
   },
 });

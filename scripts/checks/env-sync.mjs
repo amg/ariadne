@@ -2,7 +2,7 @@
 /**
  * env-sync — cross-checks environment variables between the three places
  * they can silently drift apart (see pitfall report; e0ed2f1 restored a
- * CORS_ORIGINS passthrough that had vanished from docker-compose.yml):
+ * CORS_ORIGINS passthrough that had vanished from compose.debug.yml):
  *
  *   1. code → .env.example   every process.env.X the backend reads must be
  *                            documented in backend/.env.example (or the root
@@ -10,7 +10,7 @@
  *   2. .env.example → code   declared vars nobody reads are stale config
  *                            docs (checked against backend/.env.example).
  *   3. compose passthrough   the COMPOSE_REQUIRED_PASSTHROUGH list must each
- *                            appear as ${VAR…} in docker-compose.yml.
+ *                            appear as ${VAR…} in compose.debug.yml.
  *
  * Exit code 1 on drift so the pre-commit gate fails.
  *
@@ -35,7 +35,7 @@ const EXEMPT = new Set([
 
 /**
  * Vars that MUST flow host environment → backend container. This list is
- * deliberate: dropping one from docker-compose.yml broke CORS before
+ * deliberate: dropping one from compose.debug.yml broke CORS before
  * (e0ed2f1). Add new runtime vars here when they become deployment
  * requirements.
  */
@@ -111,7 +111,7 @@ const errors = [];
 const codeVars = readVarsFromCode();
 const backendDeclared = readDeclaredVars(join(ROOT, 'backend', '.env.example'));
 const rootDeclared = readDeclaredVars(join(ROOT, '.env.example'));
-const composeText = readFileSync(join(ROOT, 'docker-compose.yml'), 'utf8');
+const composeText = readFileSync(join(ROOT, 'compose.debug.yml'), 'utf8');
 
 // 1. code → .env.example
 for (const v of [...codeVars].sort()) {
@@ -145,7 +145,7 @@ if (!hasCentralConfig) {
 for (const v of COMPOSE_REQUIRED_PASSTHROUGH) {
   // Check if var is passed through (with or without default)
   if (!new RegExp(`\\$\\{${v}(?::-.*?)?\\}`).test(composeText)) {
-    errors.push(`docker-compose.yml does not pass ${v} through (expected \${${v}…})`);
+    errors.push(`compose.debug.yml does not pass ${v} through (expected \${${v}…})`);
   }
 }
 

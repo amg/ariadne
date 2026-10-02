@@ -8,8 +8,9 @@ import {
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
 import { DEFAULT_THREAD_TITLE, TITLE_GENERATING_SENTINEL } from '@/services/api';
-import { Ellipsis, Info, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Ellipsis, Info, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { signOut } from 'supertokens-auth-react/recipe/session';
 
 type Props = {
   threads: Thread[];
@@ -150,14 +151,27 @@ export default function ThreadSidebar({
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={onAbout}
-        className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <Info className="h-4 w-4" />
-        About
-      </button>
+      <div className="mt-auto flex flex-col gap-1 border-t p-2">
+        <button
+          type="button"
+          onClick={onAbout}
+          className="flex items-center gap-2 rounded px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          <Info className="h-4 w-4" />
+          About
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            await signOut();
+            window.location.href = '/auth';
+          }}
+          className="flex items-center gap-2 rounded px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          <LogOut className="h-4 w-4" />
+          Logout
+        </button>
+      </div>
     </aside>
   );
 }

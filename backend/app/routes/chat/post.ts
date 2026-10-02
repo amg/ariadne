@@ -6,14 +6,12 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
-import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
 import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 import type { Result } from '../../../src/types/result';
-
-// Placeholder until page-level auth resolves the user.
-const REQUEST_USER_ID = DEFAULT_USER_ID;
 
 type ThreadParams = {
   id: string;
@@ -128,12 +126,14 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
     '/api/threads/:id/chat',
     {
       // Each request triggers a billable DeepInfra call — throttle hard.
+      preHandler: verifySession(),
       config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     },
     async (
       request: FastifyRequest<{ Params: ThreadParams; Body: ChatRequestBody }>,
       reply: FastifyReply,
     ) => {
+      const userId = (request as SessionRequest).session?.getUserId() as string;
       const { id: threadId } = request.params;
       if (!isValidUuid(threadId)) {
         return reply.code(400).send({ error: 'Invalid thread id' });
@@ -151,7 +151,7 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
       // Retry of the last inference (useChat `regenerate()`). The server is
       // authoritative: DB state decides the exchange, client messages ignored.
       if (trigger === 'regenerate-message') {
-        const result = await retryLastExchange({ userId: REQUEST_USER_ID, threadId });
+        const result = await retryLastExchange({ userId: userId, threadId });
         if (result.type === 'error') {
           return sendExchangeError(reply, result);
         }
@@ -164,7 +164,7 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Missing message content' });
       }
 
-      const result = await submitChat({ userId: REQUEST_USER_ID, threadId, content });
+      const result = await submitChat({ userId: userId, threadId, content });
       if (result.type === 'error') {
         return sendExchangeError(reply, result);
       }

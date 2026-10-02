@@ -1,195 +1,128 @@
 # Alex Chat Bot
 
-A production-ready, Dockerized chatbot application with real-time streaming and cost observability; factual memory (RAG) is decided (ADR 0003) but not yet implemented.
+A self-hosted chat application with real-time streaming, per-Turn cost tracking, and user authentication. Everything runs in Docker — your data stays yours.
 
-## Features
+## What You Get
 
-- 💬 **Real-time Chat** - Streaming responses via Server-Sent Events (SSE)
-- 🧵 **Multi-thread Support** - Multiple conversation sessions per user
-- 🧠 **Factual Memory** *(planned — ADR 0003)* - Long-term memory extraction for cross-session context recall; storage foundation landed, pipeline pending
-- 📊 **Cost Observability** - Token usage tracking and cost calculation per message
-- 🐳 **Dockerized** - Easy deployment with Docker Compose
-- ☁️ **Cloud-Ready** - Environment-based configuration for any deployment
+- **Real chat experience** — Streaming Exchanges (SSE), multiple Threads, edit and Retry actions
+- **Cost visibility** — See exactly what each Turn costs in tokens and USD; Running total per Thread
+- **User accounts** — SuperTokens authentication (email/password), isolated Threads per user
+- **Thread health** — Topic drift detection, segment boundaries, cost accumulation awareness
+- **Self-hosted** — No cloud dependencies, runs on your hardware
+
+## Quick Start
+
+### Development (run locally with `npm run dev`)
+
+This is how you'll work on the code. The database and auth run in Docker; the app runs on your machine for fast iteration.
+
+```bash
+# 1. Start infrastructure (PostgreSQL + SuperTokens)
+docker compose -f compose.dev-services.yml --env-file .env.dev up -d
+
+# 2. Run migrations (creates tables)
+npm run migrate
+
+# 3. Start the app
+npm run dev
+```
+
+Access at `http://localhost:5173`. Backend runs on `3001`, database on `5432`.
+
+### Full Docker Dev (everything in containers)
+
+Use this when you want to test the exact Docker build without running locally.
+
+```bash
+docker compose -f compose.dev.yml --env-file .env.dev up -d
+npm run migrate
+```
+
+Same access URLs, but everything's containerized.
+
+### Production (Cloudflare Tunnel)
+
+For actual deployment. The app has zero exposed ports — Cloudflare Tunnel handles ingress.
+
+```bash
+# 1. Set up your production env file
+cp .env.prod.example .env.prod
+# Edit .env.prod with your credentials (DB password, API keys, spend budget)
+
+# 2. Run migrations
+npm run migrate:prod
+
+# 3. Deploy
+docker compose -f compose.prod.yml --env-file .env.prod up -d
+```
+
+**What happens:** Frontend joins your existing `cloudflare-network`, backend stays internal, database listens on port `15432` for LAN tooling. Configure your tunnel to route your domain to the `frontend` container by name.
+
+## Environment Setup
+
+Three separate env files for three contexts:
+
+| File | When | What it configures |
+|------|------|-------------------|
+| `backend/.env` | `npm run dev` | Local backend only |
+| `.env.dev` | `compose.dev.yml` | Full dev stack in Docker |
+| `.env.prod` | `compose.prod.yml` | Production deployment |
+
+**Required variables** (see `.env.prod.example` for templates):
+- `DATABASE_URL` or `DB_USER`/`DB_PASSWORD`/`DB_NAME` — PostgreSQL connection
+- `DEEPINFRA_API_KEY` — AI provider (DeepInfra)
+- `SUPERTOKENS_CONNECTION_URI` — Auth service (defaults to `http://127.0.0.1:3567`)
+- `CORS_ORIGINS` — Allowed origins (defaults to localhost for dev)
+- `DAILY_SPEND_BUDGET_USD` — Safety cap on daily AI spend (e.g., `5.0`)
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React + React Router v7 + TypeScript |
-| Backend | Node.js (Fastify) + TypeScript |
-| Database | PostgreSQL |
-| Query Builder | Kysely (type-safe SQL) |
-| AI Inference | DeepInfra (OpenAI-compatible endpoints) |
-| AI Streaming | Vercel AI SDK |
-| Infrastructure | Docker & Docker Compose |
-
-## Quick Start
-
-### Local Development
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Configure your environment variables
-# Edit .env with your database credentials and API keys
-
-# Start all services
-docker compose up -d
-
-# Access the application
-# Frontend: http://localhost:5173
-# Backend: http://localhost:3001
-```
-
-### Environment Variables
-
-All configuration is externalized via environment variables. See `.env.example` for the complete list:
-
-```bash
-# Server Configuration
-PORT=3001                    # Backend server port
-HOST=0.0.0.0                 # Backend server host
-
-# Database Configuration
-DATABASE_URL=postgres://...  # Full connection string (recommended)
-# OR individual components:
-DB_USER=postgres
-DB_PASSWORD=postgrespassword
-DB_NAME=chatbot
-DB_PORT=5432
-
-# AI Provider
-DEEPINFRA_API_KEY=your-key   # DeepInfra API key (required)
-DEFAULT_MODEL=Qwen/Qwen3.5-9B
-AI_STREAM_IDLE_TIMEOUT_MS=5000
-EXCHANGE_STALENESS_MS=300000 # pending assistant rows older than this are declared lost
-
-# Thread Analysis (live drift gate)
-THREAD_ANALYSIS_MODE=heuristic  # off | heuristic | always (default: heuristic)
-```
-
-## Deployment
-
-### Production Deployment (Cloudflare Tunnel)
-
-**Topology:** Every documented deployment runs the app behind Cloudflare. The edge and the tunnel already know client IPs. IP-keyed limiting belongs at the edge; the app carries a global spend budget as the last defense against fund loss.
-
-```bash
-# 1. Copy production environment template
-cp .env.prod.example .env.prod
-# Edit .env.prod with your production credentials and API keys
-
-# 2. Run production migrations
-npm run migrate:prod
-
-# 3. Start production services (zero published ports except dedicated DB port)
-docker compose -f compose.prod.yml --env-file .env.prod up -d
-
-# 4. Add tunnel ingress rule in Zero Dashboard (host-side)
-# Route your domain to the frontend container by name
-```
-
-**Architecture:**
-- Frontend joins external `cloudflare-network` (tunnel resolves by container name)
-- Backend stays internal — no published ports
-- Database publishes on dedicated port (`15432`) for LAN tooling from 50.x/57.x nets
-- Global spend budget enforced via `DAILY_SPEND_BUDGET_USD` (default 5.0 USD)
-- Deployment-wide caps on non-chat billing routes
-
-**Benefits:**
-- ✅ Zero exposed attack surface (tunnel ingress only)
-- ✅ No `trustProxy` in codebase — app reads no forwarding headers
-- ✅ Per-replica rate limit fuse (global 100/min, chat 20/min)
-- ✅ Global daily spend budget prevents fund loss
-- ✅ Free SSL/TLS via Cloudflare
-- ✅ DDoS protection at the edge
-
-### Development Deployment
-
-```bash
-# 1. Copy development environment template
-cp .env.dev.example .env.dev
-
-# 2. Start development services (loopback DB access)
-docker compose -f compose.dev.yml --env-file .env.dev up -d
-
-# 3. Run development migrations (defaults to dev database)
-npm run migrate
-
-# Access:
-# Frontend: http://localhost:5173
-# Backend: http://localhost:3001
-# DB: 127.0.0.1:5432 (loopback only)
-```
-
-**Note:** Dev and prod use separate databases, volumes, and container names — they coexist on the same host without conflict.
-
-### Self-Hosted (Local Network - Legacy)
-
-The original `docker-compose.yml` remains for simple local network deployments. For production use, migrate to the split compose files above.
-
-### Rate Limiting
-
-The deployment enforces rate limits at two layers:
-
-**Cloudflare Edge (recommended):** IP-keyed limits at the tunnel ingress.
-
-**App-level (per-replica fuse):**
-- Global: 100 requests/minute
-- Chat: 20 requests/minute
-- Generate title: 5 requests/minute
-- Analysis: 10 requests/minute (backfill bounded to 20 arrivals per request)
-- Models refresh: 2 requests/minute
-
-**Global spend budget:** Checked before any chat exchange starts. When `DAILY_SPEND_BUDGET_USD` is set, all provider-metered USD for the current UTC day is summed across cost tables. Over budget → 429 with `Retry-After` header (seconds until UTC midnight). In-flight exchanges may overshoot — allowed by design.
+| Frontend | React 18 + React Router v7 + TypeScript + Vite |
+| Backend | Node.js 22 + Fastify + TypeScript |
+| Database | PostgreSQL 16 with pgvector |
+| Auth | SuperTokens (self-hosted) |
+| AI | DeepInfra (OpenAI-compatible) |
+| Infrastructure | Docker Compose |
 
 ## Project Structure
 
 ```
 alex-chat-bot/
-├── frontend/          # React frontend application
-│   ├── .env.example   # Frontend environment variables
-│   └── vite.config.ts # Vite configuration
-├── backend/           # Node.js backend API
-│   ├── .env.example   # Backend environment variables
-│   ├── app/           # Fastify routes and server
-│   ├── src/           # Services and database layer
-│   └── mock/          # Mock inference server for testing
-├── docs/
-│   └── ideas/         # Deployment guides and technical analysis
-│       ├── CLOUDFLARE-DEPLOYMENT.md
-│       ├── AWS-DEPLOYMENT.md
-│       └── SSE-VS-WEBSOCKET.md
-├── features/          # Feature domain modules
-├── adrs/              # Architecture Decision Records
-└── scripts/           # Utility scripts
+├── frontend/           # React app (Vite build)
+│   ├── src/
+│   │   ├── components/ # UI components
+│   │   ├── pages/      # Route pages (ChatPage, AboutPage)
+│   │   ├── services/   # API client
+│   │   └── config/     # SuperTokens config
+│   └── nginx.conf      # Production nginx config
+├── backend/
+│   ├── app/            # Fastify server and routes
+│   ├── src/
+│   │   ├── db/         # Database layer (Kysely queries)
+│   │   ├── services/   # Business logic (auth, AI, threads)
+│   │   └── config/     # Environment variables
+│   └── mock/           # Mock AI server for testing
+├── compose.*.yml       # Docker Compose files (dev/prod/services-only)
+├── adrs/               # Architecture Decision Records
+└── docs/               # Deployment guides and technical notes
 ```
 
-## Backend Architecture & Testing
+## Backend Notes
 
-The backend separates data access from business logic:
+**Query isolation:** All database access lives in `backend/src/db/queries/<table>/<operation>.ts`. Services call queries, never touch Kysely directly. This makes testing and reasoning about data flow trivial.
 
-- `backend/src/db/queries/<table>/<query>.ts` — one Kysely query per file; the only place that touches Kysely/the database.
-- `backend/src/services/*` — business logic; receives a `Kysely<Database>` instance and delegates all SQL to queries.
-- `backend/app/**` — Fastify routes and server wiring.
+**Testing:** Real end-to-end tests against actual PostgreSQL (via testcontainers). No mocks. Run with `npm test` in `backend/`.
 
-Tests are real end-to-end tests against an actual PostgreSQL (`pgvector/pgvector:pg16`, started via testcontainers) — no mocks.
-
-```bash
-cd backend
-npm test                 # Run tests
-npm run test:watch       # Watch mode
-```
+**Auth flow:** SuperTokens handles sessions via HTTP-only cookies. Every protected route uses `verifySession()` middleware to extract the user ID. On signup, the SuperTokens user ID is synced to the local `users` table to satisfy foreign key constraints.
 
 ## Documentation
 
-- [Architecture Decisions](adrs/) - Technical decision records
-- [Ideas](docs/ideas/) - Deployment and design explorations
-- [Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md) - Private server + tunnel guide
-- [AWS Deployment](docs/ideas/AWS-DEPLOYMENT.md) - Cloud deployment considerations
-- [SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md) - Protocol analysis
+- **[Architecture Decisions](adrs/)** — Why we made key technical choices
+- **[Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md)** — Private server + tunnel setup
+- **[SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md)** — Why we chose SSE for streaming
 
-## License
+## What's Not Done (Yet)
 
-MIT
+- **Factual memory (RAG)** — Decided in ADR 0003, storage foundation exists, extraction pipeline pending

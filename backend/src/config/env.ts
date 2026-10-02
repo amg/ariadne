@@ -9,13 +9,13 @@
  */
 
 export type EnvConfig = {
-  // Server
+  // Server (optional - have sensible defaults)
   NODE_ENV: string;
   PORT: number;
   HOST: string;
   DEBUG: boolean;
 
-  // Database
+  // Database (required - no defaults)
   /** Explicit URL, else assembled from the DB_* parts; always defined. */
   DATABASE_URL: string;
   /** Second standing pool for bench review (same backend, other database). */
@@ -33,45 +33,75 @@ export type EnvConfig = {
   AI_STREAM_IDLE_TIMEOUT_MS: number;
   ENABLE_REASONING: boolean;
 
-  // Exchange lifecycle
+  // Exchange lifecycle (required - no defaults)
   /** How long an assistant row may stay `pending` before being declared lost. */
   EXCHANGE_STALENESS_MS: number;
 
   // Global spend budget (rate limiting ticket)
-  /** Daily spend budget in USD. Unset = no gate, fail open. Default: 5.0 */
+  /** Daily spend budget in USD. Unset = no gate, fail open. */
   DAILY_SPEND_BUDGET_USD: number | undefined;
 
   // Titling Service
   AI_TITLING_TIMEOUT_MS: number | undefined;
   TITLING_MODEL: string | undefined;
 
-  // Thread analysis (live drift gate)
+  // Thread analysis (live drift gate) - required
   THREAD_ANALYSIS_MODE: 'off' | 'heuristic' | 'always';
   JUDGE_MODEL: string;
   REWRITE_MODEL: string;
 
-  // CORS
-  CORS_ORIGINS: string | undefined;
+  // CORS (required for SuperTokens)
+  CORS_ORIGINS: string;
 
   // Logger
   FORCE_COLOR: string | undefined;
   NO_COLOR: string | undefined;
+
+  // SuperTokens (required)
+  SUPERTOKENS_CONNECTION_URI: string;
+  SUPERTOKENS_API_KEY: string | undefined;
 };
 
 /**
  * Helper to get a string from env with fallback.
+ * Defaults live here — consumers use env.X without fallbacks.
  */
 function getString(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
 
 /**
- * Helper to get a number from env with fallback. Unset and unparseable
- * values (an empty string parses to NaN) both fall back.
+ * Helper to get a required string — throws if not set.
+ */
+function getRequiredString(key: string): string {
+  const value = process.env[key];
+  if (value === undefined) {
+    throw new Error(`Required environment variable ${key} is not set`);
+  }
+  return value;
+}
+
+/**
+ * Helper to get a number from env with fallback.
  */
 function getNumber(key: string, fallback: number): number {
   const parsed = Number.parseInt(process.env[key] ?? String(fallback), 10);
   return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+/**
+ * Helper to get a required number — throws if not set or invalid.
+ */
+function getRequiredNumber(key: string): number {
+  const value = process.env[key];
+  if (value === undefined) {
+    throw new Error(`Required environment variable ${key} is not set`);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${key} must be a valid number, got: ${value}`);
+  }
+  return parsed;
 }
 
 function getBoolean(key: string, fallback: boolean): boolean {
@@ -194,15 +224,15 @@ export const env: EnvConfig = {
   // classification and bounded rephrasing, never answering. Overridable so
   // each can be repointed independently when a better small model appears.
   get JUDGE_MODEL() {
-    return process.env.JUDGE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
+    return getString('JUDGE_MODEL', 'Qwen/Qwen3.5-9B');
   },
   get REWRITE_MODEL() {
-    return process.env.REWRITE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
+    return getString('REWRITE_MODEL', 'Qwen/Qwen3.5-9B');
   },
 
-  // CORS
+  // CORS (required for SuperTokens - defaults to local dev)
   get CORS_ORIGINS() {
-    return process.env.CORS_ORIGINS;
+    return getString('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173');
   },
 
   // Logger
@@ -211,6 +241,14 @@ export const env: EnvConfig = {
   },
   get NO_COLOR() {
     return process.env.NO_COLOR;
+  },
+
+  // SuperTokens
+  get SUPERTOKENS_CONNECTION_URI() {
+    return getString('SUPERTOKENS_CONNECTION_URI', 'http://127.0.0.1:3567');
+  },
+  get SUPERTOKENS_API_KEY() {
+    return process.env.SUPERTOKENS_API_KEY;
   },
 };
 

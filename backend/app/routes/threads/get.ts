@@ -1,14 +1,16 @@
 import { getThreads } from '@services/threadService';
-import { DEFAULT_USER_ID } from '@services/userService';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-
-// Placeholder until page-level auth resolves the user; the route layer is the
-// only place allowed to assume it.
-const REQUEST_USER_ID = DEFAULT_USER_ID;
+import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 
 export async function setupThreadsGetRoute(fastify: FastifyInstance) {
-  fastify.get('/api/threads', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const threads = await getThreads({ userId: REQUEST_USER_ID });
-    return reply.send(threads);
-  });
+  fastify.get(
+    '/api/threads',
+    { preHandler: verifySession() },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const userId = (_request as SessionRequest).session?.getUserId() as string;
+      const threads = await getThreads({ userId: userId });
+      return reply.send(threads);
+    },
+  );
 }

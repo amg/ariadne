@@ -1,11 +1,9 @@
 import { editMessage } from '@services/messageService';
-import { DEFAULT_USER_ID } from '@services/userService';
 import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 import type { Result } from '../../../src/types/result';
-
-// Placeholder until page-level auth resolves the user.
-const REQUEST_USER_ID = DEFAULT_USER_ID;
 
 type Params = {
   id: string;
@@ -36,7 +34,9 @@ function sendUpdateError(reply: FastifyReply, error: Extract<Result<never>, { ty
 export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
   fastify.patch(
     '/api/threads/:id/messages/:messageId',
+    { preHandler: verifySession() },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const userId = (request as SessionRequest).session?.getUserId() as string;
       const { id, messageId } = request.params as Params;
       if (!isValidUuid(id) || !isValidUuid(messageId)) {
         return reply.code(400).send({ error: 'Invalid thread or message id' });
@@ -48,7 +48,7 @@ export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
       }
 
       const result = await editMessage({
-        userId: REQUEST_USER_ID,
+        userId: userId,
         threadId: id,
         messageId,
         content: body.content,

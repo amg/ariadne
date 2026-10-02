@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -6,8 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 COPY backend/package*.json ./backend/
 
-# Install dependencies (workspace-aware)
-RUN npm ci
+# Install dependencies (workspace-aware, skip scripts for CI/CD)
+ENV LEFTHOOK=0
+RUN npm ci --ignore-scripts
 
 # Copy backend source
 COPY backend ./backend
