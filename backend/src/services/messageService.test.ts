@@ -116,15 +116,17 @@ describe('messageService', () => {
       if (result.type !== 'success') throw new Error('expected success');
       expect(result.data.id).not.toBe(user.id);
 
-      // The old arrival stays — original text intact, flagged abandoned so
-      // its arrival spend keeps tracking the pre-edit costs; the stale
-      // reply is gone (usage cascaded); the forked row ends the thread.
+      // The old turn stays — original text intact, flagged abandoned along
+      // with the reply it generated (its usage keeps tracking the pre-edit
+      // cost); the stale reply keeps its spend row; the forked row ends the
+      // thread.
       const rows = await listMessagesByThread({ threadId });
       expect(rows.map((row) => [row.role, row.content, row.abandoned])).toEqual([
         ['user', 'first', true],
+        ['assistant', 'stale reply', true],
         ['user', 'rewritten prompt', false],
       ]);
-      expect(await getMessageUsageByMessageId({ messageId: assistant.id })).toBeUndefined();
+      expect(await getMessageUsageByMessageId({ messageId: assistant.id })).toBeDefined();
     });
 
     it('rejects empty edits so a bubble can never be blanked out', async () => {

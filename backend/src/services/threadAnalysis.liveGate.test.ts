@@ -646,6 +646,16 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     // The old text stays with its arrival; the forked row carries the edit.
     expect(messages?.find((message) => message.id === lastUser)?.content).toBe(originalContent);
     expect(messages?.find((message) => message.id === forkedId)?.content).toBe(editedContent);
+
+    // The live reading drops the abandoned arrival but keeps the forked one:
+    // the topic story follows the live conversation, not the debris.
+    const view = await buildLiveAnalysisView(threadId);
+    expect(view.type).toBe('success');
+    if (view.type !== 'success') throw new Error('expected success');
+    const pointIds = view.data.points.map((point) => point.messageId);
+    expect(pointIds).not.toContain(lastUser);
+    expect(pointIds).toContain(forkedId);
+    expect(view.data.pending).toBe(false);
   });
 });
 

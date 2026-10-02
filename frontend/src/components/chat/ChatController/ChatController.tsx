@@ -1,14 +1,13 @@
 import { type Message, fetchResumeDraft, stopThreadExchange, updateMessage } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
-import type { UIMessage } from 'ai';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatView from '../ChatView';
 import type { RestoredDraft } from '../ChatView/types';
 import { getThreadChat, sendThreadMessage, subscribeToThreadChat } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 import {
+  buildRetrySeed,
   extractReasoning,
-  findTargetUserMessageIndex,
   lastUserMessage,
   mergeDisplayRows,
   readVerdictData,
@@ -114,9 +113,11 @@ export default function ChatController({
     }
   }, [chat.messages]);
 
-  // Filter out dropped rows before merging with chat messages
+  // Filter out dropped and abandoned rows before merging with chat messages:
+  // abandoned rows stay in the DB (their usage keeps tracking what the
+  // thread burned), but never render.
   const visibleRows = useMemo(
-    () => rows.filter((row) => !droppedIds.has(row.id)),
+    () => rows.filter((row) => !droppedIds.has(row.id) && !row.abandoned),
     [rows, droppedIds],
   );
 
@@ -143,44 +144,21 @@ export default function ChatController({
     sendThreadMessage(threadId, trimmed);
   };
 
-  /**
-   * Retry of the last inference (useChat `regenerate`). The server decides
-   * the exchange from DB state; the client message list is only there to
-   * satisfy the SDK's last-message guard, so always (re)seed it from the
-   * settled loader rows — in-session optimistic state can diverge from the
-   * DB (e.g. right after an edit). The override applies an edit that the
-   * revalidator hasn't applied to `rows` yet.
-   */
   const retryLast = (override?: { messageId: string; content: string }) => {
     if (chat.status === 'submitted' || chat.status === 'streaming') return;
     if (rows.length === 0) return;
 
-    const lastUserIndex = findTargetUserMessageIndex(rows, override?.messageId);
+    const plan = buildRetrySeed(rows, override);
+    if (!plan) return;
 
-    if (lastUserIndex >= 0) {
-      // Optimistically hide the assistant messages that the server will delete
-      const toDrop = rows.slice(lastUserIndex + 1).map((r) => r.id);
-      if (toDrop.length > 0) {
-        setDroppedIds((prev) => new Set([...prev, ...toDrop]));
-      }
-
-      // Keep only messages up to and including the last user message
-      // This removes any assistant replies that will be regenerated
-      const rowsToKeep = rows.slice(0, lastUserIndex + 1);
-
-      const seeded: UIMessage[] = rowsToKeep.map((row) => ({
-        id: row.id,
-        role: row.role,
-        parts: [{ type: 'text', text: row.content }],
-      }));
-      chat.setMessages(seeded);
-
-      // Clear reasoning cache for regenerated messages
-      for (const row of rows.slice(lastUserIndex + 1)) {
-        reasoningCache.current.delete(row.id);
-      }
+    if (plan.toDrop.length > 0) {
+      setDroppedIds((prev) => new Set([...prev, ...plan.toDrop]));
+    }
+    for (const id of plan.clearIds) {
+      reasoningCache.current.delete(id);
     }
 
+    chat.setMessages(plan.seeded);
     try {
       void chat.regenerate();
     } catch {
@@ -188,14 +166,17 @@ export default function ChatController({
     }
   };
 
-  /** Saves a prompt edit; the stale reply is dropped, then the exchange regenerates. */
+  /**
+   * Saves a prompt edit: the server abandons the old turn in place and
+   * returns the fork; the exchange then regenerates from the fork.
+   */
   const editMessage = async (messageId: string, content: string): Promise<boolean> => {
     const trimmed = content.trim();
     if (!trimmed || chat.status === 'submitted' || chat.status === 'streaming') return false;
     try {
-      await updateMessage(threadId, messageId, trimmed);
-      onSettle(); // drop the deleted reply + show the edited prompt right away
-      retryLast({ messageId, content: trimmed });
+      const forked = await updateMessage(threadId, messageId, trimmed);
+      onSettle(); // refetch: abandoned turn vanishes, the fork appears
+      retryLast({ messageId: forked.id, content: trimmed });
       return true;
     } catch {
       return false;

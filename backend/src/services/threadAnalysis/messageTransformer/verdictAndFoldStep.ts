@@ -296,7 +296,9 @@ async function processArrival(input: {
 /**
  * Rebuilds the ledger from stored rows and processes arrivals up to
  * (inclusive of) the target index. Stored rows are replayed; anything
- * missing is computed and persisted on the spot.
+ * missing is computed and persisted on the spot. Abandoned arrivals are
+ * filtered from the ledger: their segments and logs stay stored (usage
+ * keeps tracking them) but the live chain follows only the live conversation.
  */
 async function fillForwardToArrival(input: {
   threadId: string;
@@ -306,11 +308,19 @@ async function fillForwardToArrival(input: {
   const { threadId, arrivals, targetIndex } = input;
   const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
 
+  // Abandoned arrivals stay out of the live ledger: their rows, segments
+  // and drift logs stay stored (usage keeps tracking them) but the chain
+  // replays only the live conversation.
+  const abandonedIds = new Set(
+    arrivals.filter((row) => row.userMessage.abandoned).map((row) => row.userMessage.id),
+  );
   const [storedSegments, storedLogs] = await Promise.all([
     listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
     listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
   ]);
-  const storedLogsByMessageId = new Map(storedLogs.map((log) => [log.messageId, log]));
+  const storedLogsByMessageId = new Map(
+    storedLogs.filter((log) => !abandonedIds.has(log.messageId)).map((log) => [log.messageId, log]),
+  );
 
   // One batch fetch of every embedding the fill reads: user-message
   // arrival rows and assistant-message turn rows.
@@ -332,10 +342,12 @@ async function fillForwardToArrival(input: {
     anchorMemberCount: 0,
     completedTurns: 0,
     currentSegmentId: null,
-    storedSegments: storedSegments.map((segment) => ({
-      id: segment.id,
-      startMessageId: segment.startMessageId,
-    })),
+    storedSegments: storedSegments
+      .filter((segment) => !abandonedIds.has(segment.startMessageId))
+      .map((segment) => ({
+        id: segment.id,
+        startMessageId: segment.startMessageId,
+      })),
     loggedMessageIds: new Set(storedLogsByMessageId.keys()),
   };
 

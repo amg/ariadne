@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { findResumeDraft } from '@queries/messages/findResumeDraft';
 import { insertMessage } from '@queries/messages/insertMessage';
-import { markMessageAbandoned } from '@queries/messages/markMessageAbandoned';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { useTestDb } from '@test/test-db';
@@ -36,7 +36,7 @@ describe('findResumeDraft', () => {
     const threadId = await createThread();
 
     const user = await insertMessage({ threadId, role: 'user', content: 'an interrupted arrival' });
-    await markMessageAbandoned({ messageId: user.id });
+    await setMessagesAbandoned({ messageIds: [user.id], abandoned: true });
     // The aborted exchange left a non-completed assistant row behind.
     await insertMessage({
       threadId,
@@ -55,7 +55,7 @@ describe('findResumeDraft', () => {
     const threadId = await createThread();
 
     const user = await insertMessage({ threadId, role: 'user', content: 'still owed' });
-    await markMessageAbandoned({ messageId: user.id });
+    await setMessagesAbandoned({ messageIds: [user.id], abandoned: true });
     await insertMessage({ threadId, role: 'assistant', content: 'boom', exchangeStatus: 'error' });
 
     expect(await findResumeDraft({ threadId })).toEqual({
@@ -68,7 +68,7 @@ describe('findResumeDraft', () => {
     const threadId = await createThread();
 
     const user = await insertMessage({ threadId, role: 'user', content: 'recovered' });
-    await markMessageAbandoned({ messageId: user.id });
+    await setMessagesAbandoned({ messageIds: [user.id], abandoned: true });
     await insertMessage({
       threadId,
       role: 'assistant',
@@ -83,7 +83,7 @@ describe('findResumeDraft', () => {
     const threadId = await createThread();
 
     const first = await insertMessage({ threadId, role: 'user', content: 'old interrupted' });
-    await markMessageAbandoned({ messageId: first.id });
+    await setMessagesAbandoned({ messageIds: [first.id], abandoned: true });
     // The conversation moved on with a fresh arrival.
     await insertMessage({
       threadId,

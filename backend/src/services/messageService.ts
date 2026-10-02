@@ -1,10 +1,9 @@
 import { env } from '@config/env';
 import type { Message, MessageFinishReason, MessageUsage } from '@db/types';
-import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread';
-import { markMessageAbandoned } from '@queries/messages/markMessageAbandoned';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { type Result, err, ok } from '../types/result';
@@ -91,12 +90,14 @@ const MAX_MESSAGE_CONTENT_LENGTH = 10_000;
  * editable, and an edit ABANDONS its arrival rather than rewriting it:
  * the old row keeps its text and its arrival analysis (still correct for
  * the untouched reading), so its spend keeps tracking the pre-edit costs;
- * the edited text lands as a NEW user row, which the retry exchanges and
- * the live gate judges. Replies following the old prompt are dropped
- * (usage rows cascade). Assistant replies themselves are never edited —
- * retry (chat regenerate) is their recovery path. "not_last" (409) and
- * "thread_not_found" (404) keep foreign/unknown ids
- * indistinguishable from permission failures.
+ * every reply grown from the old text is abandoned with it. The edited
+ * text lands as a NEW user row after them — the arrival the retry
+ * exchanges and the live gate judges. Abandoned rows are never rewritten
+ * and never deleted; inference memory, listing, drafting and the analysis
+ * surface simply skip them. Assistant replies themselves are never edited
+ * — retry (chat regenerate) is their recovery path. "not_last" (409) and
+ * "thread_not_found" (404) keep foreign/unknown ids indistinguishable
+ * from permission failures.
  */
 export async function editMessage({
   userId,
@@ -133,18 +134,15 @@ export async function editMessage({
     return err('not_last', 'Only the last user message in a thread can be edited.');
   }
 
-  // Replies after the edited prompt were generated from the old text; drop
-  // them (the client immediately retries the exchange from the new prompt).
-  for (const row of rows.slice(lastUserIndex + 1)) {
-    await deleteMessage({ messageId: row.id });
-  }
+  // The old arrival and every reply grown from its text are abandoned in
+  // place: rows stay — text, arrival analysis and usage keep tracking what
+  // the thread burned — while retry, inference memory and listing skip
+  // them. The fork lands after them.
+  await setMessagesAbandoned({
+    messageIds: [lastUser.id, ...rows.slice(lastUserIndex + 1).map((row) => row.id)],
+    abandoned: true,
+  });
 
-  // The abandoned arrival keeps its text and arrival analysis intact, and
-  // its arrival spend (embedding/rewrite/judge) keeps tracking pre-edit cost.
-  await markMessageAbandoned({ messageId });
-
-  // The fork: the edited text lands as a new user row — the arrival the
-  // retry exchanges and the live gate judges.
   const forked = await insertMessage({ threadId, role: 'user', content: normalized });
   return ok(
     messageRowToMessageWithUsage({

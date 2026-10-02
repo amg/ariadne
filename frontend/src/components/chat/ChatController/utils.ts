@@ -1,4 +1,5 @@
 import type { Message, MessageDriftVerdict } from '@/services/api';
+import type { UIMessage } from 'ai';
 import type { DisplayRow } from '../ChatView';
 import type { StreamVerdict, UiMessageLike } from './types';
 
@@ -54,6 +55,65 @@ export function lastUserMessage(chatMessages: UiMessageLike[]): UiMessageLike | 
     if (candidate?.role === 'user') return candidate;
   }
   return null;
+}
+
+/** Maps a DB row (or a just-forked prompt) into an SDK message for seeding. */
+export function toUiMessage(source: {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}): UIMessage {
+  return {
+    id: source.id,
+    role: source.role,
+    parts: [{ type: 'text', text: source.content }],
+  };
+}
+
+/**
+ * Builds the SDK seed for a retry. The server is authoritative on the
+ * exchange; the seed exists only to satisfy the SDK's last-message guard,
+ * and carries every row up to the target (abandoned included). The override
+ * carries an edit fork the revalidator hasn't applied to `rows` yet.
+ */
+export function buildRetrySeed(
+  rows: Message[],
+  override?: { messageId: string; content: string },
+): { seeded: UIMessage[]; toDrop: string[]; clearIds: string[] } | null {
+  const targetIndex = findTargetUserMessageIndex(rows, override?.messageId);
+
+  if (targetIndex >= 0) {
+    const prefix = rows.slice(0, targetIndex).filter((row) => !row.abandoned);
+    const target = rows[targetIndex];
+    if (!target) return null;
+    const after = rows.slice(targetIndex + 1);
+    return {
+      seeded: [...prefix.map(toUiMessage), toUiMessage(target)],
+      // Stale answers past the target are hidden optimistically; the server
+      // abandons them in the DB rather than deleting.
+      toDrop: after.filter((row) => !row.abandoned).map((row) => row.id),
+      clearIds: after.map((row) => row.id),
+    };
+  }
+  if (!override) return null;
+
+  // The edit fork hasn't reached `rows` yet: it replaces the newest user
+  // turn (which the server has already abandoned server-side, but `rows`
+  // doesn't know yet), so seed the live prefix and drop that whole turn —
+  // arrival and replies alike — instead of re-seeding it.
+  const replacedIndex = findTargetUserMessageIndex(rows);
+  const prefix = (replacedIndex >= 0 ? rows.slice(0, replacedIndex) : rows).filter(
+    (row) => !row.abandoned,
+  );
+  const replaced = replacedIndex >= 0 ? rows.slice(replacedIndex) : [];
+  return {
+    seeded: [
+      ...prefix.map(toUiMessage),
+      toUiMessage({ id: override.messageId, role: 'user', content: override.content }),
+    ],
+    toDrop: replaced.filter((row) => !row.abandoned).map((row) => row.id),
+    clearIds: replaced.map((row) => row.id),
+  };
 }
 
 /**
