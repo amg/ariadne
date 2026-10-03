@@ -18,9 +18,9 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-    # Loopback only — accessible from host for local dev
+    # Exposed on all interfaces — accessible from host and agent container
     ports:
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata_dev:/var/lib/postgresql/data
     restart: unless-stopped

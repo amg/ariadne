@@ -1,3 +1,6 @@
+// Entry point: load the repo-root .env before deriving the test DB URL
+// (tests run against chatbot_test next to the database configured there).
+import '@config/dotenv';
 import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +10,16 @@ import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 
 /**
- * Database resolution order:
+ * Database resolution order (always the dedicated `chatbot_test`
+ * database — dev data is never touched):
  *   1. `TEST_DATABASE_URL` env var — explicit, always wins; the database
  *      must already exist at that URL.
- *   2. Sandbox fallback: reuse the dev Postgres published on the Docker
- *      host, reached via this container's default gateway. Uses a
- *      dedicated `chatbot_test` database only — dev data is never touched.
+ *   2. The database configured in the repo-root .env (`DATABASE_URL`, or
+ *      the `DB_*` parts): `chatbot_test` is auto-provisioned on that
+ *      server. This is the default `npm run gate` path on the host.
+ *   3. Sandbox fallback: the same configured port and credentials, but
+ *      reached via this container's default gateway — the route from the
+ *      agent container to the host's docker-published database.
  */
 const TEST_DATABASE_URL_ENV = 'TEST_DATABASE_URL';
 const DB_URL_ENV = 'VITEST_TEST_DATABASE_URL';
@@ -21,6 +28,38 @@ const TEST_DB_NAME = 'chatbot_test';
 const FALLBACK_USER = 'postgres';
 const FALLBACK_PASSWORD = 'postgrespassword'; // dev-only fallback credentials
 const FALLBACK_PORT = 5432;
+
+interface DbConfig {
+  host: string | undefined;
+  port: number;
+  user: string;
+  password: string;
+}
+
+/**
+ * Connection details of the database this repo has configured:
+ * `DATABASE_URL` wins, otherwise the `DB_*` parts; the dev-only
+ * fallbacks apply when nothing is configured at all. `host` stays
+ * undefined for bare `DB_*` parts with no `DB_HOST`.
+ */
+function deriveConfiguredDb(): DbConfig {
+  const explicit = process.env.DATABASE_URL;
+  if (explicit) {
+    const url = new URL(explicit);
+    return {
+      host: url.hostname || undefined,
+      port: Number(url.port || FALLBACK_PORT),
+      user: decodeURIComponent(url.username) || FALLBACK_USER,
+      password: decodeURIComponent(url.password) || FALLBACK_PASSWORD,
+    };
+  }
+  return {
+    host: process.env.DB_HOST || undefined,
+    port: Number(process.env.DB_PORT ?? FALLBACK_PORT),
+    user: process.env.DB_USER || FALLBACK_USER,
+    password: process.env.DB_PASSWORD || FALLBACK_PASSWORD,
+  };
+}
 
 /** Default-route gateway IP of this container's network (Linux only). */
 function detectGatewayIp(): string | undefined {
@@ -39,12 +78,18 @@ function detectGatewayIp(): string | undefined {
 }
 
 /**
- * Ensure the dedicated `chatbot_test` database exists next to the dev
- * database and return its URL. Throws when no Postgres is reachable.
+ * Ensure the dedicated `chatbot_test` database exists on the target
+ * server and return its URL. Throws when no Postgres is reachable.
  */
-async function ensureSandboxDatabase(gateway: string): Promise<string> {
-  const adminUrl = `postgres://${FALLBACK_USER}:${FALLBACK_PASSWORD}@${gateway}:${FALLBACK_PORT}/postgres`;
-  const pool = new Pool({ connectionString: adminUrl, connectionTimeoutMillis: 3_000 });
+async function ensureTestDatabase(
+  target: { host: string } & DbConfig,
+  timeoutMillis: number,
+): Promise<string> {
+  const admin = `postgres://${encodeURIComponent(target.user)}:${encodeURIComponent(target.password)}@${target.host}:${target.port}`;
+  const pool = new Pool({
+    connectionString: `${admin}/postgres`,
+    connectionTimeoutMillis: timeoutMillis,
+  });
   try {
     const existing = await pool.query('select 1 from pg_database where datname = $1', [
       TEST_DB_NAME,
@@ -55,16 +100,53 @@ async function ensureSandboxDatabase(gateway: string): Promise<string> {
       await pool.query(`create database ${TEST_DB_NAME}`);
       console.log(`[test-db] created database "${TEST_DB_NAME}"`);
     }
-  } catch (error) {
-    throw new Error(
-      `No reachable Postgres at ${gateway}:${FALLBACK_PORT} ` +
-        `(started docker compose db? or set ${TEST_DATABASE_URL_ENV}). ` +
-        `Original error: ${String(error)}`,
-    );
   } finally {
     await pool.end();
   }
-  return `postgres://${FALLBACK_USER}:${FALLBACK_PASSWORD}@${gateway}:${FALLBACK_PORT}/${TEST_DB_NAME}`;
+  return `${admin}/${TEST_DB_NAME}`;
+}
+
+/**
+ * Probe the configured host first, then the same server through the
+ * container gateway; both share the configured port and credentials.
+ * Returns the first reachable candidate with its provenance.
+ */
+async function resolveSandboxDatabase(): Promise<{ url: string; mode: string }> {
+  const config = deriveConfiguredDb();
+  const gateway = detectGatewayIp();
+
+  const candidates: { host: string; mode: string }[] = [];
+  if (config.host) {
+    candidates.push({
+      host: config.host,
+      mode: `configured database at ${config.host}:${config.port}`,
+    });
+  }
+  if (gateway && gateway !== config.host) {
+    candidates.push({
+      host: gateway,
+      mode: `sandbox fallback via gateway ${gateway}:${config.port}`,
+    });
+  }
+  if (candidates.length === 0) {
+    throw new Error(
+      `No database configured in .env and no network gateway found. Set ${TEST_DATABASE_URL_ENV} to a real Postgres URL.`,
+    );
+  }
+
+  const tried: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const url = await ensureTestDatabase({ ...config, host: candidate.host }, 3_000);
+      return { url, mode: candidate.mode };
+    } catch (error) {
+      tried.push(`${candidate.host}:${config.port} (${String(error).split('\n')[0]})`);
+    }
+  }
+  throw new Error(
+    `No reachable Postgres: tried ${tried.join(', then ')} ` +
+      `(started the docker compose db?). Set ${TEST_DATABASE_URL_ENV} explicitly.`,
+  );
 }
 
 function redactUrl(url: string): string {
@@ -76,14 +158,9 @@ export default async function globalSetup(): Promise<void> {
   let mode = `explicit ${TEST_DATABASE_URL_ENV}`;
 
   if (!databaseUrl) {
-    const gateway = detectGatewayIp();
-    if (!gateway) {
-      throw new Error(
-        `No network gateway found to reach the sandbox database. Set ${TEST_DATABASE_URL_ENV} to a real Postgres URL.`,
-      );
-    }
-    databaseUrl = await ensureSandboxDatabase(gateway);
-    mode = `sandbox fallback via gateway ${gateway}`;
+    const resolved = await resolveSandboxDatabase();
+    databaseUrl = resolved.url;
+    mode = resolved.mode;
   }
 
   // Make the URL available to all test workers (they are spawned after setup).

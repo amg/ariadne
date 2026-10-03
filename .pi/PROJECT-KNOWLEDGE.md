@@ -65,7 +65,9 @@ row anymore).
 ## Agent Environment
 
 - `cd backend && npm test` works from both the host and the agent
-  container (real Postgres, no mocks; see README).
+  container (real Postgres, no mocks; always against `chatbot_test`
+  next to the `.env`-configured database — see README/Testing and
+  `.testing/db.md`).
 - Probing the host database from the agent container (connection string,
   one-off probe recipes): see `.testing/db.md` (gitignored — throwaway
   scripts and probes live there, never in the repo).

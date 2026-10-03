@@ -128,7 +128,7 @@ alex-chat-bot/
 
 **Query isolation:** All database access lives in `backend/src/db/queries/<table>/<operation>.ts`. Services call queries, never touch Kysely directly. This makes testing and reasoning about data flow trivial.
 
-**Testing:** Real end-to-end tests against actual PostgreSQL. No mocks. They need a reachable Postgres: a dedicated `chatbot_test` database is auto-provisioned next to the dev DB via the Docker gateway, or point at one explicitly with `TEST_DATABASE_URL`. Run with `npm test` in `backend/`.
+**Testing:** Real end-to-end tests against actual PostgreSQL. No mocks. They always run against a dedicated `chatbot_test` database, never the dev DB. By default it is auto-provisioned next to the database configured in the root `.env` (`DATABASE_URL` or `DB_*` parts); from the agent container it is reached via the Docker gateway instead. Point elsewhere explicitly with `TEST_DATABASE_URL`. Run with `npm test` in `backend/`.
 
 **Auth flow:** SuperTokens handles sessions via HTTP-only cookies. Every protected route uses `verifySession()` middleware to extract the user ID. On signup, the SuperTokens user ID is synced to the local `users` table to satisfy foreign key constraints.
 
