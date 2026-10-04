@@ -138,6 +138,38 @@ Context that is still sent on every Turn but no longer contributes to the
 answer. Baggage is paid for on every Turn after it becomes baggage.
 _Avoid_: dead context, bloat, cruft, noise
 
+### Memory
+
+**Fact**:
+One memory record: a self-contained, durable sentence about the user —
+useful in a future conversation without any surrounding context, e.g.
+"the user is vegetarian". Carries its source Turn, extraction and
+validity timestamps, and optional entity subject/object columns with a
+normalized predicate. Relative time is resolved to absolute dates at
+extraction; a near-duplicate of an existing Fact is not stored twice.
+_Avoid_: memory item, note, observation
+
+**Memory**:
+The durable store of Facts that outlives any Thread. Written at Segment
+close, read at context assembly; namespaced per user even though it
+holds one user today.
+_Avoid_: knowledge base, profile store, memory bank
+
+**Seed**:
+What a fresh Thread's context receives at creation: a snapshot of what
+the Memory store knows about the user — bounded by a token-budget
+policy — and, when the Thread was born from a drift handover, the
+segment-cutting Turn. The Seed is composed by the assembler, stays
+byte-stable for the Thread's life, and never appears in the chat
+stream.
+_Avoid_: carryover, handoff block, preamble
+
+**Memory Screen**:
+The separate surface for viewing, editing, deleting, and suppressing
+Facts. Facts never surface inside Threads; the Screen is their only
+home. Deletion removes a Fact; suppression only stops it being injected.
+_Avoid_: memory panel, profile editor
+
 ### Flow
 
 **Drift gate**:

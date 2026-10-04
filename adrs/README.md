@@ -12,7 +12,8 @@ We use a lightweight markdown format for ADRs. Each ADR should include:
 
 ## Status
 
-All baseline architectural decisions have been accepted. See ADRs 0001–0009:
+All baseline architectural decisions have been accepted. See ADRs
+0001–0009:
 0004 supersedes the DI convention of 0001; 0003's storage foundation has
 landed while its extraction/retrieval pipeline is still pending; 0006 is the
 single thread-health drift record — Turn embeddings keyed to messages,
@@ -25,3 +26,10 @@ budget plus deployment-wide caps on the billed routes; 0009 fixes the
 deployment vocabulary — dev (host app + infra containers), staging (full
 Docker build, disposable data), prod (tunnel-fronted) — one compose file and
 resource-name suffix per tier, two env files, one local stack at a time.
+
+0010 is proposed: the pipeline 0003's storage has been waiting for — a
+general fact-extraction process hooked today at Segment close, Facts stored
+in the pgvector table, and fresh Threads primed by assembler Seeds. Its
+out-of-scope boundary is deliberate — preference-corpus tuning, graph
+visualization, cross-user analytics, and full UPDATE/DELETE reconciliation
+are future improvements, not rewrites.
