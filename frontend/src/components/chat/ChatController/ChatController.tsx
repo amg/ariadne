@@ -1,16 +1,29 @@
-import { type Message, fetchResumeDraft, stopThreadExchange, updateMessage } from '@/services/api';
+import {
+  type Message,
+  fetchResumeDraft,
+  handOverArrival,
+  stopThreadExchange,
+  updateMessage,
+} from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatView from '../ChatView';
 import type { RestoredDraft } from '../ChatView/types';
-import { getThreadChat, sendThreadMessage, subscribeToThreadChat } from './chatRegistry';
+import {
+  getThreadChat,
+  replyToStoredMessage,
+  sendThreadMessage,
+  subscribeToThreadChat,
+} from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 import {
   buildRetrySeed,
   extractReasoning,
   lastUserMessage,
   mergeDisplayRows,
+  pausedArrivalIdOrNull,
   readVerdictData,
+  withoutMovedArrival,
 } from './utils';
 
 type ChatControllerProps = {
@@ -18,6 +31,8 @@ type ChatControllerProps = {
   rows: Message[];
   onSettle: () => void;
   onGenerateTitle?: () => void;
+  /** Opens the fresh thread a paused arrival was moved to. */
+  onHandedOver?: (threadId: string) => void;
 };
 
 /**
@@ -32,6 +47,7 @@ export default function ChatController({
   rows,
   onSettle,
   onGenerateTitle,
+  onHandedOver,
 }: ChatControllerProps) {
   // The chat object lives in the per-tab registry (module level), keyed by
   // thread; useChat attaches to it externally instead of owning one, so no
@@ -45,6 +61,8 @@ export default function ChatController({
   // applied to the pending user bubble before the reply grows.
   const [streamVerdict, setStreamVerdict] = useState<StreamVerdict | null>(null);
   const [restoredDraft, setRestoredDraft] = useState<RestoredDraft | null>(null);
+  const [handingOver, setHandingOver] = useState(false);
+  const [handoverError, setHandoverError] = useState<string | null>(null);
   const messagesRef = useRef<UiMessageLike[]>([]);
 
   // Settlement handlers keep the render's identity; the registry
@@ -138,6 +156,33 @@ export default function ChatController({
     [visibleRows, chat.messages, chat.status, liveVerdict],
   );
 
+  const pausedMessageId = pausedArrivalIdOrNull(display, visibleRows, chat.status);
+
+  /**
+   * Moves the paused arrival to a fresh thread: the server opens it (seeded
+   * from memory) with the arrival stored as its first message, whose reply
+   * is requested there before the view switches over.
+   */
+  const startNewChat = async () => {
+    if (!pausedMessageId || handingOver) return;
+    setHandingOver(true);
+    setHandoverError(null);
+    try {
+      const handover = await handOverArrival(threadId, pausedMessageId);
+      // The arrival left this thread: hide its row now, and drop its live
+      // copy from the thread's chat object, which outlives this view and
+      // would otherwise render it again as an unsaved message.
+      setDroppedIds((prev) => new Set([...prev, pausedMessageId]));
+      chat.setMessages(withoutMovedArrival(chat.messages, handover.message.content));
+      replyToStoredMessage(handover.thread.id, handover.message);
+      onHandedOver?.(handover.thread.id);
+    } catch {
+      setHandoverError('Could not start a new chat from this message. Try again.');
+    } finally {
+      setHandingOver(false);
+    }
+  };
+
   const send = (content: string) => {
     const trimmed = content.trim();
     if (!trimmed || chat.status === 'submitted' || chat.status === 'streaming') return;
@@ -187,7 +232,7 @@ export default function ChatController({
     <ChatView
       rows={display}
       status={chat.status}
-      errorMessage={chat.error?.message ?? null}
+      errorMessage={handoverError ?? chat.error?.message ?? null}
       restoredDraft={restoredDraft}
       onSend={send}
       onStop={() => {
@@ -196,6 +241,10 @@ export default function ChatController({
       }}
       onRetryLast={() => retryLast()}
       onEditMessage={editMessage}
+      pausedMessageId={pausedMessageId}
+      handingOver={handingOver}
+      onContinueHere={() => retryLast()}
+      onStartNewChat={() => void startNewChat()}
     />
   );
 }

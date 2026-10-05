@@ -199,6 +199,26 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
 }
 
+type Handover = {
+  thread: Thread;
+  /** The arrival's stored copy, the fresh thread's first message, awaiting its reply. */
+  message: { id: string; content: string };
+};
+
+/**
+ * Moves the thread's paused arrival out into a fresh thread, where the
+ * server stores it as the first message. The caller then asks for its reply.
+ */
+export async function handOverArrival(threadId: string, messageId: string): Promise<Handover> {
+  const res = await fetch(`/api/threads/${threadId}/handover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId }),
+  });
+  if (!res.ok) throw new Error(`Failed to start a new chat: ${res.statusText}`);
+  return res.json();
+}
+
 export type ResumeDraft = { messageId: string; text: string };
 
 /**
@@ -259,6 +279,7 @@ export interface ThreadSummary {
     embedding: string;
     rewrite: string;
     judge: string;
+    memory: string;
   };
   totalTokens: {
     prompt: number;
@@ -271,7 +292,7 @@ export interface ThreadSummary {
   /** Every model the thread spent on, grouped by model id. */
   models: Array<{
     modelId: string;
-    roles: Array<'chat' | 'embedding' | 'rewrite' | 'judge'>;
+    roles: Array<'chat' | 'embedding' | 'rewrite' | 'judge' | 'memory'>;
     pricing: {
       inputPricePerMillion: number | null;
       outputPricePerMillion: number | null;

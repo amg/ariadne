@@ -83,17 +83,21 @@ export default function ChatPage() {
     messages: Message[];
   };
   const { threads } = useRouteLoaderData('root') as { threads: Thread[] };
-  const { analysisMode, generateTitle, refreshThreadSummary } = useOutletContext<{
+  const { analysisMode, generateTitle, refreshThreadSummary, openThread } = useOutletContext<{
     analysisMode: ThreadAnalysisMode;
     generateTitle: (id: string) => void;
     refreshThreadSummary: () => Promise<void>;
+    openThread: (id: string) => void;
   }>();
   const revalidator = useRevalidator();
   useRefetchOnTabFocus(revalidator.revalidate);
   const [searchParams, setSearchParams] = useSearchParams();
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
 
-  const title = threads?.find((thread) => thread.id === threadId)?.title;
+  // A thread the list doesn't hold yet was just opened outside the sidebar
+  // (a handover) and is untitled, like any fresh thread.
+  const listedThread = threads?.find((thread) => thread.id === threadId);
+  const untitled = !listedThread || listedThread.title === null;
 
   // Off = surface gone entirely: no tabs, and a stale ?mode=analyze renders
   // the conversation instead of a hidden page.
@@ -134,8 +138,9 @@ export default function ChatPage() {
           threadId={threadId}
           rows={rows}
           onSettle={handleSettle}
+          onHandedOver={openThread}
           onGenerateTitle={() => {
-            if (title === null) {
+            if (untitled) {
               generateTitle(threadId);
             }
           }}

@@ -20,6 +20,7 @@ import {
   useLocation,
   useMatch,
   useNavigate,
+  useRevalidator,
   useRouteLoaderData,
 } from 'react-router';
 import { redirect } from 'react-router';
@@ -49,6 +50,7 @@ function AppLayoutComponent() {
   const match = useMatch('/threads/:threadId');
   const location = useLocation();
   const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const createFetcher = useFetcher();
   const renameFetcher = useFetcher({ key: 'rename-thread' });
   const deleteFetcher = useFetcher({ key: 'delete-thread' });
@@ -222,6 +224,12 @@ function AppLayoutComponent() {
             );
           },
           refreshThreadSummary: handleRefreshThreadSummary,
+          // A thread opened outside the sidebar (a handover) joins the list
+          // once the navigation has landed.
+          openThread: async (id: string) => {
+            await navigate(`/threads/${id}`);
+            await revalidator.revalidate();
+          },
         }}
       />
     </AppShell>

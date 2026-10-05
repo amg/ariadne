@@ -13,6 +13,7 @@ import {
   type EmbedTextData,
   computeCostUsd,
   embedText,
+  isDriftPause,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
@@ -132,6 +133,7 @@ async function assertSuccess(
 ): Promise<ChatStreamHandle> {
   expect(result.type).toBe('success');
   if (result.type !== 'success') throw new Error('expected success');
+  if (isDriftPause(result.data)) throw new Error('expected an exchange, got a drift pause');
   return result.data;
 }
 
@@ -412,12 +414,11 @@ describe('submitChat', () => {
     expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
     expect(usage?.completionTokens).toBe(0);
 
-    // The settled row must not trip the in-flight guard on the next exchange.
-    const next = await assertSuccess(
-      await submitChat({ userId, threadId, content: 'all clear again' }),
-    );
-    await drain(next);
-    await expect(next.outcome).resolves.toMatchObject({ type: 'success' });
+    // The settled row must not trip the in-flight guard on the next submit.
+    // (The mock embeds every distinct text far apart, so this second
+    // arrival is a drift fire and pauses instead of exchanging.)
+    const next = await submitChat({ userId, threadId, content: 'all clear again' });
+    expect(next.type).toBe('success');
   });
 
   it('aborts on the inter-token idle deadline with stream_timeout', async () => {

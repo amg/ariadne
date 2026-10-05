@@ -2,6 +2,7 @@ export { setupThreadAnalysisRoute } from './analysis';
 export { setupThreadsDeleteRoute } from './delete';
 export { setupThreadDraftRoute } from './draft';
 export { setupThreadsGetRoute } from './get';
+export { setupThreadHandoverRoute } from './handover';
 export { setupThreadsPatchRoute } from './patch';
 export { setupThreadsPostRoute } from './post';
 export { setupThreadSummaryRoute } from './summary';

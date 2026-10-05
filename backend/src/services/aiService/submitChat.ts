@@ -7,14 +7,23 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
+import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
+import { isHandedOverMessage } from '@queries/threadSeeds/isHandedOverMessage';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import { runLiveGate } from '@services/threadAnalysis';
+import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
+import {
+  type FireChannel,
+  type GateVerdict,
+  type LiveArrivalOutcome,
+  runLiveGate,
+} from '@services/threadAnalysis';
 import { validateMessageContent } from '@services/validation';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, type ResultError, err, errBudgetExceeded, ok } from '../../types/result';
 import { renameThread } from '../threadService';
 import {
+  EMBEDDING_MODEL_ID,
   NOT_CONFIGURED_MESSAGE,
   SYSTEM_PROMPT,
   createModel,
@@ -22,6 +31,7 @@ import {
   resolveInferenceConfig,
 } from './config';
 import { ChatExchange, type ChatOutcome } from './exchange';
+import { pausedArrivalOrNull } from './pausedArrival';
 import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
 
 /**
@@ -35,8 +45,14 @@ import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
  *      exchange. Retries re-run the gate too — already-analysed
  *      arrivals replay (never re-embedded/re-judged), while a freshly
  *      forked arrival (an edit) is gated for the first time there;
- *   4. `streamText` over the full thread history, with inter-token idle
- *      timeout watched by the exchange,
+ *      An arrival the gate fires on the first time it is judged pauses
+ *      instead of exchanging — a new submit, or an edit's fork on retry:
+ *      the user chooses to continue here (a retry, which replays the
+ *      stored fire) or hand it over to a fresh Thread. Every gate pass also kicks off, in the background,
+ *      the Fact capture of segments a Boundary turn has closed,
+ *   4. `streamText` over the full thread history, with the Thread's Seed
+ *      prepended to the system prompt and inter-token idle timeout
+ *      watched by the exchange,
  *   5. `ChatExchange` persists text + usage as the stream settles.
  */
 
@@ -53,12 +69,54 @@ export type ChatStreamHandle = {
    * the advisory bubble signal; null on retries (no new arrival) and when
    * the feature flag is off.
    */
-  threadVerdict?: {
-    messageId: string;
-    verdict: 'muted' | 'pass' | 'fire';
-    fireChannel: 'immediate' | 'slow' | null;
-  };
+  threadVerdict?: ArrivalVerdict;
 };
+
+/** The live gate's judgment of one arrival, as the stream reports it. */
+export interface ArrivalVerdict {
+  messageId: string;
+  verdict: GateVerdict;
+  fireChannel: FireChannel | null;
+}
+
+/**
+ * A submit whose arrival the gate fired on: the user Message is stored,
+ * no Exchange started. It waits for the user to continue in this Thread
+ * or hand it over to a fresh one.
+ */
+export type DriftPause = {
+  paused: true;
+  threadVerdict: ArrivalVerdict & { verdict: 'fire' };
+};
+
+export type ChatSubmission = ChatStreamHandle | DriftPause;
+
+export function isDriftPause(submission: ChatSubmission): submission is DriftPause {
+  return 'paused' in submission;
+}
+
+/** The verdict a gate outcome reports; null when no arrival was judged. */
+function arrivalVerdictOrNull(outcome: LiveArrivalOutcome): ArrivalVerdict | null {
+  if (outcome.verdict === null || outcome.messageId === null) return null;
+  return {
+    messageId: outcome.messageId,
+    verdict: outcome.verdict,
+    fireChannel: outcome.fireChannel,
+  };
+}
+
+/** The pause a gate outcome calls for; null unless it fired on an arrival. */
+function driftPauseOrNull(outcome: LiveArrivalOutcome): DriftPause | null {
+  if (outcome.verdict !== 'fire' || outcome.messageId === null) return null;
+  return {
+    paused: true,
+    threadVerdict: {
+      messageId: outcome.messageId,
+      verdict: 'fire',
+      fireChannel: outcome.fireChannel,
+    },
+  };
+}
 
 type SubmitChatProps = {
   userId: string;
@@ -137,6 +195,7 @@ async function settleCrashedExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
   assistantMessage: (typeof rows)[number],
   assistantIndex: number,
+  systemPrompt: string,
 ): Promise<void> {
   await updateExchangeStatus({ messageId: assistantMessage.id, exchangeStatus: 'interrupted' });
 
@@ -151,7 +210,7 @@ async function settleCrashedExchange(
   }
   const promptTokens = promptRow
     ? estimateChatPromptTokens(
-        SYSTEM_PROMPT,
+        systemPrompt,
         buildModelMessages(rows.slice(0, promptIndex), promptRow),
       )
     : 0;
@@ -173,6 +232,7 @@ async function settleCrashedExchange(
 
 async function guardOrSettleStaleExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
+  scope: { userId: string; threadId: string },
 ): Promise<ResultError | null> {
   let newestAssistantIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -189,8 +249,19 @@ async function guardOrSettleStaleExchange(
     return err('exchange_in_flight', 'An exchange is already running in this thread.');
   }
 
-  await settleCrashedExchange(rows, newestAssistant, newestAssistantIndex);
+  const systemPrompt = await assembledSystemPrompt({ ...scope, basePrompt: SYSTEM_PROMPT });
+  await settleCrashedExchange(rows, newestAssistant, newestAssistantIndex, systemPrompt);
   return null;
+}
+
+/**
+ * A handed-over arrival lives on in its fresh Thread; reviving it in its
+ * old one would put the same message in two Threads.
+ */
+async function handedOverErrorOrNull(userMessage: Message): Promise<ResultError | null> {
+  if (!userMessage.abandoned) return null;
+  if (!(await isHandedOverMessage({ messageId: userMessage.id }))) return null;
+  return err('arrival_handed_over', 'The last message moved to a new chat.');
 }
 
 /** Shared tail of both entry points: assistant row + provider stream. */
@@ -212,13 +283,18 @@ async function startExchange({
 
   const controller = new AbortController();
   const modelMessages = buildModelMessages(precedingRows, userMessage);
+  const systemPrompt = await assembledSystemPrompt({
+    userId,
+    threadId,
+    basePrompt: SYSTEM_PROMPT,
+  });
 
   const exchange = new ChatExchange({
     assistantMessageId: assistantMessage.id,
     model: config.model,
     // If the provider's usage report never arrives, the spend is still
     // accounted from the locally counted input tokens.
-    promptTokensEstimate: estimateChatPromptTokens(SYSTEM_PROMPT, modelMessages),
+    promptTokensEstimate: estimateChatPromptTokens(systemPrompt, modelMessages),
     idleTimeoutMs: config.idleTimeoutMs,
     // Fires on the idle deadline; user stop / client disconnect reuse the controller.
     onIdleTimeout: () => controller.abort(),
@@ -245,7 +321,7 @@ async function startExchange({
 
   const streamResult = streamText({
     model: createModel(config),
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: modelMessages,
     abortSignal: controller.signal,
     maxRetries: 0,
@@ -296,7 +372,7 @@ export async function submitChat({
   userId,
   threadId,
   content,
-}: SubmitChatProps): Promise<Result<ChatStreamHandle>> {
+}: SubmitChatProps): Promise<Result<ChatSubmission>> {
   const contentResult = validateMessageContent(content);
   if (contentResult.type === 'error') return contentResult;
   const normalized = contentResult.data;
@@ -323,8 +399,14 @@ export async function submitChat({
   }
 
   const precedingRows = await listMessagesByThread({ threadId });
-  const inFlight = await guardOrSettleStaleExchange(precedingRows);
+  const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId });
   if (inFlight) return inFlight;
+  if (await pausedArrivalOrNull(precedingRows)) {
+    return err(
+      'arrival_paused',
+      'The last message changed the topic: continue it in this thread or start a new chat from it first.',
+    );
+  }
 
   const userMessage = await insertMessage({ threadId, role: 'user', content: normalized });
 
@@ -334,15 +416,14 @@ export async function submitChat({
   // arrival backfills whatever this run did not finish.
   const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
   if (gate.type === 'error') return gate;
+  void captureClosedSegments({ userId, threadId });
+
+  const pause = driftPauseOrNull(gate.data);
+  if (pause) return ok(pause);
 
   const handle = await startExchange({ userId, threadId, precedingRows, userMessage });
-  if (gate.data.verdict !== null && gate.data.messageId !== null) {
-    handle.threadVerdict = {
-      messageId: gate.data.messageId,
-      verdict: gate.data.verdict,
-      fireChannel: gate.data.fireChannel,
-    };
-  }
+  const verdict = arrivalVerdictOrNull(gate.data);
+  if (verdict) handle.threadVerdict = verdict;
   return ok(handle);
 }
 
@@ -353,12 +434,15 @@ export async function submitChat({
  * debris returns to the live conversation) and flags the stale assistant
  * rows beneath it abandoned in place — the rows stay, their usage keeps
  * tracking what the failed run burned, and the regenerate lands beneath
- * them.
+ * them. A retry replaying an arrival's stored verdict never pauses — that
+ * is how a paused arrival continues in its own Thread. An arrival judged
+ * for the first time here (an edit's fork, or a submit whose gate failed)
+ * pauses on a fire like any fresh arrival.
  */
 export async function retryLastExchange({
   userId,
   threadId,
-}: RetryLastExchangeProps): Promise<Result<ChatStreamHandle>> {
+}: RetryLastExchangeProps): Promise<Result<ChatSubmission>> {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
 
@@ -371,7 +455,7 @@ export async function retryLastExchange({
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
 
-  const inFlight = await guardOrSettleStaleExchange(rows);
+  const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId });
   if (inFlight) return inFlight;
 
   // The target is the newest user turn — revived: an abandoned arrival
@@ -386,6 +470,8 @@ export async function retryLastExchange({
   }
   const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
   if (!userMessage) return err('nothing_to_regenerate');
+  const handedOver = await handedOverErrorOrNull(userMessage);
+  if (handedOver) return handedOver;
 
   await setMessagesAbandoned({ messageIds: [userMessage.id], abandoned: false });
   // Stale answers stay — flagged abandoned with their usage rows intact,
@@ -402,8 +488,16 @@ export async function retryLastExchange({
   // (never re-embedded, never re-judged — cheap and idempotent), while a
   // freshly forked arrival — an edit abandoned the old text there and
   // inserted this row — is gated for the first time here.
+  const judgedBefore = await findSegmentDriftLogByMessageId({
+    messageId: userMessage.id,
+    modelId: EMBEDDING_MODEL_ID,
+  });
   const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
   if (gate.type === 'error') return gate;
+  void captureClosedSegments({ userId, threadId });
+
+  const pause = judgedBefore ? null : driftPauseOrNull(gate.data);
+  if (pause) return ok(pause);
 
   const handle = await startExchange({
     userId,
@@ -411,12 +505,7 @@ export async function retryLastExchange({
     precedingRows: rows.slice(0, userIndex),
     userMessage,
   });
-  if (gate.data.verdict !== null && gate.data.messageId !== null) {
-    handle.threadVerdict = {
-      messageId: gate.data.messageId,
-      verdict: gate.data.verdict,
-      fireChannel: gate.data.fireChannel,
-    };
-  }
+  const verdict = arrivalVerdictOrNull(gate.data);
+  if (verdict) handle.threadVerdict = verdict;
   return ok(handle);
 }

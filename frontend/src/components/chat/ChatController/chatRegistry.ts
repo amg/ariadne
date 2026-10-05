@@ -94,6 +94,22 @@ export function subscribeToThreadChat(threadId: string, listener: ThreadChatList
   };
 }
 
+/**
+ * Asks for the reply to a user message the server already stored as the
+ * thread's newest row (a handed-over arrival). Nothing is sent: a failed
+ * request leaves the message in place, retryable like any failed reply.
+ */
+export function replyToStoredMessage(
+  threadId: string,
+  message: { id: string; content: string },
+): void {
+  const chat = getThreadChat(threadId);
+  chat.messages = [
+    { id: message.id, role: 'user', parts: [{ type: 'text', text: message.content }] },
+  ];
+  void chat.regenerate();
+}
+
 /** Sends a user message and records its draft for failed-submit recovery. */
 export function sendThreadMessage(threadId: string, content: string): void {
   pendingSubmits.set(threadId, content);

@@ -1,3 +1,5 @@
+import type { DriftFireChannel, DriftVerdict } from '@/services/api';
+
 export type UiMessageLike = {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -5,7 +7,10 @@ export type UiMessageLike = {
 };
 
 export type StreamVerdict = {
+  /** The arrival in live chat state (an optimistic id while unsaved). */
   userMessageId: string;
-  verdict: 'muted' | 'pass' | 'fire';
-  fireChannel: 'immediate' | 'slow' | null;
+  /** The arrival's stored id, as the server reported it. */
+  messageId: string | null;
+  verdict: DriftVerdict;
+  fireChannel: DriftFireChannel | null;
 };

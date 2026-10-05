@@ -5,6 +5,7 @@ import { chatStatusText } from '@/services/utils';
 import { ArrowDown, Send, Square } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
+import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
 import type { ChatViewStatus, DisplayRow, RestoredDraft } from './types';
 
@@ -43,6 +44,15 @@ type ChatViewProps = {
   onRetryLast: () => void;
   /** Persists an edit of the thread's last message; rejects empty content. */
   onEditMessage: (messageId: string, content: string) => void;
+  /**
+   * The arrival the gate paused on, waiting for the user to choose where it
+   * continues; null when nothing waits. The input stays locked meanwhile.
+   */
+  pausedMessageId: string | null;
+  /** True while the paused arrival is moving to a fresh chat. */
+  handingOver: boolean;
+  onContinueHere: () => void;
+  onStartNewChat: () => void;
 };
 
 export default function ChatView({
@@ -54,10 +64,15 @@ export default function ChatView({
   onStop,
   onRetryLast,
   onEditMessage,
+  pausedMessageId,
+  handingOver,
+  onContinueHere,
+  onStartNewChat,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === 'submitted' || status === 'streaming';
+  const paused = pausedMessageId !== null;
 
   // The draft never dies on a failed submit: it returns to the input, and
   // recovery is a resend.
@@ -137,7 +152,7 @@ export default function ChatView({
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!input.trim() || busy) return;
+    if (!input.trim() || busy || paused) return;
     onSend(input.trim());
     setInput('');
     // Reset textarea height
@@ -156,7 +171,7 @@ export default function ChatView({
     // Enter alone sends the message
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (!input.trim() || busy) return;
+      if (!input.trim() || busy || paused) return;
       onSend(input.trim());
       setInput('');
       // Reset textarea height
@@ -195,6 +210,13 @@ export default function ChatView({
                     onRetryLast={onRetryLast}
                     onEditMessage={onEditMessage}
                   />
+                  {row.id === pausedMessageId ? (
+                    <DriftChoice
+                      busy={busy || handingOver}
+                      onContinueHere={onContinueHere}
+                      onStartNewChat={onStartNewChat}
+                    />
+                  ) : null}
                 </Fragment>
               );
             })}
@@ -232,7 +254,9 @@ export default function ChatView({
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder="Type your message..."
+            placeholder={
+              paused ? 'Choose where the last message continues first' : 'Type your message...'
+            }
             className="flex-1 resize-none"
             rows={1}
             autoFocus
@@ -242,7 +266,7 @@ export default function ChatView({
               <Square className="h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="icon" disabled={!input.trim()}>
+            <Button type="submit" size="icon" disabled={!input.trim() || paused}>
               <Send className="h-4 w-4" />
             </Button>
           )}
