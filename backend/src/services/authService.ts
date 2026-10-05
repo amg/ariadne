@@ -17,7 +17,6 @@ export function initAuth() {
   }
 
   supertokens.init({
-    debug: true,
     framework: 'fastify',
     supertokens: supertokensConfig,
     appInfo: {
