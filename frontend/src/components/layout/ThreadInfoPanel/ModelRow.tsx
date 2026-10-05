@@ -9,6 +9,7 @@ const ROLE_LABELS: Record<ModelRole, string> = {
   embedding: 'Embedding',
   rewrite: 'Rewrite',
   judge: 'Judgement',
+  memory: 'Memory',
 };
 
 /** One model card: role labels, model id, pricing. */

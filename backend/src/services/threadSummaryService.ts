@@ -10,7 +10,7 @@ import { type ModelConfigRow, getModelConfig } from './modelConfigService';
 const round10 = (value: number): number => Number(value.toFixed(10));
 
 /** A pipeline role a model serves in a thread's spend. */
-export type ThreadModelRole = 'chat' | 'embedding' | 'rewrite' | 'judge';
+export type ThreadModelRole = 'chat' | 'embedding' | 'rewrite' | 'judge' | 'memory';
 
 /** Pricing for one model; null when the model has no known pricing. */
 export type ModelPricing = {
@@ -37,13 +37,15 @@ export interface ThreadSummary {
   cachedCostUsd: string;
   /**
    * Composition of `totalCostUsd`: the chat exchanges' spend plus the
-   * analyzer pipeline's embedding, rewrite, and judge spend.
+   * analyzer pipeline's embedding, rewrite, and judge spend, plus the Fact
+   * capture spend.
    */
   costBreakdown: {
     chat: string;
     embedding: string;
     rewrite: string;
     judge: string;
+    memory: string;
   };
   totalTokens: {
     prompt: number;
@@ -206,6 +208,7 @@ export async function getThreadSummary(args: {
         embedding: '0.0000000000',
         rewrite: '0.0000000000',
         judge: '0.0000000000',
+        memory: '0.0000000000',
       },
       totalTokens: { prompt: 0, completion: 0, cached: 0, reasoning: 0, total: 0 },
       primaryModel: null,
@@ -220,12 +223,15 @@ export async function getThreadSummary(args: {
   const primaryModel = findPrimaryModel(stats.modelCounts);
 
   // The thread's full spend: the chat exchanges' usage rows plus the
-  // arrival pipeline's embedding, rewrite, and judge spend.
+  // arrival pipeline's embedding, rewrite, and judge spend, plus Fact capture.
   const spendTotals = await sumThreadSpend({ threadId });
   const embeddingCost = round10(Number.parseFloat(spendTotals.embedding));
   const rewriteCost = round10(Number.parseFloat(spendTotals.rewrite));
   const judgeCost = round10(Number.parseFloat(spendTotals.judge));
-  const grandTotalCost = round10(stats.totalCost + embeddingCost + rewriteCost + judgeCost);
+  const memoryCost = round10(Number.parseFloat(spendTotals.memory));
+  const grandTotalCost = round10(
+    stats.totalCost + embeddingCost + rewriteCost + judgeCost + memoryCost,
+  );
 
   // Get context window, pricing, and cached rate from DB cache (or fallback)
   const loadConfig = createConfigLoader();
@@ -253,6 +259,7 @@ export async function getThreadSummary(args: {
       { role: 'embedding', modelId: embeddingCost > 0 ? EMBEDDING_MODEL_ID : null },
       { role: 'rewrite', modelId: rewriteCost > 0 ? env.REWRITE_MODEL : null },
       { role: 'judge', modelId: judgeCost > 0 ? env.JUDGE_MODEL : null },
+      { role: 'memory', modelId: memoryCost > 0 ? env.MEMORY_MODEL : null },
     ],
     loadConfig,
   );
@@ -273,6 +280,7 @@ export async function getThreadSummary(args: {
       embedding: embeddingCost.toFixed(10),
       rewrite: rewriteCost.toFixed(10),
       judge: judgeCost.toFixed(10),
+      memory: memoryCost.toFixed(10),
     },
     totalTokens: {
       prompt: stats.totalPrompt,

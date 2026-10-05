@@ -22,6 +22,11 @@ export const ANALYZER_COST_ROWS = [
     label: 'Judgement',
     title: 'Thread analyzer: classifying context dependence',
   },
+  {
+    field: 'memory',
+    label: 'Memory',
+    title: 'User memory: capturing facts when a topic segment closes',
+  },
 ] as const;
 
 type CostRow = typeof CHAT_COST_ROW | (typeof ANALYZER_COST_ROWS)[number];

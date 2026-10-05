@@ -11,7 +11,8 @@ export function CostBreakdown({ breakdown }: { breakdown: ThreadSummary['costBre
     Number.parseFloat(breakdown.chat) +
     Number.parseFloat(breakdown.embedding) +
     Number.parseFloat(breakdown.rewrite) +
-    Number.parseFloat(breakdown.judge);
+    Number.parseFloat(breakdown.judge) +
+    Number.parseFloat(breakdown.memory);
 
   return (
     <div className="mt-2 border-t pt-2 text-xs">

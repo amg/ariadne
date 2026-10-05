@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
-import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
+import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -54,6 +54,7 @@ describe('getThreadSummary', () => {
       embedding: '0.0000000000',
       rewrite: '0.0000000000',
       judge: '0.0000000000',
+      memory: '0.0000000000',
     });
     expect(summary?.models).toEqual([]);
   });
@@ -75,13 +76,13 @@ describe('getThreadSummary', () => {
       modelId: EMBEDDING_MODEL_ID,
       embeddingCostUsd: 0.00000001,
     });
-    await upsertExpansionCost({
+    await upsertSideCost({
       messageId: userMessage.id,
       kind: 'rewrite',
       model: env.REWRITE_MODEL,
       costUsd: '0.0000002000',
     });
-    await upsertExpansionCost({
+    await upsertSideCost({
       messageId: userMessage.id,
       kind: 'judge',
       model: env.REWRITE_MODEL,
@@ -97,6 +98,7 @@ describe('getThreadSummary', () => {
       embedding: '0.0000000100',
       rewrite: '0.0000002000',
       judge: '0.0000003000',
+      memory: '0.0000000000',
     });
     // One entry per distinct model, roles grouped; rewrite and judge share
     // a model id, so they collapse into a single entry.
@@ -105,6 +107,29 @@ describe('getThreadSummary', () => {
       { modelId: EMBEDDING_MODEL_ID, roles: ['embedding'], pricing: null },
       { modelId: env.REWRITE_MODEL, roles: ['rewrite', 'judge'], pricing: null },
     ]);
+  });
+
+  it('adds Fact capture spend to the total as its own memory line', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addChatExchange(threadId, '0.0000052500');
+    const boundary = await insertMessage({ threadId, role: 'user', content: 'new topic' });
+    await upsertSideCost({
+      messageId: boundary.id,
+      kind: 'fact_extraction',
+      model: env.MEMORY_MODEL,
+      costUsd: '0.0000004000',
+    });
+    await upsertSideCost({
+      messageId: boundary.id,
+      kind: 'fact_duplicate_check',
+      model: env.MEMORY_MODEL,
+      costUsd: '0.0000001000',
+    });
+
+    const summary = await getThreadSummary({ userId, threadId });
+    expect(summary?.totalCostUsd).toBe('0.0000057500');
+    expect(summary?.costBreakdown.memory).toBe('0.0000005000');
+    expect(summary?.models.some((model) => model.roles.includes('memory'))).toBe(true);
   });
 
   it('total equals chat cost alone when the analyzer recorded nothing', async () => {
