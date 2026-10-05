@@ -25,12 +25,14 @@ memory on or off and block categories, without touching the API.
      (`{ content }` or `{ suppressed }`), and `DELETE /api/memory/facts/:id`.
      All are user-scoped.
 2. **Settings page** (`/settings`): a memory on/off switch and checkboxes
-   for the blocked categories, backed by the existing settings API.
+   for the blocked categories, backed by the existing settings API. There
+   is no delete-everything control here — "stop remembering" is ticket 010.
 
 ## Open points
 
 - Seeds already frozen keep a Fact that is later edited, suppressed, or
-  deleted until that Thread ends. Decide whether a delete should also
-  invalidate the Seeds that hold the Fact, or whether that waits for the
-  seed refresh policy. Blocking a category is already handled: Seed lines
-  keep their category, and blocked ones are skipped.
+  deleted until that Thread ends. That is the shipping behaviour of
+  phase 2; whether a delete should also strip the Fact out of frozen
+  Seeds is decided together with the purge in ticket 010. Blocking a
+  category is already handled: Seed lines keep their category and
+  blocked ones are skipped at assembly.
