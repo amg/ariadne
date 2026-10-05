@@ -4,7 +4,9 @@ import type { FactCategory } from '@db/types';
 export interface SeedableUserFact {
   content: string;
   category: FactCategory;
-  validAt: Date;
+  validAt: Date | null;
+  /** When the Fact was noted — the fallback date in Seed lines. */
+  createdAt: Date;
 }
 
 type ListSeedableUserFactsProps = {
@@ -16,7 +18,8 @@ type ListSeedableUserFactsProps = {
 
 /**
  * The user's current, unsuppressed Facts outside the blocked categories,
- * the most recently true first.
+ * newest first by stated date, or by when they were noted when no date
+ * was stated.
  */
 export async function listSeedableUserFacts({
   userId,
@@ -25,7 +28,7 @@ export async function listSeedableUserFacts({
 }: ListSeedableUserFactsProps): Promise<SeedableUserFact[]> {
   let query = db
     .selectFrom('userFacts')
-    .select(['content', 'category', 'validAt'])
+    .select(['content', 'category', 'validAt', 'createdAt'])
     .where('userId', '=', userId)
     .where('invalidAt', 'is', null)
     .where('suppressed', '=', false);
@@ -33,7 +36,7 @@ export async function listSeedableUserFacts({
     query = query.where('category', 'not in', [...blockedCategories]);
   }
   return query
-    .orderBy('validAt', 'desc')
+    .orderBy((eb) => eb.fn.coalesce('validAt', 'createdAt'), 'desc')
     .orderBy('createdAt', 'desc')
     .orderBy('id', 'asc')
     .limit(limit)

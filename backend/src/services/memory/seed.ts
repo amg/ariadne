@@ -14,7 +14,7 @@ export const SEED_TOKEN_BUDGET = 800;
 const SEED_CANDIDATE_LIMIT = 200;
 
 const SEED_HEADER =
-  'What you know about the user from earlier conversations. Each fact carries the date it became true; when two facts disagree, the more recent one wins. The list may be incomplete. Use these facts when they help, without mentioning that you remember them.';
+  'What you know about the user from earlier conversations, newest first. A date before a fact is when it became true, or when it was noted if no such date is known; when two facts disagree, the newer one wins. The list may be incomplete. Use these facts when they help, without mentioning that you remember them.';
 
 export interface RenderedSeed {
   lines: SeedLine[];
@@ -22,9 +22,10 @@ export interface RenderedSeed {
 }
 
 /**
- * The lines of a Seed: a dated bullet per Fact, in the order given,
- * stopping before the token budget (header included) is exceeded. Null
- * when no Fact fits.
+ * The lines of a Seed: a bullet per Fact, dated by its stated date, or by
+ * when it was noted when none was stated, in the order given, stopping
+ * before the token budget (header included) is exceeded. Null when no
+ * Fact fits.
  */
 export function renderedSeedOrNull(
   facts: SeedableUserFact[],
@@ -33,7 +34,8 @@ export function renderedSeedOrNull(
   const lines: SeedLine[] = [];
   let tokens = countTextTokens(SEED_HEADER);
   for (const fact of facts) {
-    const text = `- ${fact.validAt.toISOString().slice(0, 10)}: ${fact.content}`;
+    const date = (fact.validAt ?? fact.createdAt).toISOString().slice(0, 10);
+    const text = `- ${date}: ${fact.content}`;
     const lineTokens = countTextTokens(text) + 1;
     if (tokens + lineTokens > tokenBudget) break;
     tokens += lineTokens;

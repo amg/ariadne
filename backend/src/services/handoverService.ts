@@ -36,9 +36,11 @@ type HandOverArrivalProps = {
 
 /**
  * Moves a paused arrival out of its Thread into a fresh one. The Facts of
- * the segment it closed are captured first, so the fresh Thread's Seed
- * already knows them. That capture is best-effort: when it fails or runs
- * past the time limit, the move goes ahead without it. The move itself is one transaction: the arrival is
+ * the segment it closed are captured before the move so the fresh Thread's
+ * Seed already knows them, but that capture gets a time limit: when it
+ * stalls, the move goes ahead and a background pass keeps retrying the
+ * capture afterwards, so the Facts land as soon as the model answers even
+ * though the Seed sailed without them. The move itself is one transaction: the arrival is
  * abandoned in place, and the fresh Thread opens with its Seed and the
  * arrival as its stored first message, still awaiting its reply. Either
  * all of that happens or none of it, and only one handover can win.
@@ -56,6 +58,9 @@ export async function handOverArrival({
     return err('arrival_not_paused', 'Only the paused last message can start a new chat.');
   }
 
+  // The handover tries to wait the closed segment's capture out; when it
+  // stalls past the limit, the move still goes and a background pass
+  // keeps retrying the capture — the segment stays owed until it settles.
   await settledWithin(captureClosedSegments({ userId, threadId }), CAPTURE_WAIT_MS);
   const moved = await moveArrivalToFreshThreadOrNull({
     userId,
@@ -66,5 +71,6 @@ export async function handOverArrival({
   if (!moved) {
     return err('arrival_not_paused', 'The message was already answered or moved.');
   }
+  void captureClosedSegments({ userId, threadId });
   return ok(moved);
 }

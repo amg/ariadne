@@ -27,6 +27,12 @@ type CaptureFactsProps = {
   blockedCategories: readonly FactCategory[];
   /** The message the capture's spend is recorded against. */
   spendMessageId: string;
+  /**
+   * The segment's `captured_through_at` pointer: Turns at or before it have
+   * already been captured, and go to the model only as context. Null on a
+   * first pass, when every Turn is new.
+   */
+  capturedThroughAt: Date | null;
 };
 
 export interface CaptureFactsOutcome {
@@ -157,16 +163,17 @@ async function storeCandidate(input: {
     embedding: embedded.data.embedding,
     modelId: EMBEDDING_MODEL_ID,
     sourceMessageId: sourceTurn?.userMessage.id ?? null,
-    validAt: candidate.validAt ?? sourceTurn?.userMessage.createdAt ?? new Date(),
+    validAt: candidate.validAt,
   });
   return ok(true);
 }
 
 /**
- * Captures Facts about the user from an ordered run of Turns: extracts
- * candidates, drops blocked categories, and stores each candidate the
- * Memory does not already know. Spend is recorded even when the run fails
- * part-way, an unreadable extraction reply included; Facts stored before a failure stay, and a repeated run finds
+ * Captures Facts about the user from an ordered run of Turns, extracting
+ * only the ones newer than the segment's pointer (earlier turns ride along
+ * as context): drops blocked categories, skips what the Memory already
+ * knows, stores the rest. Spend is recorded even when the run fails
+ * part-way; Rows stored before a failure stay, and a repeated read finds
  * them known.
  */
 export async function captureFacts({
@@ -174,9 +181,18 @@ export async function captureFacts({
   turns,
   blockedCategories,
   spendMessageId,
+  capturedThroughAt,
 }: CaptureFactsProps): Promise<Result<CaptureFactsOutcome>> {
   const outcome: CaptureFactsOutcome = { added: 0, skippedAsDuplicate: 0 };
   if (turns.length === 0) return ok(outcome);
+
+  // Turns through the pointer are context; anything after is new.
+  const contextCount =
+    capturedThroughAt === null
+      ? 0
+      : turns.filter((turn) => turn.userMessage.createdAt.getTime() <= capturedThroughAt.getTime())
+          .length;
+  if (contextCount === turns.length) return ok(outcome);
 
   const spend = emptySpend();
   try {
@@ -186,6 +202,7 @@ export async function captureFacts({
         userText: turn.userMessage.content.slice(0, MAX_USER_CHARS),
         assistantText: turn.assistantReply?.content.slice(0, MAX_ASSISTANT_CHARS) ?? null,
       })),
+      contextCount,
       blockedCategories,
     });
     if (extracted.type === 'error') return extracted;
@@ -200,7 +217,10 @@ export async function captureFacts({
       return err('fact_extraction_unreadable', 'The extraction reply carried no readable facts.');
     }
     const allowed = extracted.data.candidates.filter(
-      (candidate) => !blockedCategories.includes(candidate.category),
+      // Only facts from the new Turns count; whatever the model pulls out
+      // of context turns is already captured (or edited away).
+      (candidate) =>
+        candidate.turnIndex >= contextCount && !blockedCategories.includes(candidate.category),
     );
     for (const candidate of allowed) {
       const stored = await storeCandidate({ userId, candidate, turns, spend });

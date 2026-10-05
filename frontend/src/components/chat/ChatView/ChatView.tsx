@@ -43,7 +43,7 @@ type ChatViewProps = {
   /** Regenerates the last exchange server-side (works on stuck/failed replies). */
   onRetryLast: () => void;
   /** Persists an edit of the thread's last message; rejects empty content. */
-  onEditMessage: (messageId: string, content: string) => void;
+  onEditMessage: (messageId: string, content: string) => Promise<boolean>;
   /**
    * The arrival the gate paused on, waiting for the user to choose where it
    * continues; null when nothing waits. The input stays locked meanwhile.
@@ -213,6 +213,7 @@ export default function ChatView({
                   {row.id === pausedMessageId ? (
                     <DriftChoice
                       busy={busy || handingOver}
+                      handingOver={handingOver}
                       onContinueHere={onContinueHere}
                       onStartNewChat={onStartNewChat}
                     />

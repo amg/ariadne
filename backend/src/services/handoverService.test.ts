@@ -11,7 +11,7 @@ import {
   submitChat,
 } from '@services/aiService';
 import { handOverArrival } from '@services/handoverService';
-import { assembledSystemPrompt } from '@services/memory';
+import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
 import { editMessage } from '@services/messageService';
 import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
@@ -206,16 +206,71 @@ describe('handOverArrival', () => {
     expect(seeds).toHaveLength(1);
   });
 
-  it('never revives a handed-over arrival in its old thread, nor offers it as a draft', async () => {
+  it('retries the last live turn without reviving the handed-over arrival or offering it as a draft', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
     await handOverArrival({ userId, threadId, messageId: pausedMessageId });
 
     const retried = await retryLastExchange({ userId, threadId });
+    if (retried.type !== 'success' || isDriftPause(retried.data)) {
+      throw new Error('the last live turn must exchange');
+    }
+    await drain(retried.data);
 
-    expect(retried).toMatchObject({ type: 'error', code: 'arrival_handed_over' });
     expect(await findResumeDraft({ threadId })).toBeUndefined();
     const oldRows = await listMessagesByThread({ threadId });
     expect(oldRows.find((row) => row.id === pausedMessageId)?.abandoned).toBe(true);
+    expect(oldRows.filter((row) => !row.abandoned).map((row) => row.content)).toEqual([
+      'I love hiking in the Alps',
+      expect.any(String),
+    ]);
+  });
+
+  it('still lets the old thread edit its last live prompt and exchange the fork', async () => {
+    const { userId, threadId, pausedMessageId } = await pausedThread();
+    await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    const opening = (await listMessagesByThread({ threadId })).find(
+      (row) => row.role === 'user' && !row.abandoned,
+    );
+    if (!opening) throw new Error('the opening prompt must stay live');
+
+    const fork = await editMessage({
+      userId,
+      threadId,
+      messageId: opening.id,
+      content: 'I love hiking in the Alps.',
+    });
+    expect(fork).toMatchObject({
+      type: 'success',
+      data: { content: 'I love hiking in the Alps.' },
+    });
+
+    const retried = await retryLastExchange({ userId, threadId });
+    if (retried.type !== 'success' || isDriftPause(retried.data)) {
+      throw new Error('the fork must exchange');
+    }
+    await drain(retried.data);
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.find((row) => row.id === pausedMessageId)?.abandoned).toBe(true);
+    expect(rows.filter((row) => !row.abandoned).map((row) => row.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
+  });
+
+  it('LOOP-dob7: captures the closed segment later when the handover capture failed', async () => {
+    const { userId, threadId, pausedMessageId } = await pausedThread();
+    mock.memory.failExtractions();
+    await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    mock.memory.clearFailures();
+
+    await captureClosedSegments({ userId, threadId });
+
+    const facts = await db
+      .selectFrom('userFacts')
+      .select('content')
+      .where('userId', '=', userId)
+      .execute();
+    expect(facts.map((fact) => fact.content)).toContain('The user loves hiking in the Alps.');
   });
 
   it('refuses a message that is not a paused arrival', async () => {

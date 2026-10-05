@@ -9,7 +9,13 @@ import { setupConfigRoute } from '@routes/config';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
 import { setupModelsRefreshRoute } from '@routes/models';
-import { setupSettingsGetRoute, setupSettingsPatchRoute } from '@routes/settings';
+import {
+  setupMemoryFactsDeleteRoute,
+  setupMemoryFactsGetRoute,
+  setupMemoryFactsPatchRoute,
+  setupSettingsGetRoute,
+  setupSettingsPatchRoute,
+} from '@routes/settings';
 import {
   setupThreadAnalysisRoute,
   setupThreadDraftRoute,
@@ -107,6 +113,9 @@ setupThreadDraftRoute(app);
 setupThreadHandoverRoute(app);
 setupSettingsGetRoute(app);
 setupSettingsPatchRoute(app);
+setupMemoryFactsGetRoute(app);
+setupMemoryFactsPatchRoute(app);
+setupMemoryFactsDeleteRoute(app);
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';

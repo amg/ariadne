@@ -14,6 +14,7 @@ export interface Database {
   messageSideCosts: MessageSideCostsTable;
   messageEmbeddings: MessageEmbeddingsTable;
   threadSegments: ThreadSegmentsTable;
+  memoryCaptureProgress: MemoryCaptureProgressTable;
   segmentDriftLogs: SegmentDriftLogsTable;
   modelConfigs: ModelConfigsTable;
   userFacts: UserFactsTable;
@@ -177,13 +178,19 @@ export interface ThreadSegmentsTable {
   startMessageId: string; // UUID FK -> messages.id (first user Message of the segment)
   /** Provenance of the reading that cut this segment — the embedding model. */
   modelId: string;
-  /**
-   * Set once the segment's Fact capture settled — extracted, or skipped
-   * because memory was off. Null while the segment is open or its capture
-   * is still owed.
-   */
-  factsCapturedAt: Generated<Date | null>;
   createdAt: Generated<Date>;
+}
+
+/**
+ * How far Fact capture has read a segment — Memory's own bookkeeping,
+ * kept out of the segmentation table. One row per segment that capture
+ * has taken in at least once.
+ */
+export interface MemoryCaptureProgressTable {
+  segmentId: string; // UUID PK, FK -> thread_segments.id (cascade)
+  /** `created_at` of the last Turn a capture pass read. */
+  capturedThroughAt: Date;
+  updatedAt: Generated<Date>;
 }
 
 /**
@@ -256,13 +263,13 @@ export interface UserFactsTable {
   modelId: string;
   /** The user Message of the Turn the Fact came from; null once its Thread is gone. */
   sourceMessageId: string | null;
-  /** When the Fact became true in the user's life. */
-  validAt: Date;
+  /** When the Fact became true, as the conversation states it; null when it states none. */
+  validAt: Date | null;
   /** When the Fact stopped being current; null while it is. */
   invalidAt: Date | null;
   /** Kept in the store but never injected into a Seed. */
   suppressed: Generated<boolean>;
-  /** Extraction time. */
+  /** When the Fact was noted: its capture, or the edit that replaced an older row. */
   createdAt: Generated<Date>;
 }
 
@@ -368,7 +375,9 @@ export type NewUserFact = {
   embedding: number[];
   modelId: string;
   sourceMessageId: string | null;
-  validAt: Date;
+  validAt: Date | null;
+  /** Defaults to false. */
+  suppressed?: boolean;
 };
 
 export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;

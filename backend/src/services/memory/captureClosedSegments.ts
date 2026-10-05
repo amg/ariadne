@@ -1,24 +1,24 @@
-import type { Message } from '@db/types';
+import type { FactCategory, Message } from '@db/types';
+import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import { listUncapturedClosedSegments } from '@queries/threadSegments/listUncapturedClosedSegments';
-import { markSegmentFactsCaptured } from '@queries/threadSegments/markSegmentFactsCaptured';
-import { reopenSegmentsOfAbandonedClosers } from '@queries/threadSegments/reopenSegmentsOfAbandonedClosers';
+import type { SegmentNeedingCapture } from '@queries/threadSegments/listSegmentsNeedingCapture';
+import { listSegmentsNeedingCapture } from '@queries/threadSegments/listSegmentsNeedingCapture';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
 import { type CaptureTurn, captureFacts } from './captureFacts';
 
 /**
- * The live Turns of a closed segment: from its first user Message up to,
- * not including, the Boundary arrival that closed it. Abandoned rows and
+ * The live Turns of a segment up to the row that settles it: from its first
+ * user Message up to, not including, the settle row. Abandoned rows and
  * empty replies stay out.
  */
 export function segmentTurns(
   rows: Message[],
   startMessageId: string,
-  closingMessageId: string,
+  settleMessageId: string,
 ): CaptureTurn[] {
   const start = rows.findIndex((row) => row.id === startMessageId);
-  const end = rows.findIndex((row) => row.id === closingMessageId);
+  const end = rows.findIndex((row) => row.id === settleMessageId);
   if (start < 0 || end <= start) return [];
 
   const live = rows.slice(start, end).filter((row) => !row.abandoned);
@@ -33,57 +33,85 @@ export function segmentTurns(
   return turns;
 }
 
+/** One in-flight capture per thread; later passes within it queue up. */
+const pool: { threadId: string; done: Promise<void> }[] = [];
+
+/**
+ * Resolves once the captures in flight for a Thread settle. With no Thread
+ * given, settles every capture anywhere — what the test harness waits on.
+ */
+export function capturesSettled(threadId?: string): Promise<void> {
+  const pending = pool.filter((entry) => threadId === undefined || entry.threadId === threadId);
+  return Promise.allSettled(pending.map((entry) => entry.done)).then(() => undefined);
+}
+
+type SegmentToSettle = SegmentNeedingCapture & {
+  userId: string;
+  blockedCategories: readonly FactCategory[];
+  turns: CaptureTurn[];
+};
+
+async function settleSegment(segment: SegmentToSettle): Promise<void> {
+  const captured = await captureFacts({
+    userId: segment.userId,
+    turns: segment.turns,
+    blockedCategories: segment.blockedCategories,
+    spendMessageId: segment.anchorMessageId,
+    capturedThroughAt: segment.capturedThroughAt,
+  });
+  if (captured.type === 'error') {
+    // The pointer stays put, so the next pass retries just the Turns after it.
+    console.error(
+      `[captureClosedSegments] segment ${segment.segmentId} capture failed: ${captured.code}${
+        captured.message ? `: ${captured.message}` : ''
+      }`,
+    );
+    return;
+  }
+  await upsertCaptureProgress({ segmentId: segment.segmentId, throughAt: segment.anchorAt });
+  if (captured.data.added > 0) {
+    const extra =
+      captured.data.skippedAsDuplicate > 0
+        ? ` (+${captured.data.skippedAsDuplicate} duplicates skipped)`
+        : '';
+    console.log(
+      `[captureClosedSegments] segment ${segment.segmentId}: ${captured.data.added} Fact(s)${extra}`,
+    );
+  }
+}
+
 async function captureOwedSegments(userId: string, threadId: string): Promise<void> {
-  // An edit or a handover can abandon the arrival that closed a captured
-  // segment, which reopens it: capture is owed again once it next closes.
-  await reopenSegmentsOfAbandonedClosers({ threadId, modelId: EMBEDDING_MODEL_ID });
-  const owed = await listUncapturedClosedSegments({ threadId, modelId: EMBEDDING_MODEL_ID });
+  const owed = await listSegmentsNeedingCapture({ threadId, modelId: EMBEDDING_MODEL_ID });
   if (owed.length === 0) return;
 
   const settings = await getUserSettings({ userId });
   if (!settings.memoryEnabled) {
-    // Memory off means nothing is gathered — not deferred until it turns on.
-    for (const segment of owed) await markSegmentFactsCaptured({ segmentId: segment.segmentId });
+    // Memory off means nothing is gathered — not deferred until it turns on:
+    // the pointer jumps to each segment's settle row.
+    for (const segment of owed) {
+      await upsertCaptureProgress({
+        segmentId: segment.segmentId,
+        throughAt: segment.anchorAt,
+      });
+    }
     return;
   }
 
   const rows = await listMessagesByThread({ threadId });
   for (const segment of owed) {
-    const captured = await captureFacts({
+    await settleSegment({
       userId,
-      turns: segmentTurns(rows, segment.startMessageId, segment.closingMessageId),
       blockedCategories: settings.memoryBlockedCategories,
-      spendMessageId: segment.closingMessageId,
+      ...segment,
+      turns: segmentTurns(rows, segment.startMessageId, segment.anchorMessageId),
     });
-    if (captured.type === 'error') {
-      // Left owed: the next pass over this thread retries it.
-      console.error(
-        `[captureClosedSegments] segment ${segment.segmentId} capture failed:`,
-        captured.code,
-        captured.message,
-      );
-      return;
-    }
-    await markSegmentFactsCaptured({ segmentId: segment.segmentId });
   }
 }
 
-const runsByThread = new Map<string, Promise<void>>();
-
 /**
- * Resolves once every capture running or queued right now has finished,
- * so a shutdown (or a test resetting the database) does not cut one off.
- */
-export async function capturesSettled(): Promise<void> {
-  await Promise.all(runsByThread.values());
-}
-
-/**
- * Captures Facts from every segment of the thread a Boundary turn has
- * closed and whose capture is still owed. Never rejects: a failed segment
- * stays owed and the next call retries it. Calls on one thread run one
- * after another, so a caller awaiting this also waits out a capture that
- * is already running.
+ * Runs one capture pass over a thread's live chain. Each pass is a separate
+ * promise; overlapping passes on the same thread read the same state and
+ * guard their pointer writes, so they do no more than re-check each other.
  */
 export function captureClosedSegments({
   userId,
@@ -92,15 +120,11 @@ export function captureClosedSegments({
   userId: string;
   threadId: string;
 }): Promise<void> {
-  const previous = runsByThread.get(threadId) ?? Promise.resolve();
-  const run = previous
-    .then(() => captureOwedSegments(userId, threadId))
-    .catch((error: unknown) => {
-      console.error('[captureClosedSegments] capture pass failed:', error);
-    });
-  runsByThread.set(threadId, run);
-  void run.finally(() => {
-    if (runsByThread.get(threadId) === run) runsByThread.delete(threadId);
+  const entry = { threadId, done: captureOwedSegments(userId, threadId) };
+  pool.push(entry);
+  entry.done.finally(() => {
+    const index = pool.indexOf(entry);
+    if (index >= 0) pool.splice(index, 1);
   });
-  return run;
+  return entry.done;
 }

@@ -202,6 +202,8 @@ function AppLayoutComponent() {
           }
           pendingRename={pendingRename}
           onAbout={() => navigate('/about')}
+          onMemory={() => navigate('/memory')}
+          onSettings={() => navigate('/settings')}
         />
       }
       infoPanel={

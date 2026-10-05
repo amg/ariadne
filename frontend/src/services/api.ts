@@ -261,7 +261,10 @@ export async function updateMessage(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
   });
-  if (!res.ok) throw new Error(`Failed to update message: ${res.statusText}`);
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update message');
+  }
   return res.json();
 }
 
@@ -352,4 +355,87 @@ export async function refreshModelPricing(): Promise<{
     };
   }
   return data;
+}
+
+// ── Memory API ─────────────────────────────────────────────────────────────
+
+export const FACT_CATEGORIES = [
+  'preferences',
+  'interests',
+  'goals',
+  'relationships',
+  'work',
+  'location',
+  'credentials',
+  'other',
+] as const;
+
+export interface UserFact {
+  id: string;
+  content: string;
+  category: string;
+  subject: string | null;
+  predicate: string | null;
+  object: string | null;
+  modelId: string;
+  sourceMessageId: string | null;
+  /** When the Fact became true, as stated in conversation; null when never stated. */
+  validAt: string | null;
+  invalidAt: string | null;
+  suppressed: boolean;
+  createdAt: string;
+}
+
+export interface UserSettings {
+  memoryEnabled: boolean;
+  memoryBlockedCategories: string[];
+}
+
+export async function fetchUserFacts(): Promise<UserFact[]> {
+  const res = await fetch('/api/memory/facts');
+  if (!res.ok) throw new Error(`Failed to fetch user facts: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateUserFact(
+  factId: string,
+  patch: { content?: string } | { suppressed: boolean },
+): Promise<UserFact> {
+  const res = await fetch(`/api/memory/facts/${factId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update fact');
+  }
+  return res.json();
+}
+
+export async function deleteUserFact(factId: string): Promise<void> {
+  const res = await fetch(`/api/memory/facts/${factId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to delete fact');
+  }
+}
+
+export async function fetchUserSettings(): Promise<UserSettings> {
+  const res = await fetch('/api/settings');
+  if (!res.ok) throw new Error(`Failed to fetch user settings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateUserSettings(patch: Partial<UserSettings>): Promise<UserSettings> {
+  const res = await fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update settings');
+  }
+  return res.json();
 }

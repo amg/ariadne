@@ -5,6 +5,8 @@ import { action as renameThreadAction } from '@/actions/threads/renameThread';
 import AboutPage from '@/pages/AboutPage';
 import AppLayout, { loader as rootLoader } from '@/pages/AppLayout';
 import EmptyPage from '@/pages/EmptyPage';
+import MemoryScreen from '@/pages/MemoryScreen';
+import SettingsPage from '@/pages/SettingsPage';
 import { fetchThreads } from '@/services/api';
 import { createBrowserRouter, redirect } from 'react-router';
 import { EmailPasswordPreBuiltUI } from 'supertokens-auth-react/recipe/emailpassword/prebuiltui';
@@ -30,8 +32,10 @@ export const router = createBrowserRouter([
           return threads.length > 0 ? redirect(`/threads/${threads[0].id}`) : null;
         },
       },
-      // Static page — no loader; a route only gets data from its own module.
+      // Static pages — no loader; a route only gets data from its own module.
       { path: 'about', Component: AboutPage },
+      { path: 'memory', Component: MemoryScreen },
+      { path: 'settings', Component: SettingsPage },
       { path: 'threads/new', action: newThreadAction },
       // Action-only route, same pattern as above.
       { path: 'threads/:threadId/rename', action: renameThreadAction },

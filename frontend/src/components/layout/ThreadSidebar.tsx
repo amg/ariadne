@@ -8,7 +8,17 @@ import {
 import { Input } from '@/components/ui/input';
 import type { Thread } from '@/services/api';
 import { DEFAULT_THREAD_TITLE, TITLE_GENERATING_SENTINEL } from '@/services/api';
-import { Ellipsis, Info, LogOut, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  Ellipsis,
+  Info,
+  LogOut,
+  MemoryStick,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Settings,
+  Trash2,
+} from 'lucide-react';
 import { useState } from 'react';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
@@ -18,6 +28,8 @@ type Props = {
   onSelectThread: (id: string) => void;
   onNewChat: () => void;
   onAbout: () => void;
+  onMemory: () => void;
+  onSettings: () => void;
   /** Persists a rename; blank drafts are filtered before calling this. */
   onRename: (id: string, title: string) => void;
   /** Permanently deletes a thread (messages go with it). */
@@ -34,6 +46,8 @@ export default function ThreadSidebar({
   onSelectThread,
   onNewChat,
   onAbout,
+  onMemory,
+  onSettings,
   onRename,
   onDelete,
   onRegenerateTitle,
@@ -152,6 +166,22 @@ export default function ThreadSidebar({
         })}
       </div>
       <div className="mt-auto flex flex-col gap-1 border-t p-2">
+        <button
+          type="button"
+          onClick={onMemory}
+          className="flex items-center gap-2 rounded px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          <MemoryStick className="h-4 w-4" />
+          Memory
+        </button>
+        <button
+          type="button"
+          onClick={onSettings}
+          className="flex items-center gap-2 rounded px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          <Settings className="h-4 w-4" />
+          Settings
+        </button>
         <button
           type="button"
           onClick={onAbout}

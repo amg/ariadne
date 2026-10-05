@@ -38,7 +38,7 @@ export type MockInferenceServer = {
   rewrites: MockRewritesControl;
   /** Test hooks for judge calls (expansion trigger backstop). */
   judges: MockJudgesControl;
-  /** Test hooks for the memory pipeline's extraction and duplicate-check calls. */
+  /** Test hooks for the memory pipeline's extraction, duplicate-check and classification calls. */
   memory: MockMemoryControl;
 };
 
@@ -87,7 +87,11 @@ export type MockMemoryControl = {
   forceExtraction: (text: string | null) => void;
   /** Fail every extraction request with a 500. */
   failExtractions: () => void;
-  /** Stop failing extraction requests. */
+  /** Total classification requests received (failed ones included). */
+  classificationCount: () => number;
+  /** Fail every classification request with a 500. */
+  failClassifications: () => void;
+  /** Stop failing extraction and classification requests. */
   clearFailures: () => void;
 };
 
@@ -372,7 +376,7 @@ function extractionReply(body: ChatCompletionsBody): string | null {
   if (!system.startsWith(EXTRACTION_MARKER)) return null;
   const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
   const facts: unknown[] = [];
-  for (const match of prompt.matchAll(/Turn (\d+) \([^)]*\):\nUser: ([^\n]*)/g)) {
+  for (const match of prompt.matchAll(/Turn (\d+)(?: \[[A-Z]+\])? \([^)]*\):\nUser: ([^\n]*)/g)) {
     const clause = match[2]?.match(/\bI (love|like|live|work|am)\b([^.?!,]*)/i);
     const known = MOCK_FACT_VERBS[(clause?.[1] ?? '').toLowerCase()];
     if (!clause || !known) continue;
@@ -409,6 +413,34 @@ function duplicateReply(body: ChatCompletionsBody): string | null {
   return known.includes(candidate) ? 'DUPLICATE' : 'NEW';
 }
 
+/** The Fact classifier's system-prompt marker. */
+const CLASSIFICATION_MARKER = 'You classify one fact about the user';
+
+/**
+ * Deterministic classification reply for a "The user <verb> …" sentence:
+ * a known verb files it like extraction does, anything else keeps the
+ * current category; the subject is kept; an ISO date in the sentence
+ * becomes validAt. Null when the request is not a classification call.
+ */
+function classificationReply(body: ChatCompletionsBody): string | null {
+  const system = body.messages?.[0]?.content ?? '';
+  if (!system.startsWith(CLASSIFICATION_MARKER)) return null;
+  const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const field = (name: string) => prompt.match(new RegExp(`^${name}: (.*)$`, 'm'))?.[1]?.trim();
+  const fact = field('Fact') ?? '';
+  const clause = fact.match(/^The user (\w+)\s*([^.]*)/i);
+  const verb = (clause?.[1] ?? '').toLowerCase();
+  const known = Object.values(MOCK_FACT_VERBS).find((entry) => entry.verb === verb);
+  const subject = field('Current subject');
+  return JSON.stringify({
+    category: known?.category ?? field('Current category') ?? 'other',
+    subject: subject === 'null' ? null : subject,
+    predicate: known?.verb ?? null,
+    object: known ? (clause?.[2] ?? '').trim().toLowerCase() || null : null,
+    validAt: fact.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? null,
+  });
+}
+
 export async function startMockInferenceServer(options?: {
   port?: number;
 }): Promise<MockInferenceServer> {
@@ -429,11 +461,15 @@ export async function startMockInferenceServer(options?: {
     duplicateCheckCount: number;
     forcedExtraction: string | null;
     failExtractions: boolean;
+    classificationCount: number;
+    failClassifications: boolean;
   } = {
     extractionCount: 0,
     duplicateCheckCount: 0,
     forcedExtraction: null,
     failExtractions: false,
+    classificationCount: 0,
+    failClassifications: false,
   };
 
   // The next override for a rewrite call: the queued reply if any, else the
@@ -464,6 +500,22 @@ export async function startMockInferenceServer(options?: {
         status: 200,
         payload: memoryJsonReply(body, memoryState.forcedExtraction ?? extraction),
       };
+    }
+    const classification = classificationReply(body);
+    if (classification !== null) {
+      memoryState.classificationCount += 1;
+      if (memoryState.failClassifications) {
+        return {
+          status: 500,
+          payload: {
+            error: {
+              message: 'Injected classification failure (mock).',
+              type: 'mock_memory_failure',
+            },
+          },
+        };
+      }
+      return { status: 200, payload: memoryJsonReply(body, classification) };
     }
     const duplicate = duplicateReply(body);
     if (duplicate === null) return null;
@@ -607,8 +659,13 @@ export async function startMockInferenceServer(options?: {
       failExtractions: () => {
         memoryState.failExtractions = true;
       },
+      classificationCount: () => memoryState.classificationCount,
+      failClassifications: () => {
+        memoryState.failClassifications = true;
+      },
       clearFailures: () => {
         memoryState.failExtractions = false;
+        memoryState.failClassifications = false;
       },
     },
   };

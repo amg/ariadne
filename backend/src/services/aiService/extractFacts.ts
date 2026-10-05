@@ -1,5 +1,5 @@
 import { env } from '@config/env';
-import { FACT_CATEGORIES, type FactCategory } from '@db/types';
+import type { FactCategory } from '@db/types';
 import { generateText } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
@@ -8,6 +8,14 @@ import {
   isInferenceConfigured,
   resolveInferenceConfig,
 } from './config';
+import {
+  FACT_FIELD_RULES,
+  type FactFields,
+  factFieldsOf,
+  isoDay,
+  jsonObjectOrNull,
+  trimmedOrNull,
+} from './factFields';
 import { withOnDemandBackoff } from './onDemandRetry';
 
 /**
@@ -31,16 +39,19 @@ Rules:
 - Extract only what the user states or clearly confirms about themselves. Never extract the assistant's suggestions, general knowledge, or the topic under discussion.
 - Skip ephemeral details: one-off task requests, passing moods, anything true only for this conversation.
 - turn is the number of the turn the fact comes from.
-- Resolve relative time ("last week", "two years ago") into absolute dates using that turn's date. validAt is the date the fact became true as YYYY-MM-DD, only when the user states or directly implies it; otherwise null.
-- category is one of: ${FACT_CATEGORIES.join(', ')}.
-- subject is "user" unless the fact is about someone the user names; predicate is a short snake_case verb phrase such as likes, lives_in, works_as; object is the thing, lowercase; use null when there is none.
+- Resolve relative time ("last week", "two years ago") into absolute dates using that turn's date. validAt is the date the fact became true as YYYY-MM-DD, only when the user states or directly implies it; otherwise null. A fact's own date (someone's birth, a move, a start) is its validAt.
+- Read dates the way this user writes them: work out their day/month order from their other dates and the turn dates the conversation gives you. When the order stays ambiguous, leave validAt null rather than guess.
+${FACT_FIELD_RULES}
 - If nothing qualifies, output {"facts":[]}.`;
 
-/** Cold loads on the on-demand pool take ~15s; a list of facts is short. */
-const EXTRACTION_TIMEOUT_MS = 30000;
+/**
+ * Cold loads on the on-demand pool take ~15s (chats observed at 11.5s),
+ * and a full pass over several turns can run ~30s to read out the facts;
+ * 60s covers that with room to spare, and capture runs in the background.
+ */
+const EXTRACTION_TIMEOUT_MS = 60000;
 const EXTRACTION_MAX_OUTPUT_TOKENS = 800;
 const MAX_FACT_CHARS = 300;
-const MAX_ENTITY_CHARS = 120;
 
 export interface FactExtractionTurn {
   /** When the Turn's user Message arrived; anchors relative dates. */
@@ -52,20 +63,20 @@ export interface FactExtractionTurn {
 
 export interface FactExtractionInput {
   turns: FactExtractionTurn[];
+  /**
+   * Turns already captured on an earlier pass: they are sent as context
+   * (0-based count from the front) but facts are extracted only from the
+   * later turns. 0 or undefined means everything is new.
+   */
+  contextCount?: number;
   /** Categories the model is told never to extract. */
   blockedCategories: readonly FactCategory[];
 }
 
-export interface FactCandidate {
+export interface FactCandidate extends FactFields {
   /** Index into the input turns. */
   turnIndex: number;
   content: string;
-  category: FactCategory;
-  subject: string | null;
-  predicate: string | null;
-  object: string | null;
-  /** The date the Fact became true, when the conversation states it. */
-  validAt: Date | null;
 }
 
 export interface FactExtractionData {
@@ -74,49 +85,24 @@ export interface FactExtractionData {
   usage: { promptTokens: number; completionTokens: number };
 }
 
-function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 export function buildFactExtractionPrompt(input: FactExtractionInput): string {
   const blocked =
     input.blockedCategories.length > 0
       ? `Never extract facts in these categories: ${input.blockedCategories.join(', ')}.\n\n`
       : '';
+  const contextCount = input.contextCount ?? 0;
+  const contextNote =
+    contextCount > 0
+      ? 'Turns marked [CONTEXT] were read on an earlier pass; use them only to resolve names and references. Extract facts only from turns marked [NEW].\n\n'
+      : '';
   const turns = input.turns
     .map((turn, index) => {
+      const tag = contextCount > 0 ? (index < contextCount ? ' [CONTEXT]' : ' [NEW]') : '';
       const reply = turn.assistantText === null ? '' : `\nAssistant: ${turn.assistantText}`;
-      return `Turn ${index + 1} (${isoDay(turn.date)}):\nUser: ${turn.userText}${reply}`;
+      return `Turn ${index + 1}${tag} (${isoDay(turn.date)}):\nUser: ${turn.userText}${reply}`;
     })
     .join('\n\n');
-  return `${blocked}${turns}`;
-}
-
-function trimmedOrNull(value: unknown, maxChars: number): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed === '' || trimmed.toLowerCase() === 'null') return null;
-  return trimmed.slice(0, maxChars);
-}
-
-function normalizedPredicate(value: unknown): string | null {
-  const text = trimmedOrNull(value, MAX_ENTITY_CHARS);
-  if (text === null) return null;
-  const snake = text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return snake === '' ? null : snake;
-}
-
-function dayOrNull(value: unknown): Date | null {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function categoryOrOther(value: unknown): FactCategory {
-  return FACT_CATEGORIES.find((category) => category === value) ?? 'other';
+  return `${contextNote}${blocked}${turns}`;
 }
 
 function turnIndexOrLast(value: unknown, turnCount: number): number {
@@ -135,11 +121,7 @@ function candidateOrNull(entry: unknown, turnCount: number): FactCandidate | nul
   return {
     turnIndex: turnIndexOrLast(raw.turn, turnCount),
     content,
-    category: categoryOrOther(raw.category),
-    subject: trimmedOrNull(raw.subject, MAX_ENTITY_CHARS)?.toLowerCase() ?? null,
-    predicate: normalizedPredicate(raw.predicate),
-    object: trimmedOrNull(raw.object, MAX_ENTITY_CHARS)?.toLowerCase() ?? null,
-    validAt: dayOrNull(raw.validAt),
+    ...factFieldsOf(raw),
   };
 }
 
@@ -149,18 +131,7 @@ function candidateOrNull(entry: unknown, turnCount: number): FactCandidate | nul
  * drops malformed entries one by one.
  */
 export function parseFactCandidates(raw: string, turnCount: number): FactCandidate[] | null {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-  // JSON.parse yields unknown; the optional access tolerates any shape,
-  // and the array check below validates it.
-  const facts = (parsed as { facts?: unknown } | null)?.facts;
+  const facts = jsonObjectOrNull(raw)?.facts;
   if (!Array.isArray(facts)) return null;
   return facts
     .map((entry) => candidateOrNull(entry, turnCount))

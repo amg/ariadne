@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
-import type { Message } from '@db/types';
+import type { FactCategory, Message } from '@db/types';
+import { captureProgressOf } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertSegmentDriftLog } from '@queries/segmentDriftLogs/insertSegmentDriftLog';
@@ -8,11 +9,12 @@ import { insertThreadSegment } from '@queries/threadSegments/insertThreadSegment
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserFact } from '@queries/userFacts/insertUserFact';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
-import { EMBEDDING_MODEL_ID } from '@services/aiService';
+import { EMBEDDING_MODEL_ID, buildFactExtractionPrompt } from '@services/aiService';
 import {
   assembledSystemPrompt,
   captureClosedSegments,
   captureFacts,
+  editFactContent,
   renderedSeedOrNull,
   segmentTurns,
 } from '@services/memory';
@@ -64,7 +66,7 @@ async function addTurn(
 async function factsOf(userId: string) {
   return db
     .selectFrom('userFacts')
-    .select(['content', 'category', 'predicate', 'sourceMessageId', 'suppressed'])
+    .select(['content', 'category', 'predicate', 'sourceMessageId', 'suppressed', 'validAt'])
     .where('userId', '=', userId)
     .orderBy('createdAt', 'asc')
     .execute();
@@ -100,16 +102,16 @@ async function threadWithClosedSegment(turnTexts: string[]) {
     fireChannel: 'immediate',
   });
   await insertThreadSegment({ threadId, startMessageId: boundary.id, modelId: EMBEDDING_MODEL_ID });
-  return { userId, threadId, turns, boundary, segmentId: segment.id };
+  const second = await db
+    .selectFrom('threadSegments')
+    .select('id')
+    .where('startMessageId', '=', boundary.id)
+    .executeTakeFirstOrThrow();
+  return { userId, threadId, turns, boundary, segmentId: segment.id, secondSegmentId: second.id };
 }
 
-async function capturedAt(segmentId: string): Promise<Date | null> {
-  const row = await db
-    .selectFrom('threadSegments')
-    .select('factsCapturedAt')
-    .where('id', '=', segmentId)
-    .executeTakeFirstOrThrow();
-  return row.factsCapturedAt;
+async function capturedThrough(segmentId: string): Promise<Date | null> {
+  return captureProgressOf(segmentId);
 }
 
 describe('captureFacts', () => {
@@ -126,6 +128,7 @@ describe('captureFacts', () => {
       ],
       blockedCategories: [],
       spendMessageId: second.user.id,
+      capturedThroughAt: null,
     });
 
     expect(result).toEqual({ type: 'success', data: { added: 2, skippedAsDuplicate: 0 } });
@@ -136,6 +139,7 @@ describe('captureFacts', () => {
         predicate: 'loves',
         sourceMessageId: first.user.id,
         suppressed: false,
+        validAt: null,
       },
       {
         content: 'The user works as a carpenter.',
@@ -143,6 +147,7 @@ describe('captureFacts', () => {
         predicate: 'works',
         sourceMessageId: second.user.id,
         suppressed: false,
+        validAt: null,
       },
     ]);
     const costs = await costsOf(second.user.id);
@@ -157,6 +162,7 @@ describe('captureFacts', () => {
       turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
       blockedCategories: [],
       spendMessageId: turn.user.id,
+      capturedThroughAt: null,
     };
     await captureFacts(input);
     const checksBefore = mock.memory.duplicateCheckCount();
@@ -184,6 +190,7 @@ describe('captureFacts', () => {
       ],
       blockedCategories: ['preference'],
       spendMessageId: other.user.id,
+      capturedThroughAt: null,
     });
 
     expect((await factsOf(userId)).map((fact) => fact.category)).toEqual(['location']);
@@ -199,12 +206,63 @@ describe('captureFacts', () => {
       turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
       blockedCategories: [],
       spendMessageId: turn.user.id,
+      capturedThroughAt: null,
     });
 
     expect(result).toMatchObject({ type: 'error', code: 'fact_extraction_unreadable' });
     expect(await factsOf(userId)).toEqual([]);
     // The call still cost tokens, and the cost is still recorded.
     expect((await costsOf(turn.user.id)).map((cost) => cost.kind)).toEqual(['fact_extraction']);
+  });
+
+  it('LOOP-neo1: extracts only turns newer than the last captured point, keeping older ones as context', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const first = await addTurn(threadId, 'I love hiking in the Alps');
+    const second = await addTurn(threadId, 'I work as a carpenter');
+
+    // The mock db stamps fast inserts with one clock read; give the turns
+    // distinct dates so the pointer split is unambiguous.
+    const older = new Date('2026-10-01T10:00:00Z');
+    const newer = new Date('2026-10-02T10:00:00Z');
+
+    const result = await captureFacts({
+      userId,
+      turns: [
+        {
+          userMessage: { ...first.user, createdAt: older },
+          assistantReply: { ...first.assistant, createdAt: older },
+        },
+        {
+          userMessage: { ...second.user, createdAt: newer },
+          assistantReply: { ...second.assistant, createdAt: newer },
+        },
+      ],
+      blockedCategories: [],
+      spendMessageId: second.user.id,
+      capturedThroughAt: older,
+    });
+
+    // The older turn is context for reading the new one, not a source.
+    expect(result).toEqual({ type: 'success', data: { added: 1, skippedAsDuplicate: 0 } });
+    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
+      'The user works as a carpenter.',
+    ]);
+    expect((await factsOf(userId))[0]?.sourceMessageId).toBe(second.user.id);
+  });
+
+  it('flags older turns as context in the extraction prompt', () => {
+    const prompt = buildFactExtractionPrompt({
+      turns: [
+        { date: new Date('2026-10-01T10:00:00Z'), userText: 'older', assistantText: null },
+        { date: new Date('2026-10-02T10:00:00Z'), userText: 'newer', assistantText: null },
+      ],
+      contextCount: 1,
+      blockedCategories: [],
+    });
+
+    expect(prompt).toContain('Extract facts only from turns marked [NEW]');
+    expect(prompt).toContain('Turn 1 [CONTEXT]');
+    expect(prompt).toContain('Turn 2 [NEW]');
   });
 });
 
@@ -245,38 +303,48 @@ describe('captureClosedSegments', () => {
     const extractions = mock.memory.extractionCount();
     await captureClosedSegments({ userId, threadId });
 
-    expect(await capturedAt(segmentId)).not.toBeNull();
+    expect(await capturedThrough(segmentId)).not.toBeNull();
     expect(mock.memory.extractionCount()).toBe(extractions);
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
       'The user loves hiking in the Alps.',
     ]);
   });
 
-  it('owes a segment again once the arrival that closed it is abandoned', async () => {
-    const { userId, threadId, boundary, segmentId } = await threadWithClosedSegment([
-      'I love hiking in the Alps',
-    ]);
+  it('keeps old Turns captured when the closer dies; the fork settles at the next cut', async () => {
+    const { userId, threadId, boundary, segmentId, secondSegmentId } =
+      await threadWithClosedSegment(['I love hiking in the Alps']);
     await captureClosedSegments({ userId, threadId });
-    expect(await capturedAt(segmentId)).not.toBeNull();
+    expect(await capturedThrough(segmentId)).not.toBeNull();
+    const extractions = mock.memory.extractionCount();
 
-    // An edit abandons the Boundary arrival; the fork stays on topic, so
-    // the segment is open again and nothing is owed yet.
+    // The edit abandons the arrival that closed the segment. That cut still
+    // stands (the successor segment names it), so nothing is owed again; the
+    // fork's Turns settle at the next cut in the chain.
     await setMessagesAbandoned({ messageIds: [boundary.id], abandoned: true });
     await addTurn(threadId, 'I work as a carpenter');
     await captureClosedSegments({ userId, threadId });
-    expect(await capturedAt(segmentId)).toBeNull();
+
+    expect(mock.memory.extractionCount()).toBe(extractions); // nothing was re-extracted
+    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
+      'The user loves hiking in the Alps.',
+    ]);
 
     const reclosing = await insertMessage({ threadId, role: 'user', content: 'Another topic' });
     await insertSegmentDriftLog({
-      segmentId,
+      segmentId: secondSegmentId,
       messageId: reclosing.id,
       modelId: EMBEDDING_MODEL_ID,
       verdict: 'fire',
       fireChannel: 'immediate',
     });
+    await insertThreadSegment({
+      threadId,
+      startMessageId: reclosing.id,
+      modelId: EMBEDDING_MODEL_ID,
+    });
     await captureClosedSegments({ userId, threadId });
 
-    expect(await capturedAt(segmentId)).not.toBeNull();
+    expect(await capturedThrough(secondSegmentId)).not.toBeNull();
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
       'The user loves hiking in the Alps.',
       'The user works as a carpenter.',
@@ -289,7 +357,7 @@ describe('captureClosedSegments', () => {
 
     await captureClosedSegments({ userId, threadId });
 
-    expect(await capturedAt(segmentId)).not.toBeNull();
+    expect(await capturedThrough(segmentId)).not.toBeNull();
     expect(await factsOf(userId)).toEqual([]);
   });
 
@@ -298,11 +366,11 @@ describe('captureClosedSegments', () => {
     mock.memory.failExtractions();
 
     await captureClosedSegments({ userId, threadId });
-    expect(await capturedAt(segmentId)).toBeNull();
+    expect(await capturedThrough(segmentId)).toBeNull();
 
     mock.memory.clearFailures();
     await captureClosedSegments({ userId, threadId });
-    expect(await capturedAt(segmentId)).not.toBeNull();
+    expect(await capturedThrough(segmentId)).not.toBeNull();
     expect(await factsOf(userId)).toHaveLength(1);
   });
 });
@@ -331,6 +399,7 @@ describe('Seed', () => {
       content: `The user owns plant number ${index}.`,
       category: 'other' as const,
       validAt: new Date('2026-09-01T00:00:00Z'),
+      createdAt: new Date('2026-09-02T00:00:00Z'),
     }));
 
     const rendered = renderedSeedOrNull(facts, 120);
@@ -342,6 +411,21 @@ describe('Seed', () => {
     });
     expect(rendered?.factCount).toBeLessThan(50);
     expect(renderedSeedOrNull([])).toBeNull();
+  });
+
+  it('dates an unstated Fact with when it was noted', () => {
+    const rendered = renderedSeedOrNull([
+      {
+        content: 'The user loves jazz.',
+        category: 'preference',
+        validAt: null,
+        createdAt: new Date('2026-09-02T08:30:00Z'),
+      },
+    ]);
+
+    expect(rendered?.lines).toEqual([
+      { category: 'preference', text: '- 2026-09-02: The user loves jazz.' },
+    ]);
   });
 
   it('seeds a fresh Thread with current, unsuppressed, unblocked Facts', async () => {
@@ -407,5 +491,150 @@ describe('Seed', () => {
     const seeded = await createThread({ userId });
     await updateUserSettings({ userId, patch: { memoryEnabled: false } });
     expect(await assembledSystemPrompt({ userId, threadId: seeded.id, basePrompt: 'B' })).toBe('B');
+  });
+});
+
+describe('editFactContent', () => {
+  async function storedFact(
+    userId: string,
+    fields: {
+      content: string;
+      category: FactCategory;
+      subject: string | null;
+      validAt?: Date | null;
+      sourceMessageId?: string | null;
+    },
+  ) {
+    return insertUserFact({
+      userId,
+      predicate: null,
+      object: null,
+      embedding: buildMockEmbedding(fields.content),
+      modelId: EMBEDDING_MODEL_ID,
+      validAt: null,
+      sourceMessageId: null,
+      ...fields,
+    });
+  }
+
+  async function rowOf(factId: string) {
+    return db
+      .selectFrom('userFacts')
+      .select(['content', 'invalidAt'])
+      .where('id', '=', factId)
+      .executeTakeFirstOrThrow();
+  }
+
+  it('stays filed where it was when the sentence still supports it', async () => {
+    const { userId } = await createUserAndThread();
+    const fact = await storedFact(userId, {
+      content: "Maria is the user's sister.",
+      category: 'relationships',
+      subject: 'maria',
+    });
+
+    const edited = await editFactContent({
+      factId: fact.id,
+      userId,
+      newContent: "Maria is the user's older sister.",
+    });
+
+    expect(edited).toMatchObject({
+      type: 'success',
+      data: {
+        content: "Maria is the user's older sister.",
+        category: 'relationships',
+        subject: 'maria',
+      },
+    });
+    expect((await rowOf(fact.id)).invalidAt).not.toBeNull();
+  });
+
+  it('refiles from the new sentence and reads its stated date, keeping suppression and source', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const turn = await addTurn(threadId, 'I love jazz');
+    const fact = await storedFact(userId, {
+      content: 'The user loves jazz.',
+      category: 'preference',
+      subject: 'user',
+      sourceMessageId: turn.user.id,
+    });
+    await db.updateTable('userFacts').set({ suppressed: true }).where('id', '=', fact.id).execute();
+
+    const edited = await editFactContent({
+      factId: fact.id,
+      userId,
+      newContent: 'The user works as a drummer since 2025-03-01.',
+    });
+
+    expect(edited).toMatchObject({
+      type: 'success',
+      data: {
+        category: 'work',
+        subject: 'user',
+        predicate: 'works',
+        validAt: new Date('2025-03-01T00:00:00Z'),
+        suppressed: true,
+        sourceMessageId: turn.user.id,
+      },
+    });
+  });
+
+  it('drops the old date when the edited sentence states none', async () => {
+    const { userId } = await createUserAndThread();
+    const fact = await storedFact(userId, {
+      content: 'The user lives in Lisbon since 2019-01-01.',
+      category: 'location',
+      subject: 'user',
+      validAt: new Date('2019-01-01T00:00:00Z'),
+    });
+
+    const edited = await editFactContent({
+      factId: fact.id,
+      userId,
+      newContent: 'The user lives in Lisbon.',
+    });
+
+    expect(edited).toMatchObject({ type: 'success', data: { validAt: null } });
+  });
+
+  it('leaves the Fact untouched when the sentence cannot be classified', async () => {
+    const { userId } = await createUserAndThread();
+    const fact = await storedFact(userId, {
+      content: 'The user loves jazz.',
+      category: 'preference',
+      subject: 'user',
+    });
+    mock.memory.failClassifications();
+
+    const edited = await editFactContent({
+      factId: fact.id,
+      userId,
+      newContent: 'The user loves blues.',
+    });
+
+    expect(edited.type).toBe('error');
+    expect(await rowOf(fact.id)).toEqual({ content: 'The user loves jazz.', invalidAt: null });
+    expect(await factsOf(userId)).toHaveLength(1);
+  });
+
+  it('reports a superseded Fact as not found without calling the model', async () => {
+    const { userId } = await createUserAndThread();
+    const fact = await storedFact(userId, {
+      content: 'The user loves jazz.',
+      category: 'preference',
+      subject: 'user',
+    });
+    await editFactContent({ factId: fact.id, userId, newContent: 'The user loves blues.' });
+    const calls = mock.memory.classificationCount();
+
+    const again = await editFactContent({
+      factId: fact.id,
+      userId,
+      newContent: 'The user loves soul.',
+    });
+
+    expect(again).toMatchObject({ type: 'error', code: 'fact_not_found' });
+    expect(mock.memory.classificationCount()).toBe(calls);
   });
 });
