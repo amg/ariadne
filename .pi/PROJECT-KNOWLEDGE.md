@@ -31,14 +31,17 @@ assistant reply stay live in the thread — visible, partial text included
 in the model context of the next exchange (empty assistant rows are
 skipped in context but remain in DB/UI). A still-untitled Thread titles
 from a short preview of the arrival text (50 chars, the rename cap).
-Editing the last user prompt forks instead of rewriting: the old arrival
-row plus every reply grown from its text are abandoned in place — text,
-arrival analysis and spend stay, the usages keep tracking what the
-thread burned — and the edited text lands as a new arrival row, which
-the retry exchanges and the live gate judges there (already-analysed
-arrivals play back — never re-embedded or re-judged). A retry revives
-the newest user turn it re-exchanges, flags the stale assistant rows
-beneath it abandoned in place, and grows the fresh reply beneath those.
+Editing forks instead of rewriting. Both edit and retry target the last
+live (non-abandoned) user prompt — so a handed-over arrival is never
+mistaken for the anchor. The edit abandons the old arrival row plus
+every reply grown from its text in place — text, arrival analysis and
+spend stay, the usages keep tracking what the thread burned — and the
+edited text lands as a new arrival row, which the retry exchanges and
+the live gate judges there (already-analysed arrivals play back — never
+re-embedded or re-judged). A retry re-exchanges that anchor prompt,
+flags the stale assistant rows beneath it abandoned in place, and grows
+the fresh reply beneath those; abandoned rows are never revived — a
+handed-over arrival stays in its new Thread.
 Abandoned rows vanish from the chat stream and the live-analysis
 reading but keep counting in cost surfaces and reports. Spend surfaces
 are purpose-built: `message_usage` is chat-inference telemetry only,
@@ -48,6 +51,56 @@ spend totals. `POST /api/threads/:id/stop` stops the live Exchange
 through the in-process exchange registry (single-replica assumption);
 the resume-draft prefill is dormant (no path abandons the newest user
 row anymore).
+
+## Memory Feature (Phase 2 Complete)
+
+User-scoped factual memory captured by segment pointer, frozen Seeds on
+fresh Threads, and per-user settings. Facts are self-contained sentences
+about the user (e.g., "the user is vegetarian") with category, a stated
+`valid_at` date when the conversation gives one (null otherwise), and
+optional entity columns.
+
+### Storage
+- **`user_facts`** table: durable store with a stated-only `valid_at` (the date
+  the conversation states, else null), `invalid_at`, suppression flag, and
+  pgvector embeddings. Update by supersession, never overwrite.
+- **`thread_seeds`** table: frozen snapshot of seedable Facts at Thread creation,
+  stored as jsonb lines with category per line (so blocked categories drop out).
+- **`user_settings`** table: per-user `memoryEnabled` boolean and
+  `memoryBlockedCategories` array (credentials blocked by default).
+
+### API Endpoints
+- `GET /api/memory/facts` — lists user's Facts (including suppressed), newest first
+- `PATCH /api/memory/facts/:id` — edit sentence (supersedes old row,
+  re-classifies the new one) or toggle suppression
+- `DELETE /api/memory/facts/:id` — hard delete
+- `GET /api/settings` — get user settings
+- `PATCH /api/settings` — update memory settings
+
+### Frontend Routes
+- `/memory` — Memory Screen: view, edit, suppress, delete Facts
+- `/settings` — Settings page: memory on/off toggle and blocked category checkboxes
+
+### Key Behaviors
+- Frozen Seeds keep edited/suppressed/deleted Facts until Thread ends (ticket 010 decides purge)
+- Blocked categories are skipped at Seed assembly time, not at capture
+- Memory is invisible in Threads; only visible in Memory Screen
+- Editing a Fact re-classifies it from the new sentence (category,
+  subject, predicate, object, stated date) and supersedes the old row;
+  a change of subject moves it into a new group on the Memory Screen
+- A segment owes capture once settled: a live drift fire judged into
+  it, or a cut onto it whose fire was handed over. Memory keeps a
+  `captured_through_at` pointer per segment in its own progress table
+  (`memory_capture_progress`), marking how far capture has gone; each
+  pass extracts only the Turns past the pointer, with older Turns read
+  as context only. A failed pass leaves the pointer put, so the debt
+  survives — abandonment of the anchor row can never strand it, because
+  the successor segment's opener anchors it in its place. Handover is a
+  capture point, not a close: the move waits up to 20 seconds for a
+  pending pass, then proceeds and retries in the background until the
+  debt settles
+- Seed lines always carry a date: the stated `valid_at` when present,
+  the day the Fact was recorded otherwise
 
 ## Knowledge Map
 

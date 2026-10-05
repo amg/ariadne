@@ -145,17 +145,21 @@ _Avoid_: dead context, bloat, cruft, noise
 One memory record: a self-contained, durable sentence about the user —
 useful in a future conversation without any surrounding context, e.g.
 "the user is vegetarian". Carries its source Turn, a category from a
-fixed set, extraction and validity timestamps, and optional entity
-subject/object columns with a normalized predicate. Relative time is
-resolved to absolute dates at extraction; a near-duplicate of an
-existing Fact is not stored twice. A category the user blocks is never
-captured and never seeded; Facts already stored under it stay, hidden.
+fixed set, a stated date when the conversation dates when the Fact took
+effect (null otherwise) plus the record time at capture, and optional
+entity subject/object columns with a normalized predicate. Stated dates
+are pinned to absolute days at extraction, inferring the user's day-
+month order from their own dates and the conversation's date; where the
+meaning stays genuinely ambiguous, no date is stored. A near-duplicate
+of an existing Fact is not stored twice. A category the user blocks is
+never captured and never seeded; Facts already stored under it stay,
+hidden.
 _Avoid_: memory item, note, observation
 
 **Memory**:
-The durable store of Facts that outlives any Thread. Written at Segment
-close, read at context assembly; namespaced per user even though it
-holds one user today.
+The durable store of Facts that outlives any Thread. Captured piecemeal
+as segments settle, keeping a pointer to the last Turn read; namespaced
+per user even though it holds one user today.
 _Avoid_: knowledge base, profile store, memory bank
 
 **Seed**:
@@ -193,10 +197,12 @@ lands a fresh arrival, judged anew, which may pause again.
 _Avoid_: blocked message, held message
 
 **Handover**:
-Moving a Paused arrival into a fresh Thread. The segment it closed is
-captured into Memory first, so the fresh Thread's Seed already knows it;
-then, as one step, the arrival is abandoned in its old Thread and becomes
-the fresh Thread's first message, never in both and never in neither.
+Moving a Paused arrival into a fresh Thread. Memory capture runs over
+the Turns up to the arrival first — a capture point, not a close, since
+the old segment stays open — so the fresh Thread's Seed already knows
+it; then, as one step, the arrival is abandoned in its old Thread and
+becomes the fresh Thread's first message, never in both and never in
+neither.
 _Avoid_: split, fork, transfer
 
 **Replay**:
