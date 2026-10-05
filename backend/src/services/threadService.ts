@@ -3,6 +3,7 @@ import { deleteThread as deleteThreadQuery } from '@queries/threads/deleteThread
 import { insertThread } from '@queries/threads/insertThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { updateThreadTitle } from '@queries/threads/updateThreadTitle';
+import { seedThread } from '@services/memory';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -61,6 +62,9 @@ type CreateThreadProps = {
   userId: string;
 };
 
+/** Opens a fresh Thread, seeded with what the Memory knows about the user. */
 export async function createThread({ userId }: CreateThreadProps): Promise<Thread> {
-  return insertThread({ userId });
+  const thread = await insertThread({ userId });
+  await seedThread({ userId, threadId: thread.id });
+  return thread;
 }

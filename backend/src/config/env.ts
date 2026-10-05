@@ -50,6 +50,9 @@ export type EnvConfig = {
   JUDGE_MODEL: string;
   REWRITE_MODEL: string;
 
+  // User memory: Fact extraction and duplicate checks
+  MEMORY_MODEL: string;
+
   // CORS (required for SuperTokens)
   CORS_ORIGINS: string;
 
@@ -230,6 +233,10 @@ export const env: EnvConfig = {
   },
   get REWRITE_MODEL() {
     return process.env.REWRITE_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
+  },
+  // Fact extraction and the duplicate check share one small model.
+  get MEMORY_MODEL() {
+    return process.env.MEMORY_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
   },
 
   // CORS (required for SuperTokens - defaults to local dev)

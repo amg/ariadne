@@ -63,6 +63,7 @@ const origins = getCorsOrigins();
   lane with that expansion tier.
 - `JUDGE_MODEL` - Expansion-trigger judge model (default: 'Qwen/Qwen3.5-9B')
 - `REWRITE_MODEL` - Expanded-signal rewrite model (default: 'Qwen/Qwen3.5-9B')
+- `MEMORY_MODEL` - Fact extraction and duplicate-check model (default: 'Qwen/Qwen3.5-9B')
 
 ### CORS
 - `CORS_ORIGINS` - Comma-separated allowed origins (optional, defaults to localhost)

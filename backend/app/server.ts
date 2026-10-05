@@ -9,9 +9,11 @@ import { setupConfigRoute } from '@routes/config';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
 import { setupModelsRefreshRoute } from '@routes/models';
+import { setupSettingsGetRoute, setupSettingsPatchRoute } from '@routes/settings';
 import {
   setupThreadAnalysisRoute,
   setupThreadDraftRoute,
+  setupThreadHandoverRoute,
   setupThreadStopRoute,
   setupThreadSummaryRoute,
   setupThreadsDeleteRoute,
@@ -102,6 +104,9 @@ setupModelsRefreshRoute(app);
 setupChatPostRoute(app);
 setupThreadStopRoute(app);
 setupThreadDraftRoute(app);
+setupThreadHandoverRoute(app);
+setupSettingsGetRoute(app);
+setupSettingsPatchRoute(app);
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';

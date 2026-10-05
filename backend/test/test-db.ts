@@ -1,4 +1,5 @@
 import { db } from '@db/db';
+import { capturesSettled } from '@services/memory';
 import { sql } from 'kysely';
 import { afterAll, afterEach } from 'vitest';
 
@@ -13,14 +14,18 @@ export async function cleanDatabase(): Promise<void> {
  * `src/db/db.ts`, which the vitest global setup points at the provisioned
  * test database via `VITEST_TEST_DATABASE_URL`. Call once per test file at
  * collection time; it truncates between tests and releases the pg pool
- * afterwards (an idle pool would keep the worker process alive).
+ * afterwards (an idle pool would keep the worker process alive). Fact
+ * captures a test fired in the background finish first: one still writing
+ * would deadlock against the truncate or outlive the pool.
  */
 export function useTestDb(): void {
   afterEach(async () => {
+    await capturesSettled();
     await cleanDatabase();
   });
 
   afterAll(async () => {
+    await capturesSettled();
     await db.destroy();
   });
 }

@@ -11,11 +11,14 @@ export interface Database {
   threads: ThreadsTable;
   messages: MessagesTable;
   messageUsage: MessageUsageTable;
-  messageExpansionCosts: MessageExpansionCostsTable;
+  messageSideCosts: MessageSideCostsTable;
   messageEmbeddings: MessageEmbeddingsTable;
   threadSegments: ThreadSegmentsTable;
   segmentDriftLogs: SegmentDriftLogsTable;
   modelConfigs: ModelConfigsTable;
+  userFacts: UserFactsTable;
+  threadSeeds: ThreadSeedsTable;
+  userSettings: UserSettingsTable;
 }
 
 export interface UsersTable {
@@ -65,7 +68,7 @@ export type MessageExchangeStatus = (typeof EXCHANGE_STATUSES)[number];
  * column is filled on both paths. The analyzer pipeline's spend lives
  * elsewhere: embedding cost rides the arrival embedding row, and the
  * rewrite and judge steps carry their own rows in
- * `message_expansion_costs`.
+ * `message_side_costs`.
  */
 export interface MessageUsageTable {
   messageId: string; // UUID FK -> messages.id (PK)
@@ -91,18 +94,26 @@ export interface MessageUsageTable {
 }
 
 /**
- * The analyzer arrival pipeline's billed inference spend: the rewrite
- * (expansion) step and its trigger judge. One row per (message, kind);
- * the embedding step's cost rides the arrival embedding row instead.
+ * Billed spend of the side pipelines, one row per (message, kind): the
+ * arrival's rewrite (expansion) step and its trigger judge, and the Fact
+ * capture a Boundary arrival triggers — extraction, duplicate checks, and
+ * Fact embeddings, each summed across the segment's calls. The arrival
+ * embedding step's cost rides the arrival embedding row instead.
  * Model attribution is fixed by the environment's pipeline models; the
  * provider response id is not persisted for these calls.
  */
-export const EXPANSION_COST_KINDS = ['rewrite', 'judge'] as const;
-export type ExpansionCostKind = (typeof EXPANSION_COST_KINDS)[number];
+export const SIDE_COST_KINDS = [
+  'rewrite',
+  'judge',
+  'fact_extraction',
+  'fact_duplicate_check',
+  'fact_embedding',
+] as const;
+export type SideCostKind = (typeof SIDE_COST_KINDS)[number];
 
-export interface MessageExpansionCostsTable {
+export interface MessageSideCostsTable {
   messageId: string; // UUID FK -> messages.id (PK together with `kind`)
-  kind: ExpansionCostKind;
+  kind: SideCostKind;
   model: string;
   /** NULL when the provider reported no token counts. */
   promptTokens: number | null;
@@ -166,6 +177,12 @@ export interface ThreadSegmentsTable {
   startMessageId: string; // UUID FK -> messages.id (first user Message of the segment)
   /** Provenance of the reading that cut this segment — the embedding model. */
   modelId: string;
+  /**
+   * Set once the segment's Fact capture settled — extracted, or skipped
+   * because memory was off. Null while the segment is open or its capture
+   * is still owed.
+   */
+  factsCapturedAt: Generated<Date | null>;
   createdAt: Generated<Date>;
 }
 
@@ -205,6 +222,82 @@ export interface ModelConfigsTable {
   lastUpdated: Generated<Date>;
 }
 
+/** The fixed category set every Fact is filed under. */
+export const FACT_CATEGORIES = [
+  'identity',
+  'preference',
+  'health',
+  'relationships',
+  'work',
+  'location',
+  'credentials',
+  'other',
+] as const;
+export type FactCategory = (typeof FACT_CATEGORIES)[number];
+
+/**
+ * The Memory store: one self-contained sentence about the user per row.
+ * Rows are superseded by invalidation (`invalidAt`), never overwritten.
+ * Facts outlive Threads, so the source message reference nulls out when
+ * its Thread is deleted.
+ */
+export interface UserFactsTable {
+  id: Generated<string>; // UUID
+  userId: string; // UUID FK -> users.id (cascade delete)
+  content: string;
+  category: FactCategory;
+  /** Entity the Fact is about; "user" for the user themself. */
+  subject: string | null;
+  /** Normalized snake_case relation, e.g. `lives_in`. */
+  predicate: string | null;
+  object: string | null;
+  /** pgvector `vector(1024)` in Postgres text form. */
+  embedding: string;
+  modelId: string;
+  /** The user Message of the Turn the Fact came from; null once its Thread is gone. */
+  sourceMessageId: string | null;
+  /** When the Fact became true in the user's life. */
+  validAt: Date;
+  /** When the Fact stopped being current; null while it is. */
+  invalidAt: Date | null;
+  /** Kept in the store but never injected into a Seed. */
+  suppressed: Generated<boolean>;
+  /** Extraction time. */
+  createdAt: Generated<Date>;
+}
+
+/**
+ * A Thread's Seed: the memory block frozen at Thread creation and
+ * prepended to the system prompt on every Exchange of that Thread.
+ */
+/**
+ * One Fact as a Seed renders it, with its category kept so a category the
+ * user blocks later drops out of Seeds already frozen.
+ */
+export interface SeedLine {
+  category: FactCategory;
+  text: string;
+}
+
+export interface ThreadSeedsTable {
+  threadId: string; // UUID PK, FK -> threads.id (cascade delete)
+  /** jsonb array, in render order. */
+  lines: SeedLine[];
+  factCount: number;
+  /** The drift-paused arrival this Thread was handed over from; null otherwise. */
+  handoverMessageId: string | null;
+  validAt: Generated<Date>;
+  invalidAt: Date | null;
+  createdAt: Generated<Date>;
+}
+
+/** Per-user settings document; missing and unknown keys resolve in code. */
+export interface UserSettingsTable {
+  userId: string; // UUID PK, FK -> users.id (cascade delete)
+  settings: unknown;
+  updatedAt: Generated<Date>;
+}
+
 export type User = Selectable<UsersTable>;
 
 export type Thread = Selectable<ThreadsTable>;
@@ -216,8 +309,8 @@ export type NewMessage = Insertable<MessagesTable>;
 export type MessageUsage = Selectable<MessageUsageTable>;
 export type NewMessageUsage = Insertable<MessageUsageTable>;
 
-export type MessageExpansionCost = Selectable<MessageExpansionCostsTable>;
-export type NewMessageExpansionCost = Insertable<MessageExpansionCostsTable>;
+export type MessageSideCost = Selectable<MessageSideCostsTable>;
+export type NewMessageSideCost = Insertable<MessageSideCostsTable>;
 
 export type ModelConfig = Selectable<ModelConfigsTable>;
 export type NewModelConfig = Insertable<ModelConfigsTable>;
@@ -258,6 +351,25 @@ export type NewArrivalEmbedding = {
 
 export type ThreadSegment = Selectable<ThreadSegmentsTable>;
 export type NewThreadSegment = Insertable<ThreadSegmentsTable>;
+
+export type ThreadSeed = Selectable<ThreadSeedsTable>;
+
+/** Fact row as returned by `queries/userFacts` (vector omitted). */
+export type UserFact = Omit<Selectable<UserFactsTable>, 'embedding'>;
+
+/** Insert input for `queries/userFacts` (vector as numbers). */
+export type NewUserFact = {
+  userId: string;
+  content: string;
+  category: FactCategory;
+  subject: string | null;
+  predicate: string | null;
+  object: string | null;
+  embedding: number[];
+  modelId: string;
+  sourceMessageId: string | null;
+  validAt: Date;
+};
 
 export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;
 export type NewSegmentDriftLog = Insertable<SegmentDriftLogsTable>;
