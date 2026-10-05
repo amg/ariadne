@@ -5,35 +5,48 @@ export type AddSideCostRow = {
   messageId: string;
   kind: SideCostKind;
   model: string;
+  /** USD as a decimal string; must be a finite, non-negative number. */
   costUsd: string;
-  promptTokens: number;
-  completionTokens: number;
+  /** Null when the provider reported no count. */
+  promptTokens: number | null;
+  completionTokens: number | null;
 };
 
 /**
  * Adds spend to the `(messageId, kind)` row, creating it on first use: a
  * repeated run accumulates what it burned instead of replacing the
- * earlier record.
+ * earlier record. A null token count means unknown: added to a known
+ * count it leaves that count as it is, and two unknowns stay unknown.
+ * Throws on a cost that is not a finite, non-negative number, since one
+ * NaN would poison the row's total for good.
  */
 export async function addSideCost(row: AddSideCostRow): Promise<void> {
+  const cost = Number(row.costUsd);
+  if (row.costUsd.trim() === '' || !Number.isFinite(cost) || cost < 0) {
+    throw new Error(`addSideCost: invalid costUsd "${row.costUsd}" for ${row.kind}`);
+  }
+
   await db
     .insertInto('messageSideCosts')
     .values(row)
     .onConflict((oc) =>
-      oc.columns(['messageId', 'kind']).doUpdateSet((eb) => ({
-        model: eb.ref('excluded.model'),
-        costUsd: eb('messageSideCosts.costUsd', '+', eb.ref('excluded.costUsd')),
-        promptTokens: eb(
-          eb.fn.coalesce('messageSideCosts.promptTokens', eb.lit(0)),
-          '+',
-          eb.ref('excluded.promptTokens'),
-        ),
-        completionTokens: eb(
-          eb.fn.coalesce('messageSideCosts.completionTokens', eb.lit(0)),
-          '+',
-          eb.ref('excluded.completionTokens'),
-        ),
-      })),
+      oc.columns(['messageId', 'kind']).doUpdateSet((eb) => {
+        // coalesce(a + b, a, b): the sum when both are known, else
+        // whichever is known, else null.
+        const summed = (
+          stored: 'messageSideCosts.promptTokens' | 'messageSideCosts.completionTokens',
+          added: 'excluded.promptTokens' | 'excluded.completionTokens',
+        ) => eb.fn.coalesce(eb(stored, '+', eb.ref(added)), eb.ref(stored), eb.ref(added));
+        return {
+          model: eb.ref('excluded.model'),
+          costUsd: eb('messageSideCosts.costUsd', '+', eb.ref('excluded.costUsd')),
+          promptTokens: summed('messageSideCosts.promptTokens', 'excluded.promptTokens'),
+          completionTokens: summed(
+            'messageSideCosts.completionTokens',
+            'excluded.completionTokens',
+          ),
+        };
+      }),
     )
     .execute();
 }

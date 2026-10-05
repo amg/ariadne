@@ -64,6 +64,12 @@ function emptySpend(): CaptureSpend {
   };
 }
 
+/**
+ * Records each call kind's spend. A line the ledger rejects (a cost that
+ * is not a finite number, which means a pricing bug) is logged and
+ * skipped: failing the capture over it would only re-run the extraction
+ * and spend again.
+ */
 async function recordSpend(spendMessageId: string, spend: CaptureSpend): Promise<void> {
   const lines = [
     { kind: 'fact_extraction', model: env.MEMORY_MODEL, spent: spend.extraction },
@@ -72,14 +78,18 @@ async function recordSpend(spendMessageId: string, spend: CaptureSpend): Promise
   ] as const;
   for (const { kind, model, spent } of lines) {
     if (spent.promptTokens === 0) continue;
-    await addSideCost({
-      messageId: spendMessageId,
-      kind,
-      model,
-      costUsd: spent.costUsd.toFixed(10),
-      promptTokens: spent.promptTokens,
-      completionTokens: spent.completionTokens,
-    });
+    try {
+      await addSideCost({
+        messageId: spendMessageId,
+        kind,
+        model,
+        costUsd: spent.costUsd.toFixed(10),
+        promptTokens: spent.promptTokens,
+        completionTokens: spent.completionTokens,
+      });
+    } catch (error) {
+      console.error(`[captureFacts] ${kind} spend not recorded:`, error);
+    }
   }
 }
 
