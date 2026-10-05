@@ -42,7 +42,7 @@ beneath it abandoned in place, and grows the fresh reply beneath those.
 Abandoned rows vanish from the chat stream and the live-analysis
 reading but keep counting in cost surfaces and reports. Spend surfaces
 are purpose-built: `message_usage` is chat-inference telemetry only,
-rewrite/judge spend lives in `message_expansion_costs`, embedding cost
+rewrite/judge spend lives in `message_side_costs`, embedding cost
 rides the arrival row; `sumThreadSpend()` is the single source of thread
 spend totals. `POST /api/threads/:id/stop` stops the live Exchange
 through the in-process exchange registry (single-replica assumption);

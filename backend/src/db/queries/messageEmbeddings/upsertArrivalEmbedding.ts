@@ -10,7 +10,7 @@ import { toDecimalLiteral, toMessageEmbedding, toVectorText } from './embeddingM
  * row is replaced (provenance change or re-population via discard).
  * `expanded_text` records the rewrite that generated the vector. The
  * embedding step's spend rides along on that row as well (`embeddingCostUsd`).
- * The rewrite/judge spend lives in `message_expansion_costs`.
+ * The rewrite/judge spend lives in `message_side_costs`.
  */
 export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<MessageEmbedding> {
   const result = await db

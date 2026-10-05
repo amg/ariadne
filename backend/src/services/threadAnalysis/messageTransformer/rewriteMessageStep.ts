@@ -2,8 +2,9 @@ import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { recordMessageExpansion } from '@queries/messageEmbeddings/recordMessageExpansion';
-import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
+import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { computeInferenceCostUsd } from '@services/aiService/pricing';
 import { type Result, err, ok } from '../../../types/result';
 import {
   EMBEDDING_MODEL_ID,
@@ -11,7 +12,7 @@ import {
   judgeContextDependence,
   rewriteFollowUp,
 } from '../../aiService';
-import { computeInferenceCostUsd, round10 } from '../cost';
+import { round10 } from '../cost';
 import {
   REWRITE_CONTEXT_LIMITS,
   REWRITE_MAX_TRIGGER_LENGTH,
@@ -276,9 +277,9 @@ export const rewriteMessageStep: MessageStep = {
       expandedText: decision.tried ? decision.expandedText : null,
     });
 
-    // The rewrite/judge spends land in `message_expansion_costs`, keyed by step.
+    // The rewrite/judge spends land in `message_side_costs`, keyed by step.
     if (decision.tried && decision.rewriteCostUsd !== null) {
-      await upsertExpansionCost({
+      await upsertSideCost({
         messageId: userMessageId,
         kind: 'rewrite',
         model: env.REWRITE_MODEL,
@@ -288,7 +289,7 @@ export const rewriteMessageStep: MessageStep = {
       });
     }
     if (decision.judgeCostUsd !== null) {
-      await upsertExpansionCost({
+      await upsertSideCost({
         messageId: userMessageId,
         kind: 'judge',
         model: env.JUDGE_MODEL,

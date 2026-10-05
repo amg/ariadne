@@ -18,7 +18,7 @@ export interface RecordMessageExpansionProps {
  * same row later. On conflict the expansion columns are replaced
  * (a re-run of the step re-records its outcome); the stored vector is
  * never touched by this write. The rewrite/judge spends land in
- * `message_expansion_costs`.
+ * `message_side_costs`.
  */
 export async function recordMessageExpansion(
   row: RecordMessageExpansionProps,

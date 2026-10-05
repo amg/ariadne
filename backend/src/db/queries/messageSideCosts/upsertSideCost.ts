@@ -1,10 +1,10 @@
 import { db } from '@db/db';
-import type { ExpansionCostKind, MessageExpansionCost, NewMessageExpansionCost } from '@db/types';
+import type { MessageSideCost, NewMessageSideCost, SideCostKind } from '@db/types';
 
 /** One expansion step spend; identity is `(messageId, kind)`. */
-export type UpsertExpansionCostRow = {
+export type UpsertSideCostRow = {
   messageId: string;
-  kind: ExpansionCostKind;
+  kind: SideCostKind;
   model: string;
   costUsd: string;
   promptTokens?: number | null;
@@ -16,10 +16,8 @@ export type UpsertExpansionCostRow = {
  * replacing any earlier record for the same `(messageId, kind)` — a
  * re-run of the step re-records its outcome, never duplicates it.
  */
-export async function upsertExpansionCost(
-  row: UpsertExpansionCostRow,
-): Promise<MessageExpansionCost> {
-  const values: NewMessageExpansionCost = {
+export async function upsertSideCost(row: UpsertSideCostRow): Promise<MessageSideCost> {
+  const values: NewMessageSideCost = {
     messageId: row.messageId,
     kind: row.kind,
     model: row.model,
@@ -28,7 +26,7 @@ export async function upsertExpansionCost(
     completionTokens: row.completionTokens ?? null,
   };
   return db
-    .insertInto('messageExpansionCosts')
+    .insertInto('messageSideCosts')
     .values(values)
     .onConflict((oc) =>
       oc.columns(['messageId', 'kind']).doUpdateSet({

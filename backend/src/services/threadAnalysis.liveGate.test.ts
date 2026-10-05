@@ -1,5 +1,5 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { getExpansionCostByMessageId } from '@queries/messageExpansionCosts/getExpansionCostByMessageId';
+import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
@@ -473,8 +473,8 @@ describe('runLiveGate — the fill-forward walk', () => {
       // only the embedding step spends, and its cost rides the arrival row.
       expect(row?.rewrittenText).toBeNull();
       expect(Number(row?.embeddingCostUsd)).toBeGreaterThan(0);
-      expect(await getExpansionCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
-      expect(await getExpansionCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
+      expect(await getSideCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
+      expect(await getSideCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
     }
     for (const messageId of assistantMessageIds) {
       expect(byMessage.get(messageId)?.modelId).toBe(EMBEDDING_MODEL_ID);
