@@ -302,9 +302,12 @@ export interface GateReplayPoint {
    * Page–Hinkley rise reached λ (the crawling class). Absent on
    * everything but fires.
    */
-  fireChannel?: 'immediate' | 'slow';
+  fireChannel?: FireChannel;
   verdict: GateVerdict;
 }
+
+/** Which of the gate's two channels fired. */
+export type FireChannel = 'immediate' | 'slow';
 
 /**
  * The gate's verdict on one incoming user message. `muted` inside the

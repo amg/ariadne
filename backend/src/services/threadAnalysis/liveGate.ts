@@ -3,7 +3,7 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { type Result, err, ok } from '../../types/result';
 import { buildLiveTurns } from './messageTransformer/liveTurns';
 import { transformMessage } from './messageTransformer/transformMessage';
-import type { GateVerdict } from './types';
+import type { FireChannel, GateVerdict } from './types';
 
 /**
  * The live lane of the thread-health gate. Every arriving user message
@@ -18,7 +18,7 @@ import type { GateVerdict } from './types';
 export interface LiveArrivalOutcome {
   /** Verdict on the last processed arrival; null when nothing arrived. */
   verdict: GateVerdict | null;
-  fireChannel: 'immediate' | 'slow' | null;
+  fireChannel: FireChannel | null;
   slowDriftStartMessageId: string | null;
   /** The user Message the last arrival landed on; null when nothing arrived. */
   messageId: string | null;
@@ -113,7 +113,8 @@ async function transformArrivals({
   // advanced between the caller's request and its turn under the lock.
   if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
   const rows = await listMessagesByThread({ threadId });
-  const arrivals = buildLiveTurns(rows);
+  // Only the live conversation is gated; abandoned rows keep what they had.
+  const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
   if (arrivals.length === 0) return ok(EMPTY_OUTCOME);
 
   let endIndex = arrivals.length;

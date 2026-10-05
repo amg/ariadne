@@ -10,7 +10,7 @@
  * this surface is private.
  */
 export { analyzeThread } from './analyzeThread';
-export { runLiveGate } from './liveGate';
+export { type LiveArrivalOutcome, runLiveGate } from './liveGate';
 export { buildLiveAnalysisView } from './liveView';
 export { renderThreadReport, type RenderedThreadReport } from './render';
 export {
@@ -26,6 +26,7 @@ export {
   type GateDivergenceRow,
   type GateReplayPoint,
   type GateReplaySection,
+  type FireChannel,
   type GateVerdict,
   type ThreadReport,
   type TopicSegmentTurn,
