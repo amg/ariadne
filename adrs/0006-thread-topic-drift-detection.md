@@ -1,7 +1,8 @@
 # ADR 0006: Thread topic drift detection
 
 ## Status
-Accepted
+Accepted. Amended by ADR 0010: a fire on a fresh arrival now pauses the
+reply for the user to choose, instead of only marking the message.
 
 ## Context
 A thread ideally covers one topic. While the conversation stays on
