@@ -84,8 +84,10 @@ type UpdateMessageProps = {
 };
 
 /**
- * The edit fork — prompts only. The thread's last user message is
- * editable, and an edit ABANDONS its arrival rather than rewriting it:
+ * The edit fork — prompts only. The thread's last live user message is
+ * editable; an abandoned arrival after it (one handed over to another
+ * Thread, say) never counts. An edit ABANDONS its arrival rather than
+ * rewriting it:
  * the old row keeps its text and its arrival analysis (still correct for
  * the untouched reading), so its spend keeps tracking the pre-edit costs;
  * every reply grown from the old text is abandoned with it. The edited
@@ -115,7 +117,7 @@ export async function editMessage({
 
   let lastUserIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user') {
+    if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
       lastUserIndex = i;
       break;
     }
@@ -130,7 +132,13 @@ export async function editMessage({
   // the thread burned — while retry, inference memory and listing skip
   // them. The fork lands after them.
   await setMessagesAbandoned({
-    messageIds: [lastUser.id, ...rows.slice(lastUserIndex + 1).map((row) => row.id)],
+    messageIds: [
+      lastUser.id,
+      ...rows
+        .slice(lastUserIndex + 1)
+        .filter((row) => !row.abandoned)
+        .map((row) => row.id),
+    ],
     abandoned: true,
   });
 

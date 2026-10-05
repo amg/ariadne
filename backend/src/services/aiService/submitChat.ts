@@ -8,7 +8,6 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { isHandedOverMessage } from '@queries/threadSeeds/isHandedOverMessage';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
 import {
@@ -254,16 +253,6 @@ async function guardOrSettleStaleExchange(
   return null;
 }
 
-/**
- * A handed-over arrival lives on in its fresh Thread; reviving it in its
- * old one would put the same message in two Threads.
- */
-async function handedOverErrorOrNull(userMessage: Message): Promise<ResultError | null> {
-  if (!userMessage.abandoned) return null;
-  if (!(await isHandedOverMessage({ messageId: userMessage.id }))) return null;
-  return err('arrival_handed_over', 'The last message moved to a new chat.');
-}
-
 /** Shared tail of both entry points: assistant row + provider stream. */
 async function startExchange({
   userId,
@@ -430,9 +419,9 @@ export async function submitChat({
 /**
  * User-initiated retry of the last inference (useChat `regenerate` trigger).
  * The server is authoritative — the client's message list is ignored. The
- * retry revives the newest user turn it re-exchanges (a turn of exchange-
- * debris returns to the live conversation) and flags the stale assistant
- * rows beneath it abandoned in place — the rows stay, their usage keeps
+ * retry re-exchanges the newest live user turn (an abandoned arrival, such
+ * as one handed over to another Thread, is never revived) and flags the
+ * stale assistant rows beneath it abandoned in place — the rows stay, their usage keeps
  * tracking what the failed run burned, and the regenerate lands beneath
  * them. A retry replaying an arrival's stored verdict never pauses — that
  * is how a paused arrival continues in its own Thread. An arrival judged
@@ -458,22 +447,18 @@ export async function retryLastExchange({
   const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId });
   if (inFlight) return inFlight;
 
-  // The target is the newest user turn — revived: an abandoned arrival
-  // re-joining the live conversation, its stale assistant rows overrun by
-  // the regenerate.
+  // The target is the newest live user turn; its stale assistant rows are
+  // overrun by the regenerate.
   let userIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user') {
+    if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
       userIndex = i;
       break;
     }
   }
   const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
   if (!userMessage) return err('nothing_to_regenerate');
-  const handedOver = await handedOverErrorOrNull(userMessage);
-  if (handedOver) return handedOver;
 
-  await setMessagesAbandoned({ messageIds: [userMessage.id], abandoned: false });
   // Stale answers stay — flagged abandoned with their usage rows intact,
   // the honest cost of the failed run; the regenerate lands beneath them.
   await setMessagesAbandoned({

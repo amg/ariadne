@@ -12,7 +12,7 @@ export function UserMessageRow({
   row: DisplayRow;
   isLastUser: boolean;
   busy: boolean;
-  onEditMessage: (messageId: string, content: string) => void;
+  onEditMessage: (messageId: string, content: string) => Promise<boolean>;
 }) {
   const { message } = row;
   const [draft, setDraft] = useState<string | null>(null);
@@ -35,9 +35,9 @@ export function UserMessageRow({
           draft={draft ?? ''}
           onDraftChange={setDraft}
           onCancel={() => setDraft(null)}
-          onSave={(content) => {
-            onEditMessage(message.id, content);
-            setDraft(null);
+          onSave={async (content) => {
+            // A rejected edit keeps the box open so the text is not lost.
+            if (await onEditMessage(message.id, content)) setDraft(null);
           }}
         />
       ) : (

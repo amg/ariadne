@@ -11,7 +11,7 @@ export function MessageRow(props: {
   busy: boolean;
   status: ChatViewStatus;
   onRetryLast: () => void;
-  onEditMessage: (messageId: string, content: string) => void;
+  onEditMessage: (messageId: string, content: string) => Promise<boolean>;
 }) {
   const role = props.row.message.role;
   if (role === 'system') return <SystemMessageRow row={props.row} />;

@@ -40,7 +40,6 @@ function extractLastUserText(messages: ChatRequestBody['messages']): string {
 /** Failures where the thread's state forbids the exchange, with their fallback text. */
 const CONFLICT_MESSAGES: Record<string, string> = {
   arrival_paused: 'The last message is waiting for a choice.',
-  arrival_handed_over: 'The last message moved to a new chat.',
   nothing_to_regenerate: 'The thread has no exchange to retry.',
   exchange_in_flight: 'An exchange is already running in this thread.',
 };

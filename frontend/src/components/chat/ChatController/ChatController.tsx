@@ -7,6 +7,7 @@ import {
 } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import ChatView from '../ChatView';
 import type { RestoredDraft } from '../ChatView/types';
 import {
@@ -213,7 +214,8 @@ export default function ChatController({
 
   /**
    * Saves a prompt edit: the server abandons the old turn in place and
-   * returns the fork; the exchange then regenerates from the fork.
+   * returns the fork; the exchange then regenerates from the fork. A
+   * rejected edit is reported, and resolves false.
    */
   const editMessage = async (messageId: string, content: string): Promise<boolean> => {
     const trimmed = content.trim();
@@ -223,7 +225,10 @@ export default function ChatController({
       onSettle(); // refetch: abandoned turn vanishes, the fork appears
       retryLast({ messageId: forked.id, content: trimmed });
       return true;
-    } catch {
+    } catch (error) {
+      toast.error('Could not save the edit', {
+        description: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   };

@@ -3,6 +3,7 @@ import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsag
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { SYSTEM_PROMPT } from '@services/aiService/config';
@@ -169,6 +170,33 @@ describe('messageService', () => {
 
       expect(result.type).toBe('error');
       if (result.type === 'error') expect(result.code).toBe('invalid_content');
+    });
+
+    it('edits the last visible prompt when a handed-over arrival trails it', async () => {
+      const { userId, threadId } = await createRandomThread();
+      await insertMessage({ threadId, role: 'user', content: 'I love rabbits' });
+      await insertMessage({ threadId, role: 'assistant', content: 'Lovely.' });
+      const lastVisible = await insertMessage({
+        threadId,
+        role: 'user',
+        content: 'Had them for years',
+      });
+      await insertMessage({ threadId, role: 'assistant', content: 'Wonderful.' });
+      const handedOver = await insertMessage({
+        threadId,
+        role: 'user',
+        content: 'Best hot spring?',
+      });
+      await setMessagesAbandoned({ messageIds: [handedOver.id], abandoned: true });
+
+      const result = await editMessage({
+        userId,
+        threadId,
+        messageId: lastVisible.id,
+        content: 'Had them for years.',
+      });
+
+      expect(result).toMatchObject({ type: 'success', data: { content: 'Had them for years.' } });
     });
 
     it('refuses to edit assistant replies or earlier prompts', async () => {

@@ -288,12 +288,17 @@ export function pausedArrivalIdOrNull(
   return settledRows.some((row) => row.id === last.id) ? last.id : null;
 }
 
+/**
+ * Index of the row with `overrideId`, or else of the newest live user row
+ * (an abandoned arrival, such as one handed over, never counts); -1 when
+ * there is none.
+ */
 export function findTargetUserMessageIndex(rows: Message[], overrideId?: string): number {
   if (overrideId) {
     return rows.findIndex((row) => row.id === overrideId);
   }
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i].role === 'user') return i;
+    if (rows[i].role === 'user' && !rows[i].abandoned) return i;
   }
   return -1;
 }
