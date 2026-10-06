@@ -8,64 +8,80 @@ import {
   type WorkerUtils,
 } from 'graphile-worker';
 import { logger } from '../src/logger';
-import { TaskFailure, classifiedTaskError, classifyTaskError } from './errors';
+import { classifiedTaskError, classifyTaskError } from './errors';
+import { whenArrivalJudged, whenJudgmentAbandoned } from './flows/driftGate';
+import { judgeArrival } from './tasks/driftGateJudgeArrivalTask';
+import { executeMemoryCaptureSegment } from './tasks/memoryCaptureSegmentTask';
+
+/** The identifier of a task the worker knows, and so the payload its jobs carry. */
+export type TaskName = keyof GraphileWorker.Tasks;
+
+/** A job's payload, as the task's own enqueue side wrote it. */
+export type TaskPayload<Name extends TaskName> = GraphileWorker.Tasks[Name];
 
 /** One kind of background work, as the worker runs it. */
-export interface QueueTask<Payload> {
-  /** The task's identifier in the queue. */
-  name: string;
-  /** The job's payload, checked; null when it is not one this task reads. */
-  payloadOrNull(raw: unknown): Payload | null;
-  execute(payload: Payload): Promise<void>;
+export interface QueueTask<Name extends TaskName> {
+  execute(payload: TaskPayload<Name>): Promise<void>;
   /**
    * Runs once a job will not run again on its own: it failed fatally, or
    * its last attempt failed.
    */
-  onGivenUp?(payload: Payload, errorClass: JobErrorClass): Promise<void>;
+  onGivenUp?(payload: TaskPayload<Name>, errorClass: JobErrorClass): Promise<void>;
 }
 
-/** A task ready to register with the worker. */
-export interface RegisteredTask {
-  name: string;
-  run: Task;
-}
-
-async function reportGivenUp<Payload>(
-  task: QueueTask<Payload>,
-  payload: Payload,
+async function reportGivenUp<Name extends TaskName>(
+  name: Name,
+  task: QueueTask<Name>,
+  payload: TaskPayload<Name>,
   errorClass: JobErrorClass,
 ): Promise<void> {
   try {
     await task.onGivenUp?.(payload, errorClass);
   } catch (error) {
-    logger.error({ err: error, task: task.name }, 'queue task give-up hook failed');
+    logger.error({ err: error, task: name }, 'queue task give-up hook failed');
   }
 }
 
 /**
- * Wraps a task for the worker: an unreadable payload fails it fatally, and
- * every failure is recorded with its class so readers of the queue can
- * tell a retryable job from one waiting for the operator.
+ * Wraps a task for the worker, recording every failure with its class so
+ * readers of the queue can tell a retryable job from one waiting for the
+ * operator.
  */
-export function registeredTask<Payload>(task: QueueTask<Payload>): RegisteredTask {
-  return {
-    name: task.name,
-    run: async (raw, helpers) => {
-      const payload = task.payloadOrNull(raw);
-      try {
-        if (payload === null) {
-          throw new TaskFailure('invalid_task_payload', JSON.stringify(raw));
-        }
-        await task.execute(payload);
-      } catch (error) {
-        const errorClass = classifyTaskError(error);
-        const lastAttempt = helpers.job.attempts >= helpers.job.max_attempts;
-        if (payload !== null && (errorClass === 'fatal' || lastAttempt)) {
-          await reportGivenUp(task, payload, errorClass);
-        }
-        throw classifiedTaskError(error);
+export function registeredTask<Name extends TaskName>(
+  name: Name,
+  task: QueueTask<Name>,
+): Task<Name> {
+  return async (raw, helpers) => {
+    // The engine hands back JSON the enqueue side wrote; shape changes ride
+    // a renamed task, not this cast.
+    const payload = raw as TaskPayload<Name>;
+    try {
+      await task.execute(payload);
+    } catch (error) {
+      const errorClass = classifyTaskError(error);
+      const lastAttempt = helpers.job.attempts >= helpers.job.max_attempts;
+      if (errorClass === 'fatal' || lastAttempt) {
+        await reportGivenUp(name, task, payload, errorClass);
       }
-    },
+      throw classifiedTaskError(error);
+    }
+  };
+}
+
+/**
+ * Every task this deployment runs. Each task computes its outcome; its
+ * flow translates that outcome into announcements and follow-up work.
+ */
+export function queueTasks(): TaskList {
+  return {
+    driftGateJudgeArrival: registeredTask('driftGateJudgeArrival', {
+      execute: async (params) =>
+        whenArrivalJudged({ params, judgment: await judgeArrival(params) }),
+      onGivenUp: async (params) => whenJudgmentAbandoned(params),
+    }),
+    memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
+      execute: executeMemoryCaptureSegment,
+    }),
   };
 }
 
@@ -109,10 +125,9 @@ const queueLogger = new Logger((scope) => (level, message) => {
 });
 
 export function queueRuntime(
-  tasks: readonly RegisteredTask[],
+  taskList: TaskList,
   utils: Pick<WorkerUtils, 'permanentlyFailJobs'>,
 ): QueueRuntime {
-  const taskList: TaskList = Object.fromEntries(tasks.map((task) => [task.name, task.run]));
   // The engine types its emitter with a typed-event overlay that a plain
   // EventEmitter satisfies at runtime but not structurally.
   const events = new EventEmitter() as WorkerEvents;

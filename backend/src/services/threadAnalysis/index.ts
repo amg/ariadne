@@ -10,7 +10,7 @@
  * this surface is private.
  */
 export { analyzeThread } from './analyzeThread';
-export { type LiveArrivalOutcome, runLiveGate } from './liveGate';
+export { runLiveGate } from './liveGate';
 export { buildLiveAnalysisView } from './liveView';
 export { renderThreadReport, type RenderedThreadReport } from './render';
 export {

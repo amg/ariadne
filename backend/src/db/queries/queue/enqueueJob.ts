@@ -1,24 +1,25 @@
+import { db } from '@db/db';
 import type { DbExecutor } from '@db/types';
 import { jobKeyOf } from './jobError';
 
-export type EnqueueJobProps = {
-  /** The task that runs the job. */
-  task: string;
-  payload: Record<string, unknown>;
+/** The task that runs the job, and the payload registered for it. */
+export type EnqueueJobProps<Name extends keyof GraphileWorker.Tasks> = {
+  task: Name;
+  payload: GraphileWorker.Tasks[Name];
   /** What the job works on; a second job for the same key merges into a waiting one. */
   key: string;
   maxAttempts: number;
 };
 
 /**
- * Queues a job on the given handle, so it commits or rolls back with the
- * caller's other writes. A job for the same task and key that is still
+ * Queues a job; given a transaction, the job commits or rolls back with
+ * the caller's other writes. A job for the same task and key that is still
  * waiting is replaced in place, its attempts reset; one already running or
  * dead hands its key over and a fresh job is queued behind it.
  */
-export async function enqueueJob(
-  executor: DbExecutor,
-  { task, payload, key, maxAttempts }: EnqueueJobProps,
+export async function enqueueJob<Name extends keyof GraphileWorker.Tasks>(
+  { task, payload, key, maxAttempts }: EnqueueJobProps<Name>,
+  executor: DbExecutor = db,
 ): Promise<void> {
   await executor
     .selectNoFrom((eb) =>

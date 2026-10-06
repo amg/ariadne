@@ -3,6 +3,20 @@ import { capturesSettled } from '@services/memory';
 import { sql } from 'kysely';
 import { afterAll, afterEach } from 'vitest';
 
+/** Resolves once no queue job is running; one mid-write would race the truncate. */
+async function queueJobsStopped(limitMs = 20_000): Promise<void> {
+  const deadline = Date.now() + limitMs;
+  for (;;) {
+    const running = await db
+      .selectFrom('queues.jobs')
+      .select('id')
+      .where('lockedAt', 'is not', null)
+      .executeTakeFirst();
+    if (!running || Date.now() > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 export async function cleanDatabase(): Promise<void> {
   await sql`truncate table messages, message_embeddings, thread_segments, segment_drift_logs, threads, users, model_configs cascade`.execute(
     db,
@@ -22,6 +36,7 @@ export async function cleanDatabase(): Promise<void> {
  */
 export function useTestDb(): void {
   afterEach(async () => {
+    await queueJobsStopped();
     await capturesSettled();
     await cleanDatabase();
   });

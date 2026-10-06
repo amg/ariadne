@@ -152,7 +152,7 @@ function stopOnSignal(signal: NodeJS.Signals) {
 const start = async () => {
   try {
     await seedDefaultUser();
-    await startQueue([]);
+    await startQueue();
     stopOnSignal('SIGINT');
     stopOnSignal('SIGTERM');
     await app.listen({ port: PORT, host: HOST });

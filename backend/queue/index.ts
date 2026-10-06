@@ -2,7 +2,7 @@ import { env } from '@config/env';
 import { listLockingWorkerIds } from '@queries/queue/listLockingWorkerIds';
 import { type Runner, type WorkerUtils, makeWorkerUtils, run } from 'graphile-worker';
 import { logger } from '../src/logger';
-import { type RegisteredTask, queueRuntime } from './worker';
+import { queueRuntime, queueTasks } from './worker';
 
 /** The database schema the queue keeps its tables in, apart from the app's. */
 export const QUEUE_SCHEMA = 'queues';
@@ -25,11 +25,11 @@ async function releaseLocksOfPastProcesses(utils: WorkerUtils): Promise<void> {
 }
 
 /**
- * Installs or upgrades the queue's schema, then starts working the given
- * tasks in this process. Jobs already waiting, including those a restart
+ * Installs or upgrades the queue's schema, then starts working every task
+ * in this process. Jobs already waiting, including those a restart
  * interrupted, run from here on.
  */
-export async function startQueue(tasks: readonly RegisteredTask[]): Promise<void> {
+export async function startQueue(): Promise<void> {
   if (active) return;
   const utils = await makeWorkerUtils({
     connectionString: env.DATABASE_URL,
@@ -37,7 +37,7 @@ export async function startQueue(tasks: readonly RegisteredTask[]): Promise<void
   });
   await utils.migrate();
   await releaseLocksOfPastProcesses(utils);
-  const runtime = queueRuntime(tasks, utils);
+  const runtime = queueRuntime(queueTasks(), utils);
   const runner = await run({
     connectionString: env.DATABASE_URL,
     schema: QUEUE_SCHEMA,

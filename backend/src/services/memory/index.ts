@@ -3,7 +3,8 @@
  * hook that turns closed segments into stored Facts, `captureUnreadTurns`
  * the on-demand pass that also reads the segment still open, and
  * `capturesSettled` waits out the captures in flight. `seedThread` freezes a fresh Thread's
- * Seed (`currentSeed` renders one for a caller that stores it itself), and
+ * Seed (`currentSeed` renders one for a caller that stores it itself).
+ * `memoryFeature` names which shape of Memory this deployment runs as, and
  * `assembledSystemPrompt` adds it to every Exchange. `editFactContent`
  * replaces a Fact with a user-edited sentence.
  *
@@ -12,6 +13,8 @@
  * the app should reach them.
  */
 export { captureFacts } from './captureFacts';
+export { memoryFeature } from './memoryFeature';
+export type { SegmentToCapture } from './memoryFeature';
 export {
   captureClosedSegments,
   captureUnreadTurns,

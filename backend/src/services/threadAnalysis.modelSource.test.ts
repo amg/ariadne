@@ -3,6 +3,7 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { editMessage, getMessages } from '@services/messageService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
@@ -188,6 +189,7 @@ describe('the live chain runs one per embedding model', () => {
     const lastUser = userMessageIds[userMessageIds.length - 1];
     if (!lastUser) throw new Error('seed too short');
     const edit = await editMessage({
+      judging: { enqueueDriftGateJudgeArrival },
       userId: USER_ID,
       threadId,
       messageId: lastUser,

@@ -36,6 +36,8 @@ export type EnvConfig = {
   // Exchange lifecycle (required - no defaults)
   /** How long an assistant row may stay `pending` before being declared lost. */
   EXCHANGE_STALENESS_MS: number;
+  /** How long a chat request holds its response open for the drift gate's verdict. */
+  GATE_WAIT_MS: number;
 
   // Global spend budget (rate limiting ticket)
   /** Daily spend budget in USD. Unset = no gate, fail open. */
@@ -196,6 +198,11 @@ export const env: EnvConfig = {
   // observed maximum settled latency).
   get EXCHANGE_STALENESS_MS() {
     return getNumber('EXCHANGE_STALENESS_MS', 300_000);
+  },
+  // Past this wait the request answers "still checking"; the judgment
+  // itself carries on in the background.
+  get GATE_WAIT_MS() {
+    return getNumber('GATE_WAIT_MS', 10_000);
   },
 
   // Global spend budget (rate limiting ticket)

@@ -1,4 +1,5 @@
 import { db } from '@db/db';
+import type { DbExecutor } from '@db/types';
 
 /**
  * Flags rows as abandoned or live: an edit abandons the turn it replaces,
@@ -8,13 +9,16 @@ import { db } from '@db/db';
  * what the thread burned — only listing, drafting, inference and reporting
  * skip them. Idempotent in both directions.
  */
-export async function setMessagesAbandoned({
-  messageIds,
-  abandoned,
-}: {
-  messageIds: string[];
-  abandoned: boolean;
-}): Promise<void> {
+export async function setMessagesAbandoned(
+  {
+    messageIds,
+    abandoned,
+  }: {
+    messageIds: string[];
+    abandoned: boolean;
+  },
+  executor: DbExecutor = db,
+): Promise<void> {
   if (messageIds.length === 0) return;
-  await db.updateTable('messages').set({ abandoned }).where('id', 'in', messageIds).execute();
+  await executor.updateTable('messages').set({ abandoned }).where('id', 'in', messageIds).execute();
 }

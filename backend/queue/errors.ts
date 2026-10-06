@@ -15,10 +15,7 @@ export class TaskFailure extends Error {
 }
 
 /** Codes that no retry can fix: the deployment or the job itself is wrong. */
-const FATAL_CODES: ReadonlySet<string> = new Set([
-  'provider_not_configured',
-  'invalid_task_payload',
-]);
+const FATAL_CODES: ReadonlySet<string> = new Set(['provider_not_configured']);
 
 /**
  * Provider answers that no retry can fix: rejected credentials, a model

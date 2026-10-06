@@ -7,22 +7,25 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
-import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
-import {
-  type FireChannel,
-  type GateVerdict,
-  type LiveArrivalOutcome,
-  runLiveGate,
-} from '@services/threadAnalysis';
+import { inTransaction } from '@queries/transaction/inTransaction';
+import { assembledSystemPrompt } from '@services/memory';
 import { validateMessageContent } from '@services/validation';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
 import { type Result, type ResultError, err, errBudgetExceeded, ok } from '../../types/result';
 import { renameThread } from '../threadService';
 import {
-  EMBEDDING_MODEL_ID,
+  type Arrival,
+  type ArrivalGateOutcome,
+  type ArrivalJudging,
+  type ArrivalVerdict,
+  type VerdictListener,
+  awaitArrivalGate,
+  listenForVerdict,
+  storedGateOutcomeOrNull,
+} from './arrivalGate';
+import {
   NOT_CONFIGURED_MESSAGE,
   SYSTEM_PROMPT,
   createModel,
@@ -36,19 +39,14 @@ import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
 /**
  * Per-call service boundary. Flow:
  *   1. verify thread ownership,
- *   2. resolve the user turn (insert it on `submitChat`, reuse the persisted
- *      last user row on `retryLastExchange`),
- *   3. run the live thread-health gate on the arriving user Message:
- *      expansion → embed → the shared two-channel verdict → persist,
- *      awaited before inference; a pipeline failure fails the whole
- *      exchange. Retries re-run the gate too — already-analysed
- *      arrivals replay (never re-embedded/re-judged), while a freshly
- *      forked arrival (an edit) is gated for the first time there;
- *      An arrival the gate fires on the first time it is judged pauses
- *      instead of exchanging — a new submit, or an edit's fork on retry:
- *      the user chooses to continue here (a retry, which replays the
- *      stored fire) or hand it over to a fresh Thread. Every gate pass also kicks off, in the background,
- *      the Fact capture of segments a Boundary turn has closed,
+ *   2. resolve the user turn (insert it on `submitChat`, together with its
+ *      queued Drift gate judgment; reuse the newest live user row on
+ *      `retryLastExchange`),
+ *   3. wait, briefly, for the Drift gate's verdict on that arrival. No
+ *      reply is ever generated for an arrival the gate has not judged: a
+ *      clear verdict starts the Exchange on this same response, a fire
+ *      pauses it, and an arrival still being judged when the wait runs
+ *      out, or one the gate could not judge, gets no reply yet,
  *   4. `streamText` over the full thread history, with the Thread's Seed
  *      prepended to the system prompt and inter-token idle timeout
  *      watched by the exchange,
@@ -71,13 +69,6 @@ export type ChatStreamHandle = {
   threadVerdict?: ArrivalVerdict;
 };
 
-/** The live gate's judgment of one arrival, as the stream reports it. */
-export interface ArrivalVerdict {
-  messageId: string;
-  verdict: GateVerdict;
-  fireChannel: FireChannel | null;
-}
-
 /**
  * A submit whose arrival the gate fired on: the user Message is stored,
  * no Exchange started. It waits for the user to continue in this Thread
@@ -94,38 +85,29 @@ export function isDriftPause(submission: ChatSubmission): submission is DriftPau
   return 'paused' in submission;
 }
 
-/** The verdict a gate outcome reports; null when no arrival was judged. */
-function arrivalVerdictOrNull(outcome: LiveArrivalOutcome): ArrivalVerdict | null {
-  if (outcome.verdict === null || outcome.messageId === null) return null;
-  return {
-    messageId: outcome.messageId,
-    verdict: outcome.verdict,
-    fireChannel: outcome.fireChannel,
-  };
-}
-
-/** The pause a gate outcome calls for; null unless it fired on an arrival. */
-function driftPauseOrNull(outcome: LiveArrivalOutcome): DriftPause | null {
-  if (outcome.verdict !== 'fire' || outcome.messageId === null) return null;
-  return {
-    paused: true,
-    threadVerdict: {
-      messageId: outcome.messageId,
-      verdict: 'fire',
-      fireChannel: outcome.fireChannel,
-    },
-  };
-}
-
 type SubmitChatProps = {
   userId: string;
   threadId: string;
   content: string;
+  judging: ArrivalJudging;
+  /** Aborts when the client stops waiting; the judgment carries on without it. */
+  signal?: AbortSignal;
 };
+
+/**
+ * What the user asks of a retry. `continue` is the choice to keep a Paused
+ * arrival in its Thread: its stored fire is replayed and the reply runs.
+ * A plain `retry` of a Paused arrival only reports the pause again.
+ */
+export type RetryChoice = 'retry' | 'continue';
 
 type RetryLastExchangeProps = {
   userId: string;
   threadId: string;
+  choice: RetryChoice;
+  judging: ArrivalJudging;
+  /** Aborts when the client stops waiting; the judgment carries on without it. */
+  signal?: AbortSignal;
 };
 
 const STREAM_ERROR_MESSAGE = 'The assistant hit an error while generating the reply.';
@@ -357,10 +339,76 @@ async function startExchange({
   };
 }
 
+/**
+ * The refusal a submit gets while the newest live row is an arrival with
+ * no reply: nothing else enters the Thread until it is answered. A Paused
+ * arrival waits for the user's choice; any other waits for its retry.
+ * Null when the Thread is free.
+ */
+async function unansweredArrivalErrorOrNull(rows: Message[]): Promise<ResultError | null> {
+  const newestLive = rows.filter((row) => !row.abandoned).at(-1);
+  if (newestLive?.role !== 'user') return null;
+  if (await pausedArrivalOrNull(rows)) {
+    return err(
+      'arrival_paused',
+      'The last message changed the topic: continue it in this thread or start a new chat from it first.',
+    );
+  }
+  return err('arrival_unanswered', 'The last message has no reply yet: retry it first.');
+}
+
+/**
+ * Stores the arrival and queues its judgment in one transaction, with a
+ * listener already open for the verdict: the judgment cannot land before
+ * anyone hears it.
+ */
+async function storeArrival(
+  { userId, threadId, content }: { userId: string; threadId: string; content: string },
+  judging: ArrivalJudging,
+): Promise<{ userMessage: Message; listener: VerdictListener }> {
+  const opened: { listener?: VerdictListener } = {};
+  try {
+    return await inTransaction(async (trx) => {
+      const userMessage = await insertMessage({ threadId, role: 'user', content }, trx);
+      const arrival: Arrival = { userId, threadId, messageId: userMessage.id };
+      opened.listener = listenForVerdict(arrival);
+      await judging.enqueueDriftGateJudgeArrival(arrival, trx);
+      return { userMessage, listener: opened.listener };
+    });
+  } catch (error) {
+    opened.listener?.close();
+    throw error;
+  }
+}
+
+/**
+ * What a chat request answers once the gate has spoken: the Exchange on a
+ * clear verdict, the pause on a fire (unless the user chose to continue
+ * past it), and no reply while the verdict is missing.
+ */
+async function submissionForGate(
+  gate: ArrivalGateOutcome,
+  pauseOnFire: boolean,
+  exchange: StartExchangeProps,
+): Promise<Result<ChatSubmission>> {
+  if (gate.kind === 'pending') {
+    return err('gate_pending', 'The message is still being checked. Try again shortly.');
+  }
+  if (gate.kind === 'failed') return err('gate_failed', 'The message could not be checked.');
+  if (gate.kind === 'paused' && pauseOnFire) {
+    return ok({ paused: true, threadVerdict: gate.verdict });
+  }
+  const handle = await startExchange(exchange);
+  if (gate.verdict) handle.threadVerdict = gate.verdict;
+  return ok(handle);
+}
+
 export async function submitChat({
   userId,
   threadId,
   content,
+  judging,
+  signal,
 }: SubmitChatProps): Promise<Result<ChatSubmission>> {
   const contentResult = validateMessageContent(content);
   if (contentResult.type === 'error') return contentResult;
@@ -390,47 +438,42 @@ export async function submitChat({
   const precedingRows = await listMessagesByThread({ threadId });
   const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId });
   if (inFlight) return inFlight;
-  if (await pausedArrivalOrNull(precedingRows)) {
-    return err(
-      'arrival_paused',
-      'The last message changed the topic: continue it in this thread or start a new chat from it first.',
-    );
-  }
+  const unanswered = await unansweredArrivalErrorOrNull(precedingRows);
+  if (unanswered) return unanswered;
 
-  const userMessage = await insertMessage({ threadId, role: 'user', content: normalized });
-
-  // The live gate judges the arriving message before inference: the
-  // pipeline persists every step as it completes, so a failure leaves the
-  // user row in place (regenerate retries the exchange) and a later
-  // arrival backfills whatever this run did not finish.
-  const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
-  if (gate.type === 'error') return gate;
-  void captureClosedSegments({ userId, threadId });
-
-  const pause = driftPauseOrNull(gate.data);
-  if (pause) return ok(pause);
-
-  const handle = await startExchange({ userId, threadId, precedingRows, userMessage });
-  const verdict = arrivalVerdictOrNull(gate.data);
-  if (verdict) handle.threadVerdict = verdict;
-  return ok(handle);
+  const { userMessage, listener } = await storeArrival(
+    { userId, threadId, content: normalized },
+    judging,
+  );
+  const gate = await awaitArrivalGate({
+    arrival: { userId, threadId, messageId: userMessage.id },
+    listener,
+    judging,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return submissionForGate(gate, true, { userId, threadId, precedingRows, userMessage });
 }
 
 /**
  * User-initiated retry of the last inference (useChat `regenerate` trigger).
  * The server is authoritative — the client's message list is ignored. The
- * retry re-exchanges the newest live user turn (an abandoned arrival, such
- * as one handed over to another Thread, is never revived) and flags the
- * stale assistant rows beneath it abandoned in place — the rows stay, their usage keeps
- * tracking what the failed run burned, and the regenerate lands beneath
- * them. A retry replaying an arrival's stored verdict never pauses — that
- * is how a paused arrival continues in its own Thread. An arrival judged
- * for the first time here (an edit's fork, or a submit whose gate failed)
- * pauses on a fire like any fresh arrival.
+ * retry targets the newest live user turn (an abandoned arrival, such as
+ * one handed over to another Thread, is never revived).
+ *
+ * An arrival already answered is re-exchanged: the stale assistant rows
+ * beneath it are flagged abandoned in place — the rows stay, their usage
+ * keeps tracking what the failed run burned — and the regenerate lands
+ * beneath them. An arrival with no reply yet waits on the Drift gate the
+ * way a submit does, queueing its judgment again when none is under way.
+ * A Paused arrival continues in its Thread only when the user chooses
+ * `continue`; a plain retry reports the pause again.
  */
 export async function retryLastExchange({
   userId,
   threadId,
+  choice,
+  judging,
+  signal,
 }: RetryLastExchangeProps): Promise<Result<ChatSubmission>> {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
@@ -447,8 +490,6 @@ export async function retryLastExchange({
   const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId });
   if (inFlight) return inFlight;
 
-  // The target is the newest live user turn; its stale assistant rows are
-  // overrun by the regenerate.
   let userIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
@@ -459,38 +500,30 @@ export async function retryLastExchange({
   const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
   if (!userMessage) return err('nothing_to_regenerate');
 
-  // Stale answers stay — flagged abandoned with their usage rows intact,
-  // the honest cost of the failed run; the regenerate lands beneath them.
-  await setMessagesAbandoned({
-    messageIds: rows
-      .slice(userIndex + 1)
-      .filter((row) => row.role === 'assistant' && !row.abandoned)
-      .map((row) => row.id),
-    abandoned: true,
-  });
-
-  // The exchanged arrival is gated: already-analysed arrivals replay
-  // (never re-embedded, never re-judged — cheap and idempotent), while a
-  // freshly forked arrival — an edit abandoned the old text there and
-  // inserted this row — is gated for the first time here.
-  const judgedBefore = await findSegmentDriftLogByMessageId({
-    messageId: userMessage.id,
-    modelId: EMBEDDING_MODEL_ID,
-  });
-  const gate = await runLiveGate({ threadId, upToMessageId: userMessage.id });
-  if (gate.type === 'error') return gate;
-  void captureClosedSegments({ userId, threadId });
-
-  const pause = judgedBefore ? null : driftPauseOrNull(gate.data);
-  if (pause) return ok(pause);
-
-  const handle = await startExchange({
+  const exchange: StartExchangeProps = {
     userId,
     threadId,
     precedingRows: rows.slice(0, userIndex),
     userMessage,
+  };
+  const staleReplyIds = rows
+    .slice(userIndex + 1)
+    .filter((row) => row.role === 'assistant' && !row.abandoned)
+    .map((row) => row.id);
+  if (staleReplyIds.length > 0) {
+    await setMessagesAbandoned({ messageIds: staleReplyIds, abandoned: true });
+    const handle = await startExchange(exchange);
+    const stored = await storedGateOutcomeOrNull(userMessage.id);
+    if (stored?.verdict) handle.threadVerdict = stored.verdict;
+    return ok(handle);
+  }
+
+  const arrival: Arrival = { userId, threadId, messageId: userMessage.id };
+  const gate = await awaitArrivalGate({
+    arrival,
+    listener: listenForVerdict(arrival),
+    judging,
+    ...(signal === undefined ? {} : { signal }),
   });
-  const verdict = arrivalVerdictOrNull(gate.data);
-  if (verdict) handle.threadVerdict = verdict;
-  return ok(handle);
+  return submissionForGate(gate, choice !== 'continue', exchange);
 }

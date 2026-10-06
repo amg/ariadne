@@ -5,7 +5,12 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
+  enqueueDriftGateJudgeArrival,
+  findDriftGateJudgeArrivalJobOrNull,
+} from '@queue/tasks/driftGateJudgeArrivalTask';
+import {
   type ChatStreamHandle,
+  type RetryChoice,
   isDriftPause,
   retryLastExchange,
   submitChat,
@@ -13,6 +18,7 @@ import {
 import { handOverArrival } from '@services/handoverService';
 import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
 import { editMessage } from '@services/messageService';
+import { useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -36,6 +42,17 @@ afterAll(async () => {
 });
 
 useTestDb();
+useTestQueue();
+
+const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+
+function submit(props: { userId: string; threadId: string; content: string }) {
+  return submitChat({ ...props, judging });
+}
+
+function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
+  return retryLastExchange({ ...props, choice, judging });
+}
 
 async function drain(handle: ChatStreamHandle): Promise<void> {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
@@ -51,13 +68,13 @@ async function pausedThread() {
   const thread = await insertThread({ userId, title: 'Pause thread' });
   const threadId = thread.id;
 
-  const opening = await submitChat({ userId, threadId, content: 'I love hiking in the Alps' });
+  const opening = await submit({ userId, threadId, content: 'I love hiking in the Alps' });
   if (opening.type !== 'success' || isDriftPause(opening.data)) {
     throw new Error('the opening arrival must exchange');
   }
   await drain(opening.data);
 
-  const shift = await submitChat({
+  const shift = await submit({
     userId,
     threadId,
     content: 'Explain how espresso machines work',
@@ -80,7 +97,7 @@ describe('drift pause', () => {
   it('refuses a further submit until the user chooses', async () => {
     const { userId, threadId } = await pausedThread();
 
-    const next = await submitChat({ userId, threadId, content: 'hello again' });
+    const next = await submit({ userId, threadId, content: 'hello again' });
 
     expect(next).toMatchObject({ type: 'error', code: 'arrival_paused' });
   });
@@ -88,7 +105,7 @@ describe('drift pause', () => {
   it('continues in the same thread through a retry', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
 
-    const continued = await retryLastExchange({ userId, threadId });
+    const continued = await retryExchange({ userId, threadId }, 'continue');
     if (continued.type !== 'success' || isDriftPause(continued.data)) {
       throw new Error('the retry must exchange');
     }
@@ -104,20 +121,21 @@ describe('drift pause', () => {
 describe('edit into a new topic', () => {
   it('pauses the fork on its first judgment instead of exchanging', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
-    const continued = await retryLastExchange({ userId, threadId });
+    const continued = await retryExchange({ userId, threadId }, 'continue');
     if (continued.type !== 'success' || isDriftPause(continued.data)) {
       throw new Error('the retry must exchange');
     }
     await drain(continued.data);
 
     const fork = await editMessage({
+      judging,
       userId,
       threadId,
       messageId: pausedMessageId,
       content: 'Tell me about volcanoes in Iceland',
     });
     if (fork.type !== 'success') throw new Error('the edit must fork');
-    const retried = await retryLastExchange({ userId, threadId });
+    const retried = await retryExchange({ userId, threadId });
 
     expect(retried.type === 'success' && isDriftPause(retried.data)).toBe(true);
     const rows = await listMessagesByThread({ threadId });
@@ -157,7 +175,7 @@ describe('handOverArrival', () => {
     expect(prompt).toContain('The user loves hiking in the Alps.');
 
     // The stored first message gets its reply through a retry.
-    const reply = await retryLastExchange({ userId, threadId: freshThreadId });
+    const reply = await retryExchange({ userId, threadId: freshThreadId });
     if (reply.type !== 'success' || isDriftPause(reply.data)) {
       throw new Error('the fresh thread must exchange');
     }
@@ -169,7 +187,7 @@ describe('handOverArrival', () => {
     ]);
 
     // The old thread is free again: its newest live row is a settled reply.
-    const next = await submitChat({ userId, threadId, content: 'Back to hiking boots' });
+    const next = await submit({ userId, threadId, content: 'Back to hiking boots' });
     expect(next.type).toBe('success');
   });
 
@@ -210,7 +228,7 @@ describe('handOverArrival', () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
     await handOverArrival({ userId, threadId, messageId: pausedMessageId });
 
-    const retried = await retryLastExchange({ userId, threadId });
+    const retried = await retryExchange({ userId, threadId });
     if (retried.type !== 'success' || isDriftPause(retried.data)) {
       throw new Error('the last live turn must exchange');
     }
@@ -234,6 +252,7 @@ describe('handOverArrival', () => {
     if (!opening) throw new Error('the opening prompt must stay live');
 
     const fork = await editMessage({
+      judging,
       userId,
       threadId,
       messageId: opening.id,
@@ -244,7 +263,7 @@ describe('handOverArrival', () => {
       data: { content: 'I love hiking in the Alps.' },
     });
 
-    const retried = await retryLastExchange({ userId, threadId });
+    const retried = await retryExchange({ userId, threadId });
     if (retried.type !== 'success' || isDriftPause(retried.data)) {
       throw new Error('the fork must exchange');
     }

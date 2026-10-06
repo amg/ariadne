@@ -1,4 +1,3 @@
-import { db } from '@db/db';
 import { enqueueJob } from '@queries/queue/enqueueJob';
 import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
 import { listDeadJobs } from '@queries/queue/listDeadJobs';
@@ -11,18 +10,19 @@ import { describe, expect, it } from 'vitest';
 
 useTestDb();
 
-type Payload = { subject: string };
+declare global {
+  namespace GraphileWorker {
+    interface Tasks {
+      probeRun: { subject: string };
+    }
+  }
+}
 
 /** A task that records each run and fails however the test asks it to. */
 function probeTask(failure: () => Error | null) {
   const runs: string[] = [];
   const givenUp: string[] = [];
-  const task: QueueTask<Payload> = {
-    name: 'probeRun',
-    payloadOrNull: (raw) =>
-      typeof raw === 'object' && raw !== null && 'subject' in raw && typeof raw.subject === 'string'
-        ? { subject: raw.subject }
-        : null,
+  const task: QueueTask<'probeRun'> = {
     execute: async ({ subject }) => {
       runs.push(subject);
       const error = failure();
@@ -32,16 +32,11 @@ function probeTask(failure: () => Error | null) {
       givenUp.push(`${subject}:${errorClass}`);
     },
   };
-  return { runs, givenUp, tasks: [registeredTask(task)] };
+  return { runs, givenUp, tasks: { probeRun: registeredTask('probeRun', task) } };
 }
 
-function enqueueProbe(key: string, payload: unknown = { subject: key }) {
-  return enqueueJob(db, {
-    task: 'probeRun',
-    payload: payload as Record<string, unknown>,
-    key,
-    maxAttempts: 3,
-  });
+function enqueueProbe(key: string, payload: { subject: string } = { subject: key }) {
+  return enqueueJob({ task: 'probeRun', payload, key, maxAttempts: 3 });
 }
 
 describe('enqueueJob', () => {
@@ -59,21 +54,17 @@ describe('enqueueJob', () => {
 
   it('commits with the transaction it is given, and not without it', async () => {
     await inTransaction(async (trx) => {
-      await enqueueJob(trx, {
-        task: 'probeRun',
-        payload: { subject: 'kept' },
-        key: 'kept',
-        maxAttempts: 3,
-      });
+      await enqueueJob(
+        { task: 'probeRun', payload: { subject: 'kept' }, key: 'kept', maxAttempts: 3 },
+        trx,
+      );
     });
     await expect(
       inTransaction(async (trx) => {
-        await enqueueJob(trx, {
-          task: 'probeRun',
-          payload: { subject: 'dropped' },
-          key: 'dropped',
-          maxAttempts: 3,
-        });
+        await enqueueJob(
+          { task: 'probeRun', payload: { subject: 'dropped' }, key: 'dropped', maxAttempts: 3 },
+          trx,
+        );
         throw new Error('roll back');
       }),
     ).rejects.toThrow('roll back');
@@ -132,20 +123,6 @@ describe('the worker', () => {
     });
   });
 
-  it('fails a job it cannot read fatally, without running it', async () => {
-    const probe = probeTask(() => null);
-    await enqueueProbe('garbled', { nonsense: true });
-
-    await drainQueue(probe.tasks);
-
-    expect(probe.runs).toEqual([]);
-    expect(probe.givenUp).toEqual([]);
-    expect(await findJobByKeyOrNull({ task: 'probeRun', key: 'garbled' })).toMatchObject({
-      state: 'dead',
-      errorClass: 'fatal',
-    });
-  });
-
   it('queues a fresh job behind a dead one when the same key is asked for again', async () => {
     let failing = true;
     const probe = probeTask(() => (failing ? new TaskFailure('provider_not_configured') : null));
@@ -168,7 +145,7 @@ describe('the worker', () => {
 describe('classifyTaskError', () => {
   it('treats missing configuration, rejected credentials and bad input as fatal', () => {
     expect(classifyTaskError(new TaskFailure('provider_not_configured'))).toBe('fatal');
-    expect(classifyTaskError(new TaskFailure('invalid_task_payload'))).toBe('fatal');
+    expect(classifyTaskError(new TaskFailure('provider_not_configured'))).toBe('fatal');
     expect(classifyTaskError(Object.assign(new Error('unauthorized'), { statusCode: 401 }))).toBe(
       'fatal',
     );

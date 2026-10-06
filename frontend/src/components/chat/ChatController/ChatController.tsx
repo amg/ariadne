@@ -190,7 +190,12 @@ export default function ChatController({
     sendThreadMessage(threadId, trimmed);
   };
 
-  const retryLast = (override?: { messageId: string; content: string }) => {
+  /**
+   * Asks the server for the last arrival's reply again. `continueHere`
+   * carries the user's choice to keep a Paused arrival in this thread;
+   * without it, a Paused arrival only reports its pause again.
+   */
+  const retryLast = (override?: { messageId: string; content: string }, continueHere = false) => {
     if (chat.status === 'submitted' || chat.status === 'streaming') return;
     if (rows.length === 0) return;
 
@@ -206,7 +211,7 @@ export default function ChatController({
 
     chat.setMessages(plan.seeded);
     try {
-      void chat.regenerate();
+      void chat.regenerate(continueHere ? { body: { choice: 'continue' } } : undefined);
     } catch {
       // No settled rows: nothing to retry.
     }
@@ -248,7 +253,7 @@ export default function ChatController({
       onEditMessage={editMessage}
       pausedMessageId={pausedMessageId}
       handingOver={handingOver}
-      onContinueHere={() => retryLast()}
+      onContinueHere={() => retryLast(undefined, true)}
       onStartNewChat={() => void startNewChat()}
     />
   );

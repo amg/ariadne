@@ -6,6 +6,7 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { editMessage, getMessages } from '@services/messageService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
@@ -612,6 +613,7 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     // The edit forks: the arrival is abandoned, never rewritten.
     const editedContent = `${originalContent} — revised${PAD}`;
     const edit = await editMessage({
+      judging: { enqueueDriftGateJudgeArrival },
       userId: USER_ID,
       threadId,
       messageId: lastUser,

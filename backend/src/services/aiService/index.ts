@@ -8,7 +8,8 @@
  * context-clarity verdict call), extractFacts.ts, judgeFactDuplicate.ts and
  * classifyFact.ts (the memory pipeline's extraction, duplicate-check and
  * edit-classification calls),
- * exchange.ts (per-exchange lifecycle/persistence + idle watchdog), submitChat.ts (flow).
+ * exchange.ts (per-exchange lifecycle/persistence + idle watchdog),
+ * arrivalGate.ts (waiting on the Drift gate's verdict), submitChat.ts (flow).
  */
 export { computeCostUsd } from './cost';
 export { computeEmbeddingCostUsd, computeInferenceCostUsd } from './pricing';
@@ -35,10 +36,12 @@ export {
   clearActiveExchange,
 } from './exchangeRegistry';
 export { pausedArrivalOrNull } from './pausedArrival';
+export type { ArrivalJudging } from './arrivalGate';
 export {
   isDriftPause,
   retryLastExchange,
   submitChat,
   type ChatStreamHandle,
   type DriftPause,
+  type RetryChoice,
 } from './submitChat';

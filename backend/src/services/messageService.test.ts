@@ -6,9 +6,12 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { SYSTEM_PROMPT } from '@services/aiService/config';
 import { editMessage, getMessages } from '@services/messageService';
 import { useTestDb } from '@test/test-db';
+
+const judging = { enqueueDriftGateJudgeArrival };
 import { describe, expect, it } from 'vitest';
 
 async function createRandomThread() {
@@ -103,6 +106,7 @@ describe('messageService', () => {
       });
 
       const result = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: user.id,
@@ -134,8 +138,15 @@ describe('messageService', () => {
       const { userId, threadId } = await createRandomThread();
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
-      const empty = await editMessage({ userId, threadId, messageId: message.id, content: '' });
+      const empty = await editMessage({
+        judging,
+        userId,
+        threadId,
+        messageId: message.id,
+        content: '',
+      });
       const blank = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: message.id,
@@ -162,6 +173,7 @@ describe('messageService', () => {
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
       const result = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: message.id,
@@ -190,6 +202,7 @@ describe('messageService', () => {
       await setMessagesAbandoned({ messageIds: [handedOver.id], abandoned: true });
 
       const result = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: lastVisible.id,
@@ -215,12 +228,14 @@ describe('messageService', () => {
       });
 
       const editEarlierUser = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: earlier.id,
         content: 'rewritten',
       });
       const editAssistant = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: reply.id,
@@ -251,6 +266,7 @@ describe('messageService', () => {
 
       // Unknown thread id.
       const unknownThread = await editMessage({
+        judging,
         userId,
         threadId: randomUUID(),
         messageId: message.id,
@@ -258,6 +274,7 @@ describe('messageService', () => {
       });
       // Foreign thread id.
       const foreignThread = await editMessage({
+        judging,
         userId,
         threadId: foreign.threadId,
         messageId: foreignMessage.id,
@@ -265,6 +282,7 @@ describe('messageService', () => {
       });
       // Unknown message id in a valid thread.
       const unknownMessage = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: randomUUID(),

@@ -6,7 +6,9 @@ import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
+import { inTransaction } from '@queries/transaction/inTransaction';
 import { type Result, err, ok } from '../types/result';
+import type { ArrivalJudging } from './aiService/arrivalGate';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
 import { validateMessageContent } from './validation';
 
@@ -81,6 +83,7 @@ type UpdateMessageProps = {
   threadId: string;
   messageId: string;
   content: string;
+  judging: Pick<ArrivalJudging, 'enqueueDriftGateJudgeArrival'>;
 };
 
 /**
@@ -91,8 +94,8 @@ type UpdateMessageProps = {
  * the old row keeps its text and its arrival analysis (still correct for
  * the untouched reading), so its spend keeps tracking the pre-edit costs;
  * every reply grown from the old text is abandoned with it. The edited
- * text lands as a NEW user row after them — the arrival the retry
- * exchanges and the live gate judges. Abandoned rows are never rewritten
+ * text lands as a NEW user row after them — a fresh arrival, its Drift
+ * gate judgment queued with it; the retry then exchanges or pauses it. Abandoned rows are never rewritten
  * and never deleted; inference memory, listing, drafting and the analysis
  * surface simply skip them. Assistant replies themselves are never edited
  * — retry (chat regenerate) is their recovery path. "not_last" (409) and
@@ -104,6 +107,7 @@ export async function editMessage({
   threadId,
   messageId,
   content,
+  judging,
 }: UpdateMessageProps): Promise<Result<MessageWithUsage>> {
   const contentResult = validateMessageContent(content);
   if (contentResult.type === 'error') return contentResult;
@@ -130,19 +134,25 @@ export async function editMessage({
   // The old arrival and every reply grown from its text are abandoned in
   // place: rows stay — text, arrival analysis and usage keep tracking what
   // the thread burned — while retry, inference memory and listing skip
-  // them. The fork lands after them.
-  await setMessagesAbandoned({
-    messageIds: [
-      lastUser.id,
-      ...rows
-        .slice(lastUserIndex + 1)
-        .filter((row) => !row.abandoned)
-        .map((row) => row.id),
-    ],
-    abandoned: true,
+  // them. The fork lands after them, in the same step as its judgment.
+  const forked = await inTransaction(async (trx) => {
+    await setMessagesAbandoned(
+      {
+        messageIds: [
+          lastUser.id,
+          ...rows
+            .slice(lastUserIndex + 1)
+            .filter((row) => !row.abandoned)
+            .map((row) => row.id),
+        ],
+        abandoned: true,
+      },
+      trx,
+    );
+    const fork = await insertMessage({ threadId, role: 'user', content: normalized }, trx);
+    await judging.enqueueDriftGateJudgeArrival({ userId, threadId, messageId: fork.id }, trx);
+    return fork;
   });
-
-  const forked = await insertMessage({ threadId, role: 'user', content: normalized });
   return ok(
     messageRowToMessageWithUsage({
       ...forked,
