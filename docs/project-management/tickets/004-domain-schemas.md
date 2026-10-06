@@ -1,8 +1,7 @@
 # Database: one Postgres schema per domain
 
-Branch: `feat/domain-schemas`. Priority: next feature, before the capture
-queue (ticket 005), which adds a schema of its own and should land on the
-convention this ticket sets.
+Branch: `feat/domain-schemas`. Priority: after the durable queue (ticket
+006), which already lands its own `queues` schema.
 
 ## Goal
 
@@ -21,8 +20,8 @@ keeps the app's tables apart from the auth provider's.
 | `billing` | `message_usage`, `message_side_costs`, `model_configs` |
 | `public` | `kysely_migration` and its lock table, unless they move too |
 
-The queue library of ticket 005 creates and owns a `graphile_worker`
-schema by itself.
+The queue library (ADR 0011) creates and owns a `queues` schema by
+itself; leave it out of the move.
 
 ## Decide first
 

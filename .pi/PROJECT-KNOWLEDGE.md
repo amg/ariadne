@@ -52,6 +52,20 @@ through the in-process exchange registry (single-replica assumption);
 the resume-draft prefill is dormant (no path abandons the newest user
 row anymore).
 
+## Background work (decided, being built)
+
+ADRs 0011–0013 are accepted; implementation is underway on this branch
+(ticket 006). Drift gate judging, Thread titling and Fact capture run as
+tasks on a graphile-worker queue in the `queues` schema. Tasks are named
+by domain feature first, and the worker runs in-process but can be
+lifted out. The chat waits up to `GATE_WAIT_MS` for a verdict, then
+answers "still checking" (503 `gate_pending`). Results reach the browser
+over a per-tab SSE push stream behind a swappable transport. Feature
+toggles are read only at entry points. Memory sits behind
+`FEATURE_MEMORY` (off by default) so the rest can merge first. Failed
+tasks: `npm run queue:retry-failed`. Until this lands, the sections
+below describe the in-process mechanics still running.
+
 ## Memory Feature (Phase 2 Complete)
 
 User-scoped factual memory captured by segment pointer, frozen Seeds on

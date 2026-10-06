@@ -196,6 +196,14 @@ Handover. Nothing else enters the Thread until the user chooses. An Edit
 lands a fresh arrival, judged anew, which may pause again.
 _Avoid_: blocked message, held message
 
+**Unanswered arrival**:
+A live user Message with no reply that is not paused: its Drift gate
+verdict is still being reached, has come back clear while nobody was
+waiting for it, or could not be reached at all. No reply is generated
+until the gate has judged it, and nothing else enters the Thread until it
+is answered. A Retry waits for the verdict and replies once it is clear.
+_Avoid_: pending message, stuck message
+
 **Handover**:
 Moving a Paused arrival into a fresh Thread. Memory capture runs over
 the Turns up to the arrival first — a capture point, not a close, since

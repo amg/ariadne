@@ -34,3 +34,13 @@ the user continues in the Thread or hands the message over to a new one. Its
 out-of-scope boundary is deliberate — preference-corpus tuning, graph
 visualization, cross-user analytics, and full UPDATE/DELETE reconciliation
 are future improvements, not rewrites.
+
+0011 moves work that must outlive a request (the Drift gate's judging,
+titling, Fact capture) onto a graphile-worker queue in its own `queues`
+schema, superseding 0010's in-process capture. The gate stays before
+inference: a chat waits briefly for its verdict and otherwise answers
+"still checking". 0012 delivers background results through an event bus
+whose transport (SSE today, WebSockets possibly later) is an adapter.
+0013 puts unfinished features behind toggles read only at the backend
+and frontend entry points, with decisions passed down as values and
+deployment toggles kept distinct from per-user settings.
