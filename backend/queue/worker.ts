@@ -10,8 +10,10 @@ import {
 import { logger } from '../src/logger';
 import { classifiedTaskError, classifyTaskError } from './errors';
 import { whenArrivalJudged, whenJudgmentAbandoned } from './flows/driftGate';
+import { whenThreadTitled } from './flows/threadTitling';
 import { judgeArrival } from './tasks/driftGateJudgeArrivalTask';
 import { executeMemoryCaptureSegment } from './tasks/memoryCaptureSegmentTask';
+import { titleThread } from './tasks/threadGenerateTitleTask';
 
 /** The identifier of a task the worker knows, and so the payload its jobs carry. */
 export type TaskName = keyof GraphileWorker.Tasks;
@@ -78,6 +80,9 @@ export function queueTasks(): TaskList {
       execute: async (params) =>
         whenArrivalJudged({ params, judgment: await judgeArrival(params) }),
       onGivenUp: async (params) => whenJudgmentAbandoned(params),
+    }),
+    threadGenerateTitle: registeredTask('threadGenerateTitle', {
+      execute: async (params) => whenThreadTitled(await titleThread(params)),
     }),
     memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
       execute: executeMemoryCaptureSegment,

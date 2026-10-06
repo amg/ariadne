@@ -12,6 +12,7 @@ import {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
+import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import {
   type ChatStreamHandle,
   type EmbedTextData,
@@ -149,13 +150,14 @@ useTestDb();
 useTestQueue();
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+const titling = { enqueueThreadGenerateTitle };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging });
+  return submitChat({ ...props, judging, titling });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging });
+  return retryLastExchange({ ...props, choice, judging, titling });
 }
 
 describe('submitChat', () => {
@@ -316,6 +318,31 @@ describe('submitChat', () => {
     expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBe(
       `${'abcd '.repeat(10).trim()}\u2026`,
     );
+  });
+
+  it('queues a still-untitled thread\u2019s titling once its Exchange settles', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const handle = await assertSuccess(
+      await submit({ userId, threadId: thread.id, content: 'Hello world' }),
+    );
+    await drain(handle);
+    await handle.outcome;
+
+    // The titling runs on the queue after settlement; poll until it lands.
+    const deadline = Date.now() + 20_000;
+    let title: string | null = null;
+    while (Date.now() < deadline) {
+      title = (await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title ?? null;
+      if (title) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    // A generated title, not the interrupted-exchange preview of the arrival.
+    expect(title).toBeTruthy();
+    expect(title).not.toBe('Hello world');
   });
 
   it('an interrupted exchange leaves no resume draft; retrying completes it', async () => {

@@ -1,16 +1,9 @@
 import { ChatController } from '@/components/chat';
 import AnalysisTab from '@/components/chat/AnalysisTab';
 import { type Message, type ThreadAnalysisMode, fetchMessages } from '@/services/api';
-import type { Thread } from '@/services/api';
 import { pushClient } from '@/services/push';
 import { useEffect, useState } from 'react';
-import {
-  useLoaderData,
-  useOutletContext,
-  useRevalidator,
-  useRouteLoaderData,
-  useSearchParams,
-} from 'react-router';
+import { useLoaderData, useOutletContext, useRevalidator, useSearchParams } from 'react-router';
 
 /** Framework glue only: loader + revalidation. The exchange lives in
  *  components/chat/ChatController. See PK "Framework files" policy. */
@@ -83,10 +76,8 @@ export default function ChatPage() {
     threadId: string;
     messages: Message[];
   };
-  const { threads } = useRouteLoaderData('root') as { threads: Thread[] };
-  const { analysisMode, generateTitle, refreshThreadSummary, openThread } = useOutletContext<{
+  const { analysisMode, refreshThreadSummary, openThread } = useOutletContext<{
     analysisMode: ThreadAnalysisMode;
-    generateTitle: (id: string) => void;
     refreshThreadSummary: () => Promise<void>;
     openThread: (id: string) => void;
   }>();
@@ -111,11 +102,6 @@ export default function ChatPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
-
-  // A thread the list doesn't hold yet was just opened outside the sidebar
-  // (a handover) and is untitled, like any fresh thread.
-  const listedThread = threads?.find((thread) => thread.id === threadId);
-  const untitled = !listedThread || listedThread.title === null;
 
   // Off = surface gone entirely: no tabs, and a stale ?mode=analyze renders
   // the conversation instead of a hidden page.
@@ -157,11 +143,6 @@ export default function ChatPage() {
           rows={rows}
           onSettle={handleSettle}
           onHandedOver={openThread}
-          onGenerateTitle={() => {
-            if (untitled) {
-              generateTitle(threadId);
-            }
-          }}
         />
       )}
     </div>

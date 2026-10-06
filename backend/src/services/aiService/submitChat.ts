@@ -9,6 +9,7 @@ import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { inTransaction } from '@queries/transaction/inTransaction';
+import type { ThreadGenerateTitleParams } from '@queue/tasks/threadGenerateTitleTask';
 import { assembledSystemPrompt } from '@services/memory';
 import { validateMessageContent } from '@services/validation';
 import type { ModelMessage } from 'ai';
@@ -85,11 +86,17 @@ export function isDriftPause(submission: ChatSubmission): submission is DriftPau
   return 'paused' in submission;
 }
 
+/** Queues the titling a Thread owes once its first Exchange settles. */
+export interface ThreadTitling {
+  enqueueThreadGenerateTitle(params: ThreadGenerateTitleParams): Promise<void>;
+}
+
 type SubmitChatProps = {
   userId: string;
   threadId: string;
   content: string;
   judging: ArrivalJudging;
+  titling: ThreadTitling;
   /** Aborts when the client stops waiting; the judgment carries on without it. */
   signal?: AbortSignal;
 };
@@ -106,6 +113,7 @@ type RetryLastExchangeProps = {
   threadId: string;
   choice: RetryChoice;
   judging: ArrivalJudging;
+  titling: ThreadTitling;
   /** Aborts when the client stops waiting; the judgment carries on without it. */
   signal?: AbortSignal;
 };
@@ -151,6 +159,7 @@ type StartExchangeProps = {
   precedingRows: Awaited<ReturnType<typeof listMessagesByThread>>;
   /** The user turn the exchange responds to. */
   userMessage: Message;
+  titling: ThreadTitling;
 };
 
 /**
@@ -241,6 +250,7 @@ async function startExchange({
   threadId,
   precedingRows,
   userMessage,
+  titling,
 }: StartExchangeProps): Promise<ChatStreamHandle> {
   const config = resolveInferenceConfig();
   const assistantMessage = await insertMessage({
@@ -276,15 +286,18 @@ async function startExchange({
   // context of whatever comes next, and the user decides its fate — reword
   // (an explicit replacement), edit (a fork), or build on top. A still-
   // untitled thread titles from the arrival text so the listing stays
-  // navigable. Best effort — the outcome and spend settlement are
-  // authoritative.
+  // navigable. A completed exchange titles through the queue instead, so
+  // the title lands whether or not the browser stays open. Best effort —
+  // the outcome and spend settlement are authoritative.
   void exchange.outcome.then(async (result) => {
-    if (result.type === 'success' && result.data.finishReason !== 'interrupted') return;
     try {
       const thread = await findThreadByIdAndUser({ userId, threadId });
-      if (thread && !thread.title) {
-        await renameThread({ userId, threadId, title: abandonedTitlePreview(userMessage.content) });
+      if (!thread || thread.title) return;
+      if (result.type === 'success' && result.data.finishReason !== 'interrupted') {
+        await titling.enqueueThreadGenerateTitle({ userId, threadId, forced: false });
+        return;
       }
+      await renameThread({ userId, threadId, title: abandonedTitlePreview(userMessage.content) });
     } catch {
       // Titling must not fail the exchange.
     }
@@ -408,6 +421,7 @@ export async function submitChat({
   threadId,
   content,
   judging,
+  titling,
   signal,
 }: SubmitChatProps): Promise<Result<ChatSubmission>> {
   const contentResult = validateMessageContent(content);
@@ -451,7 +465,7 @@ export async function submitChat({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, true, { userId, threadId, precedingRows, userMessage });
+  return submissionForGate(gate, true, { userId, threadId, precedingRows, userMessage, titling });
 }
 
 /**
@@ -473,6 +487,7 @@ export async function retryLastExchange({
   threadId,
   choice,
   judging,
+  titling,
   signal,
 }: RetryLastExchangeProps): Promise<Result<ChatSubmission>> {
   const thread = await findThreadByIdAndUser({ userId, threadId });
@@ -505,6 +520,7 @@ export async function retryLastExchange({
     threadId,
     precedingRows: rows.slice(0, userIndex),
     userMessage,
+    titling,
   };
   const staleReplyIds = rows
     .slice(userIndex + 1)

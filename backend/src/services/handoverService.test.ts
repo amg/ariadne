@@ -45,13 +45,15 @@ useTestDb();
 useTestQueue();
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+/** This suite asserts the move itself, not titles: settlement never asks for one. */
+const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging });
+  return submitChat({ ...props, judging, titling });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging });
+  return retryLastExchange({ ...props, choice, judging, titling });
 }
 
 async function drain(handle: ChatStreamHandle): Promise<void> {

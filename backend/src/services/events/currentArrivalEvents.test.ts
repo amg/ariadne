@@ -43,6 +43,8 @@ useTestDb();
 useTestQueue();
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+/** This suite asserts arrival states, not titles: settlement never asks for one. */
+const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 async function freshThread() {
   const userId = randomUUID();
@@ -89,7 +91,9 @@ async function newestArrivalId(threadId: string): Promise<string> {
 describe('the current state of a user\u2019s arrivals', () => {
   it('reports nothing for a thread whose last arrival is answered', async () => {
     const { userId, threadId } = await freshThread();
-    await drained(await submitChat({ userId, threadId, content: 'A plain question', judging }));
+    await drained(
+      await submitChat({ userId, threadId, content: 'A plain question', judging, titling }),
+    );
 
     expect(await currentArrivalEvents(userId)).toEqual([]);
   });
@@ -98,7 +102,13 @@ describe('the current state of a user\u2019s arrivals', () => {
     const { userId, threadId } = await freshThread();
     process.env.GATE_WAIT_MS = '0';
 
-    const pending = await submitChat({ userId, threadId, content: 'Left hanging', judging });
+    const pending = await submitChat({
+      userId,
+      threadId,
+      content: 'Left hanging',
+      judging,
+      titling,
+    });
     expect(pending).toMatchObject({ type: 'error', code: 'gate_pending' });
 
     const arrivalId = await newestArrivalId(threadId);
@@ -112,13 +122,20 @@ describe('the current state of a user\u2019s arrivals', () => {
   it('reports a Paused arrival with its fire', async () => {
     const { userId, threadId } = await freshThread();
     await drained(
-      await submitChat({ userId, threadId, content: 'I love hiking in the Alps', judging }),
+      await submitChat({
+        userId,
+        threadId,
+        content: 'I love hiking in the Alps',
+        judging,
+        titling,
+      }),
     );
     const shift = await submitChat({
       userId,
       threadId,
       content: 'Explain how espresso machines work',
       judging,
+      titling,
     });
     if (shift.type !== 'success' || !isDriftPause(shift.data)) {
       throw new Error('the second arrival must pause');
@@ -169,6 +186,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         threadId: stranger.threadId,
         content: 'I love hiking in the Alps too',
         judging,
+        titling,
       }),
     );
     await submitChat({
@@ -176,6 +194,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       threadId: stranger.threadId,
       content: 'Explain how espresso machines work',
       judging,
+      titling,
     });
 
     const { userId } = await freshThread();

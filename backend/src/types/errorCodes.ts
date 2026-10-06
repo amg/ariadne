@@ -20,19 +20,3 @@ export const ErrorCodes = {
 
 /** Union of every contract code above; the titling flow can produce all of them. */
 export type TitlingErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
-
-/** HTTP status each contract code lands on (route-side concern). */
-export function httpStatusFor(code: TitlingErrorCode): number {
-  switch (code) {
-    case ErrorCodes.THREAD_NOT_FOUND:
-      return 404;
-    case ErrorCodes.PROVIDER_NOT_CONFIGURED:
-      return 503;
-    case ErrorCodes.TITLE_PROVIDER_ERROR:
-      return 502;
-    case ErrorCodes.TITLE_TIMEOUT:
-      return 504;
-    default:
-      return 500;
-  }
-}

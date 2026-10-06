@@ -44,4 +44,5 @@ export {
   type ChatStreamHandle,
   type DriftPause,
   type RetryChoice,
+  type ThreadTitling,
 } from './submitChat';

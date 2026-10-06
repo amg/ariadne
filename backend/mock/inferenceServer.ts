@@ -281,14 +281,17 @@ function memoryJsonReply(body: ChatCompletionsBody, replyText: string) {
  *  so deterministic callers never hit the 255-char title guard. Rewrite
  *  requests get a deterministic
  *  `Rewritten: <follow-up>` derived from the request itself, so the
- *  thread-health e2e can assert the expanded signal without a real model. */
+ *  thread-health e2e can assert the expanded signal without a real model.
+ *  Titling requests answer a short title, as a bounded titling model
+ *  would. */
 function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
   const messages = body.messages ?? [];
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
   const rewrite = rewriteOverride ?? rewriteReply(body);
   const judge = judgeReply(body);
-  const replyText = (rewrite ?? judge ?? buildReply(lastUser)).slice(0, 80);
+  const title = titlingReply(body);
+  const replyText = (rewrite ?? judge ?? title ?? buildReply(lastUser)).slice(0, 80);
   const tokens = replyText.split(/(?<=\s)/);
 
   counter += 1;
@@ -313,6 +316,16 @@ function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
 
 /** The rewriter's system-prompt marker the expansion tier sends. */
 const REWRITER_MARKER = 'You rewrite chat follow-ups';
+
+/** The titling prompt's opening line; titling sends it as the user message. */
+const TITLING_MARKER = 'Given the following conversation';
+
+/** Deterministic titling reply: a short title within the rename limit. */
+function titlingReply(body: ChatCompletionsBody): string | null {
+  const lastUser =
+    [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  return lastUser.startsWith(TITLING_MARKER) ? 'Mock Thread Title' : null;
+}
 
 /**
  * Deterministic rewrite reply: the follow-up text with the prior Turn's

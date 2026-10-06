@@ -48,16 +48,18 @@ useTestDb();
 useTestQueue();
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+/** This suite asserts verdict waits, not titles: settlement never asks for one. */
+const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 function submit(
   props: { userId: string; threadId: string; content: string },
   signal?: AbortSignal,
 ) {
-  return submitChat({ ...props, judging, ...(signal ? { signal } : {}) });
+  return submitChat({ ...props, judging, titling, ...(signal ? { signal } : {}) });
 }
 
 function retry(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging });
+  return retryLastExchange({ ...props, choice, judging, titling });
 }
 
 async function freshThread() {

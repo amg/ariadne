@@ -33,7 +33,6 @@ type ChatControllerProps = {
   threadId: string;
   rows: Message[];
   onSettle: () => void;
-  onGenerateTitle?: () => void;
   /** Opens the fresh thread a paused arrival was moved to. */
   onHandedOver?: (threadId: string) => void;
 };
@@ -49,7 +48,6 @@ export default function ChatController({
   threadId,
   rows,
   onSettle,
-  onGenerateTitle,
   onHandedOver,
 }: ChatControllerProps) {
   // The chat object lives in the per-tab registry (module level), keyed by
@@ -73,10 +71,10 @@ export default function ChatController({
 
   // Settlement handlers keep the render's identity; the registry
   // subscription is tied to the thread alone.
-  const settleRef = useRef({ onSettle, onGenerateTitle });
+  const settleRef = useRef({ onSettle });
   useMemo(() => {
-    settleRef.current = { onSettle, onGenerateTitle };
-  }, [onSettle, onGenerateTitle]);
+    settleRef.current = { onSettle };
+  }, [onSettle]);
 
   // The registry fans exchange events to whichever view is subscribed.
   useEffect(() => {
@@ -96,7 +94,6 @@ export default function ChatController({
       onSettle: () => {
         setStreamVerdict(null);
         settleRef.current.onSettle();
-        settleRef.current.onGenerateTitle?.();
       },
       // A failed submit puts the draft back in the input; recovery is a resend.
       onFailedSubmit: (draft) => {

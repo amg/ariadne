@@ -68,24 +68,49 @@ function AppLayoutComponent() {
     return () => pushClient.disconnect();
   }, []);
 
+  // A queued titling accepted by the backend keeps the loading pulse until
+  // the title actually lands — announced by the push channel, or visible on
+  // the next refetch when push is down.
+  const [queuedTitlingThreadId, setQueuedTitlingThreadId] = useState<string | null>(null);
+
   // A Thread that was titled outside any request of this tab joins the
   // sidebar through the root loader — one revalidation settles it.
   useEffect(
-    () => pushClient.subscribe('thread-titled', () => revalidator.revalidate()),
+    () =>
+      pushClient.subscribe('thread-titled', (event) => {
+        setQueuedTitlingThreadId((queued) => (queued === event.threadId ? null : queued));
+        revalidator.revalidate();
+      }),
     [revalidator.revalidate],
   );
+
+  // The refetch fallback: the loader's refresh shows the title, so the
+  // pulse ends even if the announcement never arrived.
+  useEffect(() => {
+    if (!queuedTitlingThreadId) return;
+    const titled = threads.some(
+      (thread) => thread.id === queuedTitlingThreadId && thread.title !== null,
+    );
+    if (titled) setQueuedTitlingThreadId(null);
+  }, [threads, queuedTitlingThreadId]);
 
   // Titling failures were previously invisible: the action swallowed them so
   // the pulse would still stop. Now the action settles a curated errorCode
   // (backend contract → friendly copy; raw provider text stays server-side)
   // and this effect toasts it — once per settled submission.
-  const lastToastedTitleResultRef = useRef<GenerateTitleActionResult | null>(null);
+  const lastTitleResultRef = useRef<GenerateTitleActionResult | null>(null);
   useEffect(() => {
     const { state, data } = generateTitleFetcher;
     if (state !== 'idle' || !data) return;
     const result = data as GenerateTitleActionResult;
-    if (result.ok !== false || lastToastedTitleResultRef.current === result) return;
-    lastToastedTitleResultRef.current = result;
+    if (lastTitleResultRef.current === result) return;
+    lastTitleResultRef.current = result;
+    if (result.ok) {
+      if (result.queued && result.threadId) {
+        setQueuedTitlingThreadId(result.threadId);
+      }
+      return;
+    }
     toast.error('Title regeneration failed', {
       description: friendlyErrorMessage(result.errorCode),
     });
@@ -107,9 +132,11 @@ function AppLayoutComponent() {
     return threads
       .filter((t) => t.id !== pendingDeleteId)
       .map((t) =>
-        t.id === generatingTitleThreadId ? { ...t, title: TITLE_GENERATING_SENTINEL } : t,
+        t.id === generatingTitleThreadId || t.id === queuedTitlingThreadId
+          ? { ...t, title: TITLE_GENERATING_SENTINEL }
+          : t,
       );
-  }, [threads, pendingDeleteId, generatingTitleThreadId]);
+  }, [threads, pendingDeleteId, generatingTitleThreadId, queuedTitlingThreadId]);
 
   // Thread summary state
   const [threadSummary, setThreadSummary] = useState<ThreadSummary | null>(null);
@@ -236,12 +263,6 @@ function AppLayoutComponent() {
         key={match?.params.threadId ?? 'empty'}
         context={{
           analysisMode: threadAnalysisMode,
-          generateTitle: (id: string) => {
-            generateTitleFetcher.submit(
-              { threadId: id },
-              { method: 'post', action: `/threads/${id}/generate-title` },
-            );
-          },
           refreshThreadSummary: handleRefreshThreadSummary,
           // A thread opened outside the sidebar (a handover) joins the list
           // once the navigation has landed.

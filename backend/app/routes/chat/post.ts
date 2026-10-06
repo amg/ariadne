@@ -3,11 +3,13 @@ import {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
+import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import {
   type ArrivalJudging,
   type ChatStreamHandle,
   type DriftPause,
   type RetryChoice,
+  type ThreadTitling,
   clearActiveExchange,
   isDriftPause,
   registerActiveExchange,
@@ -38,6 +40,9 @@ const judging: ArrivalJudging = {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 };
+
+/** How a settled Exchange reaches the Thread's titling. */
+const titling: ThreadTitling = { enqueueThreadGenerateTitle };
 
 /** The `useChat` POST contains the client's message list; we take the last user text. */
 function extractLastUserText(messages: ChatRequestBody['messages']): string {
@@ -188,8 +193,15 @@ async function respondToChat(
   const signal = clientGoneSignal(reply);
   const result =
     request.kind === 'retry'
-      ? await retryLastExchange({ userId, threadId, choice: request.choice, judging, signal })
-      : await submitChat({ userId, threadId, content: request.content, judging, signal });
+      ? await retryLastExchange({
+          userId,
+          threadId,
+          choice: request.choice,
+          judging,
+          titling,
+          signal,
+        })
+      : await submitChat({ userId, threadId, content: request.content, judging, titling, signal });
   if (result.type === 'error') return sendExchangeError(reply, result);
   if (isDriftPause(result.data)) return createPauseResponse(result.data);
   registerActiveExchange(input.threadId, result.data);
