@@ -196,7 +196,7 @@ export default function ChatView({
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full min-w-0 max-w-[900px] flex-col">
-          <div className="flex flex-col gap-4 py-4">
+          <div className="flex flex-col gap-4 py-4 px-4">
             {rows.map((row, index) => {
               return (
                 <Fragment key={row.id}>
