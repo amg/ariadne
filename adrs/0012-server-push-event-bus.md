@@ -69,3 +69,13 @@ what the state forbids.
   second API replica can publish to tabs connected elsewhere. That is a
   prerequisite for multi-replica deployment, alongside the exchange
   registry.
+
+## Notes
+
+**2026-10-06: a failed gate is announced, nothing more.** When the
+Drift gate gives up on an arrival for good, the user hears it once as
+it happens and again on every reconnect, for as long as the arrival
+stays unjudged. Nothing else is added: no repeated notices on an open
+connection and no fresh call to the provider. An unjudged arrival never
+gets a reply, so a failed gate costs nothing while it waits for Retry
+or the operator.

@@ -63,6 +63,14 @@ docker compose -f compose.prod.yml --env-file .env.prod up -d
 
 **What happens:** Frontend joins your existing `cloudflare-network`, backend stays internal, database listens on port `15432` for LAN tooling. Configure your tunnel to route your domain to the `frontend` container by name.
 
+**Background work:** the backend runs its own job queue in Postgres and installs the queue's `queues` schema on every boot, so the database user needs `CREATE` on the database. A job that runs out of attempts stays failed until you put it back in line. A chat whose drift check failed for good shows "couldn't check this message" until then:
+
+```bash
+ENV_FILE=.env.prod npm run queue:retry-failed   # prints what it re-queued
+```
+
+Run it after fixing the cause (usually a missing or rejected API key). Failed jobs that a newer job has already taken over are listed and left alone.
+
 ## Environment Setup
 
 Two env files — one for local dev, one for production. Both are gitignored.
@@ -89,6 +97,10 @@ cp .env.prod.example .env.prod
 - `SUPERTOKENS_CONNECTION_URI` — Auth service (defaults to `http://127.0.0.1:3567`)
 - `CORS_ORIGINS` — Allowed origins (defaults to localhost for dev)
 - `DAILY_SPEND_BUDGET_USD` — Safety cap on daily AI spend (e.g., `5.0`)
+
+**Optional variables:**
+- `FEATURE_MEMORY` — User memory (Fact capture, Thread Seeds, the Memory and Settings screens). Off by default; the backend reads it at boot, so restart it after a change.
+- `GATE_WAIT_MS`, `HANDOVER_WAIT_MS` — How long a chat waits for its drift check, and a handover for the old chat's memory, before telling the browser to try again. Both default to 10 seconds.
 
 ## Tech Stack
 

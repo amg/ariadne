@@ -40,6 +40,8 @@ export async function setupEventsGetRoute(fastify: FastifyInstance) {
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       });
+      // The stream counts as open once its headers arrive, before any event.
+      raw.flushHeaders();
 
       const unsubscribe = subscribe(
         (event) => event.userId === userId,

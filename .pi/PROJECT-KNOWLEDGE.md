@@ -52,19 +52,20 @@ through the in-process exchange registry (single-replica assumption);
 the resume-draft prefill is dormant (no path abandons the newest user
 row anymore).
 
-## Background work (decided, being built)
+## Background work
 
-ADRs 0011–0013 are accepted; implementation is underway on this branch
-(ticket 006). Drift gate judging, Thread titling and Fact capture run as
-tasks on a graphile-worker queue in the `queues` schema. Tasks are named
-by domain feature first, and the worker runs in-process but can be
-lifted out. The chat waits up to `GATE_WAIT_MS` for a verdict, then
-answers "still checking" (503 `gate_pending`). Results reach the browser
-over a per-tab SSE push stream behind a swappable transport. Feature
-toggles are read only at entry points. Memory sits behind
-`FEATURE_MEMORY` (off by default) so the rest can merge first. Failed
-tasks: `npm run queue:retry-failed`. Until this lands, the sections
-below describe the in-process mechanics still running.
+The Drift gate's judging, Thread titling and Fact capture run as tasks
+on a graphile-worker queue in the `queues` schema (ADRs 0011–0013). The
+worker runs inside the API process and installs its schema at boot.
+Tasks are named by domain feature first. A chat waits up to
+`GATE_WAIT_MS` for its verdict, then answers 503 `gate_pending`. A task
+that fails fatally answers `gate_failed` until the operator runs
+`npm run queue:retry-failed`, which re-queues dead jobs and leaves
+superseded ones alone. Results that land outside a request reach the
+browser over one SSE push stream per tab, which re-emits current
+arrival state on every connect. Feature toggles are read once at boot,
+so flipping one needs a restart. Memory sits behind `FEATURE_MEMORY`,
+off by default.
 
 ## Memory Feature (Phase 2 Complete)
 
@@ -110,9 +111,11 @@ optional entity columns.
   as context only. A failed pass leaves the pointer put, so the debt
   survives — abandonment of the anchor row can never strand it, because
   the successor segment's opener anchors it in its place. Handover is a
-  capture point, not a close: the move waits up to 20 seconds for a
-  pending pass, then proceeds and retries in the background until the
-  debt settles
+  capture point, not a close: the move waits up to `HANDOVER_WAIT_MS`
+  for the closed segment's capture job. If the wait runs out it answers
+  "still saving" (503 `capture_pending`) and moves nothing, and the
+  browser asks again. A capture that gave up for good lets the move go
+  ahead without its Facts
 - Seed lines always carry a date: the stated `valid_at` when present,
   the day the Fact was recorded otherwise
 

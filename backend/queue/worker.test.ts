@@ -3,7 +3,9 @@ import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
 import { listDeadJobs } from '@queries/queue/listDeadJobs';
 import { inTransaction } from '@queries/transaction/inTransaction';
 import { TaskFailure, classifyTaskError } from '@queue/errors';
-import { type QueueTask, registeredTask } from '@queue/worker';
+import { MEMORY_CAPTURE_SEGMENT } from '@queue/tasks/memoryCaptureSegmentTask';
+import { type QueueTask, queueTasks, registeredTask } from '@queue/worker';
+import { memoryOff, memoryOn } from '@test/memory';
 import { drainQueue, makeWaitingJobsDue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -164,5 +166,12 @@ describe('classifyTaskError', () => {
     );
     expect(classifyTaskError(new Error('fetch failed'))).toBe('recoverable');
     expect(classifyTaskError('a thrown string')).toBe('recoverable');
+  });
+});
+
+describe('queueTasks', () => {
+  it('works capture jobs only in a deployment with Memory', () => {
+    expect(Object.keys(queueTasks(memoryOff))).not.toContain(MEMORY_CAPTURE_SEGMENT);
+    expect(Object.keys(queueTasks(memoryOn))).toContain(MEMORY_CAPTURE_SEGMENT);
   });
 });

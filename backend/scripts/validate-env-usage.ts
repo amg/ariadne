@@ -54,6 +54,7 @@ const RULES: Rule[] = [
     `,
     skip: [
       'src/config/env.ts', // This is where process.env belongs
+      'src/config/dotenv.ts', // Picks the env file to load, before env.ts can read anything
       '.test.ts', // Tests can set process.env
       '/test/', // Test files
       '/mock/', // Mock servers need process.env

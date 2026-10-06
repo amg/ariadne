@@ -4,6 +4,7 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { requeueDeadJobs } from '@queue/deadJobs';
 import {
   DRIFT_GATE_JUDGE_ARRIVAL,
   enqueueDriftGateJudgeArrival,
@@ -202,6 +203,23 @@ describe('retrying an arrival with no reply', () => {
 
     expect(await retry({ userId, threadId })).toMatchObject({ type: 'error', code: 'gate_failed' });
     expect(await verdictCount(arrival.id)).toBe(0);
+  });
+
+  it('replies once the operator re-queues the fatally dead judgment', async () => {
+    const { userId, threadId } = await freshThread();
+    const arrival = await insertMessage({ threadId, role: 'user', content: 'Fixed config' });
+    await addDeadJob({
+      task: DRIFT_GATE_JUDGE_ARRIVAL,
+      key: arrival.id,
+      payload: { userId, threadId, messageId: arrival.id },
+      errorClass: 'fatal',
+    });
+
+    await requeueDeadJobs();
+    const reply = await drained(await retry({ userId, threadId }));
+
+    expect(reply.threadVerdict?.messageId).toBe(arrival.id);
+    expect(await verdictCount(arrival.id)).toBe(1);
   });
 });
 
