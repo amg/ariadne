@@ -26,5 +26,11 @@ export interface GateFailedEvent extends EventScope {
   messageId: string;
 }
 
+/** A Thread received its title; carries the title it now bears. */
+export interface ThreadTitledEvent extends EventScope {
+  kind: 'thread-titled';
+  title: string;
+}
+
 /** News for a user that happened outside any request of theirs. */
-export type ServerEvent = VerdictOkEvent | VerdictPausedEvent | GateFailedEvent;
+export type ServerEvent = VerdictOkEvent | VerdictPausedEvent | GateFailedEvent | ThreadTitledEvent;

@@ -36,6 +36,12 @@ type ChatViewProps = {
   rows: DisplayRow[];
   status: ChatViewStatus;
   errorMessage?: string | null;
+  /**
+   * A submit that settled as a gate wait: the arrival is stored, and the
+   * notice offers the retry. `pending` while the judgment runs, `cleared`
+   * once it passes and the reply is owed, `failed` once it gave up.
+   */
+  gateWait?: 'pending' | 'cleared' | 'failed' | null;
   /** A failed submit's draft; restoring puts it back in the input. */
   restoredDraft?: RestoredDraft | null;
   onSend: (content: string) => void;
@@ -55,10 +61,40 @@ type ChatViewProps = {
   onStartNewChat: () => void;
 };
 
+const GATE_WAIT_COPY: Record<'pending' | 'cleared' | 'failed', string> = {
+  pending: 'This message is still being checked.',
+  cleared: 'This message is checked and ready for a reply.',
+  failed: 'This message could not be checked.',
+};
+
+/**
+ * The calm line over the composer while a gate wait owes its retry: the
+ * message stays, and a retry waits on the same judgment again. It sits
+ * where an error line sits, but never shouts.
+ */
+function GateWaitNotice({
+  kind,
+  onRetry,
+}: { kind: 'pending' | 'cleared' | 'failed'; onRetry: () => void }) {
+  return (
+    <p className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+      {GATE_WAIT_COPY[kind]}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="underline underline-offset-2 transition-colors hover:text-foreground"
+      >
+        retry
+      </button>
+    </p>
+  );
+}
+
 export default function ChatView({
   rows,
   status,
   errorMessage,
+  gateWait,
   restoredDraft,
   onSend,
   onStop,
@@ -248,7 +284,11 @@ export default function ChatView({
         </button>
       ) : null}
       <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
-        {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
+        {gateWait ? (
+          <GateWaitNotice kind={gateWait} onRetry={onRetryLast} />
+        ) : errorMessage ? (
+          <p className="mb-2 text-sm text-red-400">{errorMessage}</p>
+        ) : null}
         <form className="flex gap-2" onSubmit={handleSubmit}>
           <Textarea
             ref={inputRef}

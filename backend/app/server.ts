@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import { startQueue, stopQueue } from '@queue/index';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupConfigRoute } from '@routes/config';
+import { setupEventsGetRoute } from '@routes/events/get';
 import { setupHealthRoute } from '@routes/health/get';
 import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
 import { setupModelsRefreshRoute } from '@routes/models';
@@ -115,6 +116,7 @@ await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' }
 // Register routes
 setupHealthRoute(app);
 setupConfigRoute(app);
+setupEventsGetRoute(app);
 setupThreadsGetRoute(app);
 setupThreadsPostRoute(app);
 setupThreadsGenerateTitleRoute(app);

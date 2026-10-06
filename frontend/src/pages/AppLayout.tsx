@@ -13,6 +13,7 @@ import {
   refreshModelPricing,
 } from '@/services/api';
 import { friendlyErrorMessage } from '@/services/errorCodes';
+import { pushClient } from '@/services/push';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Outlet,
@@ -59,6 +60,20 @@ function AppLayoutComponent() {
   const generatingTitleThreadId = generateTitleFetcher.formData
     ? String(generateTitleFetcher.formData.get('threadId') ?? '')
     : null;
+
+  // One push connection per tab: opened when the app shell mounts, closed
+  // when it unmounts. Screens subscribe to the kinds they care about.
+  useEffect(() => {
+    pushClient.connect();
+    return () => pushClient.disconnect();
+  }, []);
+
+  // A Thread that was titled outside any request of this tab joins the
+  // sidebar through the root loader — one revalidation settles it.
+  useEffect(
+    () => pushClient.subscribe('thread-titled', () => revalidator.revalidate()),
+    [revalidator.revalidate],
+  );
 
   // Titling failures were previously invisible: the action swallowed them so
   // the pulse would still stop. Now the action settles a curated errorCode

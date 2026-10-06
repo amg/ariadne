@@ -2,6 +2,7 @@ import { ChatController } from '@/components/chat';
 import AnalysisTab from '@/components/chat/AnalysisTab';
 import { type Message, type ThreadAnalysisMode, fetchMessages } from '@/services/api';
 import type { Thread } from '@/services/api';
+import { pushClient } from '@/services/push';
 import { useEffect, useState } from 'react';
 import {
   useLoaderData,
@@ -91,6 +92,23 @@ export default function ChatPage() {
   }>();
   const revalidator = useRevalidator();
   useRefetchOnTabFocus(revalidator.revalidate);
+
+  // A verdict landing while this thread is open settles its rows through
+  // the loader — same code path as tab focus, prompted a moment earlier.
+  useEffect(() => {
+    const kinds = ['verdict-ok', 'verdict-paused', 'gate-failed'] as const;
+    const unsubscribes = kinds.map((kind) =>
+      pushClient.subscribe(kind, (event) => {
+        if (event.threadId === threadId) revalidator.revalidate();
+      }),
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [threadId, revalidator.revalidate]);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
 

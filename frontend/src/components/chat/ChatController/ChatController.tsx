@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import ChatView from '../ChatView';
 import type { RestoredDraft } from '../ChatView/types';
 import {
+  type GateWaitOutcome,
+  describeChatError,
   getThreadChat,
   replyToStoredMessage,
   sendThreadMessage,
@@ -61,6 +63,9 @@ export default function ChatController({
   // (the SDK keeps it out of message.parts), so the verdict is held here and
   // applied to the pending user bubble before the reply grows.
   const [streamVerdict, setStreamVerdict] = useState<StreamVerdict | null>(null);
+  // A submit that settled as a gate wait: the arrival is stored, its
+  // judgment still owed. The bubble stays; a retry waits on it again.
+  const [gateWait, setGateWait] = useState<GateWaitOutcome | null>(null);
   const [restoredDraft, setRestoredDraft] = useState<RestoredDraft | null>(null);
   const [handingOver, setHandingOver] = useState(false);
   const [handoverError, setHandoverError] = useState<string | null>(null);
@@ -96,6 +101,10 @@ export default function ChatController({
       // A failed submit puts the draft back in the input; recovery is a resend.
       onFailedSubmit: (draft) => {
         setRestoredDraft((prev) => ({ text: draft, nonce: (prev?.nonce ?? 0) + 1 }));
+      },
+      // A gate wait keeps the message on screen; its notice offers the retry.
+      onGateWait: (outcome) => {
+        setGateWait(outcome);
       },
     });
   }, [threadId]);
@@ -158,6 +167,33 @@ export default function ChatController({
   );
 
   const pausedMessageId = pausedArrivalIdOrNull(display, visibleRows, chat.status);
+
+  // A gate wait ends when the next attempt starts: the retry itself, or a
+  // fresh submit, takes the thread through the gate again. It also goes
+  // once a fire lands on the arrival — the pause choice takes over.
+  useEffect(() => {
+    if (!gateWait) return;
+    if (chat.status === 'submitted' || chat.status === 'streaming') {
+      setGateWait(null);
+      return;
+    }
+    const last = display[display.length - 1];
+    if (last?.message.role === 'user' && last.verdict?.verdict === 'fire') {
+      setGateWait(null);
+    }
+  }, [gateWait, chat.status, display]);
+
+  // What the gate-wait notice says: still mid-judgment, judged clear and
+  // ready for a reply, or the judgment gave up.
+  const gateWaitKind = useMemo<'pending' | 'cleared' | 'failed' | null>(() => {
+    if (!gateWait) return null;
+    if (gateWait === 'gate_failed') return 'failed';
+    const last = display[display.length - 1];
+    const clear =
+      last?.message.role === 'user' &&
+      (last.verdict?.verdict === 'pass' || last.verdict?.verdict === 'muted');
+    return clear ? 'cleared' : 'pending';
+  }, [gateWait, display]);
 
   /**
    * Moves the paused arrival to a fresh thread: the server opens it (seeded
@@ -242,7 +278,8 @@ export default function ChatController({
     <ChatView
       rows={display}
       status={chat.status}
-      errorMessage={handoverError ?? chat.error?.message ?? null}
+      errorMessage={gateWait ? null : (handoverError ?? describeChatError(chat.error))}
+      gateWait={gateWaitKind}
       restoredDraft={restoredDraft}
       onSend={send}
       onStop={() => {
