@@ -5,6 +5,7 @@ import { sql } from 'kysely';
 export interface NearUserFact {
   id: string;
   content: string;
+  suppressed: boolean;
   /** Cosine distance to the probe vector, 0 = identical direction. */
   distance: number;
 }
@@ -31,7 +32,7 @@ export async function listNearestUserFacts({
   const probe = sql`${toVectorText(embedding)}::vector`;
   const rows = await db
     .selectFrom('userFacts')
-    .select(['id', 'content', sql<number>`embedding <=> ${probe}`.as('distance')])
+    .select(['id', 'content', 'suppressed', sql<number>`embedding <=> ${probe}`.as('distance')])
     .where('userId', '=', userId)
     .where('modelId', '=', modelId)
     .where('invalidAt', 'is', null)

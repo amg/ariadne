@@ -14,7 +14,7 @@ export interface FactFields {
 
 /** The filing rules every memory-model prompt shares, one rule per line. */
 export const FACT_FIELD_RULES = `- category is one of: ${FACT_CATEGORIES.join(', ')}.
-- subject is "user" unless the fact is about someone the user names; predicate is a short snake_case verb phrase such as likes, lives_in, works_as; object is the thing, lowercase; use null when there is none.`;
+- subject is "user" when the fact is about the user; when it is about someone or something the user names, it is that name as the sentence writes it ("The user's sister Maria is a nurse" has subject "Maria"); predicate is a short snake_case verb phrase such as likes, lives_in, works_as; object is the thing, as the sentence writes it; use null when there is none.`;
 
 export function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -47,13 +47,25 @@ function categoryOrOther(value: unknown): FactCategory {
   return FACT_CATEGORIES.find((category) => category === value) ?? 'other';
 }
 
-/** Reads filing fields off a model-written object; malformed fields fall back to null or `other`. */
+/** The subject of a Fact about the user themselves. */
+const USER_SUBJECT = 'user';
+
+/** A subject as written; any spelling of "user" becomes the one marker. */
+function subjectOrNull(value: unknown): string | null {
+  const subject = trimmedOrNull(value, MAX_ENTITY_CHARS);
+  return subject?.toLowerCase() === USER_SUBJECT ? USER_SUBJECT : subject;
+}
+
+/**
+ * Reads filing fields off a model-written object; malformed fields fall
+ * back to null or `other`. Names keep the spelling they were written in.
+ */
 export function factFieldsOf(raw: Record<string, unknown>): FactFields {
   return {
     category: categoryOrOther(raw.category),
-    subject: trimmedOrNull(raw.subject, MAX_ENTITY_CHARS)?.toLowerCase() ?? null,
+    subject: subjectOrNull(raw.subject),
     predicate: normalizedPredicate(raw.predicate),
-    object: trimmedOrNull(raw.object, MAX_ENTITY_CHARS)?.toLowerCase() ?? null,
+    object: trimmedOrNull(raw.object, MAX_ENTITY_CHARS),
     validAt: dayOrNull(raw.validAt),
   };
 }

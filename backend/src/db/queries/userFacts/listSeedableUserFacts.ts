@@ -13,7 +13,8 @@ type ListSeedableUserFactsProps = {
   userId: string;
   /** Categories kept out of Seeds. */
   blockedCategories: readonly FactCategory[];
-  limit: number;
+  /** Every match when left out. */
+  limit?: number;
 };
 
 /**
@@ -35,10 +36,9 @@ export async function listSeedableUserFacts({
   if (blockedCategories.length > 0) {
     query = query.where('category', 'not in', [...blockedCategories]);
   }
-  return query
+  const ordered = query
     .orderBy((eb) => eb.fn.coalesce('validAt', 'createdAt'), 'desc')
     .orderBy('createdAt', 'desc')
-    .orderBy('id', 'asc')
-    .limit(limit)
-    .execute();
+    .orderBy('id', 'asc');
+  return (limit === undefined ? ordered : ordered.limit(limit)).execute();
 }

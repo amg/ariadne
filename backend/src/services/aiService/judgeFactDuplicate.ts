@@ -10,22 +10,25 @@ import {
 import { withOnDemandBackoff } from './onDemandRetry';
 
 /**
- * The duplicate check of the provider boundary: does a candidate Fact say
- * anything the closest stored Facts do not already say? One label out.
+ * The duplicate check of the provider boundary: is a candidate Fact about
+ * the same thing as one of the closest stored Facts, whether it restates
+ * it or changes a detail of it? Which one, or none, comes out.
  * Runs on `env.MEMORY_MODEL` with the thinking phase disabled.
  */
 
 // The opening sentence names the task, and stays stable so replies can be
 // matched to it.
 export const FACT_DUPLICATE_SYSTEM_PROMPT = `You compare facts about the user; you never answer them. Given a candidate fact and a numbered list of known facts, output exactly one label:
-- DUPLICATE — a known fact already states everything the candidate states, even in other words.
-- NEW — the candidate adds information no known fact states, including a more specific or changed detail.
+- SAME <number> — known fact <number> is about the same person, animal, or thing as the candidate, and about the same detail of them: the candidate says it again in other words, or gives a new value for it (a corrected date, a new home, a changed job).
+- NEW — no known fact is about that same detail of the same person, animal, or thing.
+Names matter: a fact about one named person or pet and a fact about another are about different things. When the user has several of something (pets, hobbies, likes), a fact about another one is NEW.
 Output only the label.`;
 
 const DUPLICATE_TIMEOUT_MS = 20000;
 const DUPLICATE_MAX_OUTPUT_TOKENS = 8;
 
-export type FactDuplicateVerdict = 'duplicate' | 'new';
+/** `same` points into the known Facts given, 0-based. */
+export type FactDuplicateVerdict = { type: 'same'; knownIndex: number } | { type: 'new' };
 
 export interface FactDuplicateInput {
   candidate: string;
@@ -43,11 +46,21 @@ export function buildFactDuplicatePrompt(input: FactDuplicateInput): string {
   return `Candidate: ${input.candidate}\n\nKnown facts:\n${known}`;
 }
 
-/** Maps raw model output onto a verdict; null when the label is unreadable. */
-export function parseFactDuplicateLabel(raw: string): FactDuplicateVerdict | null {
+/**
+ * Maps raw model output onto a verdict; null when the label is unreadable
+ * or names a known Fact that was not given.
+ */
+export function parseFactDuplicateLabel(
+  raw: string,
+  knownCount: number,
+): FactDuplicateVerdict | null {
   const normalized = raw.toUpperCase();
-  if (normalized.includes('DUPLICATE')) return 'duplicate';
-  if (normalized.includes('NEW')) return 'new';
+  const same = normalized.match(/\bSAME\s*(\d+)/);
+  if (same) {
+    const number = Number(same[1]);
+    return number >= 1 && number <= knownCount ? { type: 'same', knownIndex: number - 1 } : null;
+  }
+  if (normalized.includes('NEW')) return { type: 'new' };
   return null;
 }
 
@@ -68,7 +81,7 @@ async function judgeOnce(
       abortSignal: controller.signal,
       providerOptions: { deepinfra: { chat_template_kwargs: { enable_thinking: false } } },
     });
-    const verdict = parseFactDuplicateLabel(result.text);
+    const verdict = parseFactDuplicateLabel(result.text, input.knownFacts.length);
     if (verdict === null) {
       return err('fact_duplicate_unreadable', 'The duplicate check returned no readable label.');
     }

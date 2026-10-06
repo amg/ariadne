@@ -1,4 +1,5 @@
 export { setupThreadAnalysisRoute } from './analysis';
+export { setupThreadCaptureMemoryRoute } from './capture-memory';
 export { setupThreadsDeleteRoute } from './delete';
 export { setupThreadDraftRoute } from './draft';
 export { setupThreadsGetRoute } from './get';

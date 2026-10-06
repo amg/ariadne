@@ -15,7 +15,12 @@ export { computeEmbeddingCostUsd, computeInferenceCostUsd } from './pricing';
 export { EMBEDDING_MODEL_ID } from './config';
 export { embedText, type EmbedTextData } from './embedText';
 export { rewriteFollowUp } from './rewrite';
-export { buildFactExtractionPrompt, extractFacts, type FactCandidate } from './extractFacts';
+export {
+  buildFactExtractionPrompt,
+  extractFacts,
+  type FactCandidate,
+  factExtractionSystemPrompt,
+} from './extractFacts';
 export { judgeFactDuplicate } from './judgeFactDuplicate';
 export { classifyFact } from './classifyFact';
 export { countTextTokens } from './usageMap';

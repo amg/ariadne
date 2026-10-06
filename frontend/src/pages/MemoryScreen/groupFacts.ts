@@ -27,10 +27,11 @@ function capitalizedWords(text: string): string {
     .join(' ');
 }
 
-function subjectHeading(subject: string | null): string {
+/** `spelling` is the subject as a fact in the group writes it. */
+function subjectHeading(subject: string | null, spelling: string): string {
   if (subject === null) return 'Unspecified';
   if (subject === USER_SUBJECT) return 'About: The User';
-  return `About: ${capitalizedWords(subject)}`;
+  return `About: ${capitalizedWords(spelling)}`;
 }
 
 /** The user comes first, named entities next, facts without a subject last. */
@@ -56,7 +57,8 @@ function byGroupOrder(a: RankedFactGroup, b: RankedFactGroup): number {
  * Facts clustered by the entity they describe. Groups are ordered user
  * first and Unspecified last, then by newest fact, then by size; facts
  * inside a group are newest first. A fact's recency is its stated date,
- * or when it was noted. Subjects match case-insensitively.
+ * or when it was noted. Subjects match case-insensitively; a heading
+ * spells its subject the way the group's newest fact does.
  */
 export function factGroupsBySubject(facts: UserFact[]): FactGroup[] {
   const factsBySubject = new Map<string | null, UserFact[]>();
@@ -66,15 +68,19 @@ export function factGroupsBySubject(facts: UserFact[]): FactGroup[] {
   }
 
   return [...factsBySubject.entries()]
-    .map(([subject, subjectFacts]) => ({
-      group: {
-        key: subject === null ? 'unspecified' : `about:${subject}`,
-        heading: subjectHeading(subject),
-        facts: [...subjectFacts].sort(byNewestFact),
-      },
-      subjectRank: subjectRank(subject),
-      newestFactMs: Math.max(...subjectFacts.map(factRecencyMs)),
-    }))
+    .map(([subject, subjectFacts]) => {
+      const newestFirst = [...subjectFacts].sort(byNewestFact);
+      const spelling = newestFirst[0]?.subject?.trim() ?? subject ?? '';
+      return {
+        group: {
+          key: subject === null ? 'unspecified' : `about:${subject}`,
+          heading: subjectHeading(subject, spelling),
+          facts: newestFirst,
+        },
+        subjectRank: subjectRank(subject),
+        newestFactMs: Math.max(...subjectFacts.map(factRecencyMs)),
+      };
+    })
     .sort(byGroupOrder)
     .map(({ group }) => group);
 }

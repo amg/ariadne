@@ -16,7 +16,7 @@ import { type Result, err, ok } from '../types/result';
 const CAPTURE_WAIT_MS = 20_000;
 
 /** Waits for the work, or for the time limit, whichever comes first. */
-async function settledWithin(work: Promise<void>, ms: number): Promise<void> {
+async function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   const limit = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, ms);

@@ -31,18 +31,33 @@ import { withOnDemandBackoff } from './onDemandRetry';
 // The extraction contract. Phrased as checkable rules because small
 // models follow those more reliably than loose guidance. The opening
 // sentence names the task, and stays stable so replies can be matched
-// to it.
+// to it. Blocked categories join as a rule just before the last one.
+const NOTHING_QUALIFIES_RULE = '- If nothing qualifies, output {"facts":[]}.';
 export const FACT_EXTRACTION_SYSTEM_PROMPT = `You extract durable facts about the user from a conversation; you never answer it. Read the numbered turns and output JSON only, in this shape:
 {"facts":[{"turn":1,"content":"The user ...","category":"preference","subject":"user","predicate":"likes","object":"dogs","validAt":null}]}
 Rules:
 - A fact is one self-contained sentence about the user: who they are, what they like or avoid, their circumstances, people, work, places, or a correction they gave. It must still be useful in a future conversation with no other context. Write it in the third person, starting with "The user".
-- Extract only what the user states or clearly confirms about themselves. Never extract the assistant's suggestions, general knowledge, or the topic under discussion.
+- Extract only what the user states or clearly confirms about themselves. Take every detail, dates included, from the user's own words; assistant replies only help you follow the conversation. Never extract the assistant's suggestions, general knowledge, or the topic under discussion.
 - Skip ephemeral details: one-off task requests, passing moods, anything true only for this conversation.
 - turn is the number of the turn the fact comes from.
 - Resolve relative time ("last week", "two years ago") into absolute dates using that turn's date. validAt is the date the fact became true as YYYY-MM-DD, only when the user states or directly implies it; otherwise null. A fact's own date (someone's birth, a move, a start) is its validAt.
 - Read dates the way this user writes them: work out their day/month order from their other dates and the turn dates the conversation gives you. When the order stays ambiguous, leave validAt null rather than guess.
 ${FACT_FIELD_RULES}
-- If nothing qualifies, output {"facts":[]}.`;
+${NOTHING_QUALIFIES_RULE}`;
+
+/**
+ * The extraction contract with the user's blocked categories as one rule
+ * among the others. Stated as a line ahead of the conversation instead,
+ * "Never extract facts in these categories: credentials." made the memory
+ * model return no facts at all for whole conversations.
+ */
+export function factExtractionSystemPrompt(blockedCategories: readonly FactCategory[]): string {
+  if (blockedCategories.length === 0) return FACT_EXTRACTION_SYSTEM_PROMPT;
+  return FACT_EXTRACTION_SYSTEM_PROMPT.replace(
+    NOTHING_QUALIFIES_RULE,
+    `- Leave out any fact whose category would be one of: ${blockedCategories.join(', ')}.\n${NOTHING_QUALIFIES_RULE}`,
+  );
+}
 
 /**
  * Cold loads on the on-demand pool take ~15s (chats observed at 11.5s),
@@ -69,6 +84,11 @@ export interface FactExtractionInput {
    * later turns. 0 or undefined means everything is new.
    */
   contextCount?: number;
+  /**
+   * Fact sentences the Memory already holds about what the turns mention,
+   * given as background for reading them.
+   */
+  knownFacts?: readonly string[];
   /** Categories the model is told never to extract. */
   blockedCategories: readonly FactCategory[];
 }
@@ -85,11 +105,17 @@ export interface FactExtractionData {
   usage: { promptTokens: number; completionTokens: number };
 }
 
-export function buildFactExtractionPrompt(input: FactExtractionInput): string {
-  const blocked =
-    input.blockedCategories.length > 0
-      ? `Never extract facts in these categories: ${input.blockedCategories.join(', ')}.\n\n`
-      : '';
+// Ahead of the turns: placed after them, the memory model dropped facts
+// it extracts from the same turns without the section.
+function knownFactsSection(knownFacts: readonly string[]): string {
+  if (knownFacts.length === 0) return '';
+  const lines = knownFacts.map((fact) => `- ${fact}`).join('\n');
+  return `Already known about the user from earlier conversations, as background for who and what the turns mention:\n${lines}\n\n`;
+}
+
+export function buildFactExtractionPrompt(
+  input: Pick<FactExtractionInput, 'turns' | 'contextCount' | 'knownFacts'>,
+): string {
   const contextCount = input.contextCount ?? 0;
   const contextNote =
     contextCount > 0
@@ -102,7 +128,7 @@ export function buildFactExtractionPrompt(input: FactExtractionInput): string {
       return `Turn ${index + 1}${tag} (${isoDay(turn.date)}):\nUser: ${turn.userText}${reply}`;
     })
     .join('\n\n');
-  return `${contextNote}${blocked}${turns}`;
+  return `${knownFactsSection(input.knownFacts ?? [])}${contextNote}${turns}`;
 }
 
 function turnIndexOrLast(value: unknown, turnCount: number): number {
@@ -147,7 +173,7 @@ async function extractOnce(
   try {
     const result = await generateText({
       model: createModel({ ...config, model: env.MEMORY_MODEL }),
-      system: FACT_EXTRACTION_SYSTEM_PROMPT,
+      system: factExtractionSystemPrompt(input.blockedCategories),
       prompt: buildFactExtractionPrompt(input),
       maxRetries: 0,
       maxOutputTokens: EXTRACTION_MAX_OUTPUT_TOKENS,

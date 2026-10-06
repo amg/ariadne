@@ -211,6 +211,8 @@ function AppLayoutComponent() {
           summary={threadSummary}
           threadTitle={activeThreadTitle}
           onRefreshPricing={handleRefreshPricing}
+          threadId={currentThreadId ?? undefined}
+          memoryCaptureAvailable={threadAnalysisMode !== 'off'}
         />
       }
     >

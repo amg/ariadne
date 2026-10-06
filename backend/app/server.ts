@@ -18,6 +18,7 @@ import {
 } from '@routes/settings';
 import {
   setupThreadAnalysisRoute,
+  setupThreadCaptureMemoryRoute,
   setupThreadDraftRoute,
   setupThreadHandoverRoute,
   setupThreadStopRoute,
@@ -30,7 +31,7 @@ import {
 } from '@routes/threads';
 import { seedDefaultUser } from '@services/userService';
 import Fastify, { LogController } from 'fastify';
-import type { FastifyBaseLogger } from 'fastify';
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { logger } from '../src/logger';
 
 import { initAuth } from '@services/authService';
@@ -38,6 +39,22 @@ import supertokens from 'supertokens-node';
 import { errorHandler, plugin } from 'supertokens-node/framework/fastify';
 
 initAuth();
+
+/**
+ * `disableRequestLogging` silences Fastify's per-request lines (the
+ * onResponse hook below replaces them), but it also silences the error
+ * log, so a 4xx raised before a handler runs (bad body, failed parse)
+ * left only its status code behind. The reason is logged regardless.
+ */
+class AppLogController extends LogController {
+  override defaultErrorLog(error: Error, _request: FastifyRequest, reply: FastifyReply): void {
+    if (reply.statusCode >= 500) {
+      reply.log.error({ err: error }, error.message);
+    } else {
+      reply.log.warn({ err: error }, error.message);
+    }
+  }
+}
 
 // ── Dev console — the logger singleton (`src/logger.ts`) renders one
 // scannable line per request via the onResponse hook below:
@@ -51,7 +68,7 @@ const app = Fastify({
   loggerInstance: logger as FastifyBaseLogger,
   // Fastify's default per-request "incoming request"/"request completed" pair
   // is replaced by the single-line hook below (non-deprecated controller API).
-  logController: new LogController({ disableRequestLogging: true }),
+  logController: new AppLogController({ disableRequestLogging: true }),
 });
 
 app.addHook('onResponse', (request, reply, done) => {
@@ -111,6 +128,7 @@ setupChatPostRoute(app);
 setupThreadStopRoute(app);
 setupThreadDraftRoute(app);
 setupThreadHandoverRoute(app);
+setupThreadCaptureMemoryRoute(app);
 setupSettingsGetRoute(app);
 setupSettingsPatchRoute(app);
 setupMemoryFactsGetRoute(app);

@@ -2,7 +2,9 @@ import { env } from '@config/env';
 import type { FactCategory, Message } from '@db/types';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertUserFact } from '@queries/userFacts/insertUserFact';
-import { listNearestUserFacts } from '@queries/userFacts/listNearestUserFacts';
+import { type NearUserFact, listNearestUserFacts } from '@queries/userFacts/listNearestUserFacts';
+import { listSeedableUserFacts } from '@queries/userFacts/listSeedableUserFacts';
+import { replaceCurrentUserFactOrNull } from '@queries/userFacts/replaceCurrentUserFactOrNull';
 import {
   EMBEDDING_MODEL_ID,
   type FactCandidate,
@@ -13,6 +15,7 @@ import {
   judgeFactDuplicate,
 } from '@services/aiService';
 import { type Result, err, ok } from '../../types/result';
+import { factsNamedIn } from './factsNamedIn';
 
 /** One Turn of the scope Facts are captured from. */
 export interface CaptureTurn {
@@ -37,12 +40,16 @@ type CaptureFactsProps = {
 
 export interface CaptureFactsOutcome {
   added: number;
-  skippedAsDuplicate: number;
+  /** Known Facts a candidate restated or corrected, now superseded by it. */
+  replaced: number;
 }
 
 /** Closer than this a candidate is the same sentence again; no check needed. */
 const IDENTICAL_DISTANCE = 0.02;
-/** Closer than this a candidate may restate a known Fact; the duplicate check decides. */
+/**
+ * Closer than this a candidate may restate or correct a known Fact; the
+ * duplicate check decides.
+ */
 const NEAR_DUPLICATE_DISTANCE = 0.15;
 const NEIGHBOUR_COUNT = 5;
 /** Per-message caps keep one long reply from crowding the scope out. */
@@ -100,15 +107,16 @@ async function recordSpend(spendMessageId: string, spend: CaptureSpend): Promise
 }
 
 /**
- * Decides whether a candidate is already known. Identical sentences and
- * far-away ones need no model call; only near neighbours are checked.
+ * The known Fact a candidate restates or corrects, or null when it is
+ * about something new. Identical sentences and far-away ones need no
+ * model call; only near neighbours are checked.
  */
-async function isKnownFact(
+async function factReplacedByOrNull(
   userId: string,
   candidate: string,
   embedding: number[],
   spend: CaptureSpend,
-): Promise<Result<boolean>> {
+): Promise<Result<NearUserFact | null>> {
   const neighbours = await listNearestUserFacts({
     userId,
     embedding,
@@ -116,8 +124,9 @@ async function isKnownFact(
     limit: NEIGHBOUR_COUNT,
   });
   const near = neighbours.filter((fact) => fact.distance < NEAR_DUPLICATE_DISTANCE);
-  if (near.length === 0) return ok(false);
-  if ((near[0]?.distance ?? 1) < IDENTICAL_DISTANCE) return ok(true);
+  const nearest = near[0];
+  if (nearest === undefined) return ok(null);
+  if (nearest.distance < IDENTICAL_DISTANCE) return ok(nearest);
 
   const judged = await judgeFactDuplicate({
     candidate,
@@ -132,29 +141,37 @@ async function isKnownFact(
     promptTokens,
     completionTokens,
   );
-  return ok(judged.data.verdict === 'duplicate');
+  const { verdict } = judged.data;
+  return ok(verdict.type === 'same' ? (near[verdict.knownIndex] ?? null) : null);
 }
 
-/** Embeds, checks, and stores one candidate; true when a new Fact landed. */
+/**
+ * Embeds, checks, and stores one candidate: as a new Fact, or in place of
+ * the known Fact it restates or corrects, whose suppression it keeps. The
+ * newest statement wins, even over a sentence edited by hand.
+ */
 async function storeCandidate(input: {
   userId: string;
   candidate: FactCandidate;
   turns: CaptureTurn[];
   spend: CaptureSpend;
-}): Promise<Result<boolean>> {
+}): Promise<Result<'added' | 'replaced'>> {
   const { userId, candidate, turns, spend } = input;
   const embedded = await embedText(candidate.content);
   if (embedded.type === 'error') return embedded;
   spend.embedding.promptTokens += embedded.data.promptTokens;
   spend.embedding.costUsd += await computeEmbeddingCostUsd(embedded.data.promptTokens);
 
-  const known = await isKnownFact(userId, candidate.content, embedded.data.embedding, spend);
-  if (known.type === 'error') return known;
-  if (known.data) return ok(false);
+  const replaced = await factReplacedByOrNull(
+    userId,
+    candidate.content,
+    embedded.data.embedding,
+    spend,
+  );
+  if (replaced.type === 'error') return replaced;
 
   const sourceTurn = turns[candidate.turnIndex] ?? turns[turns.length - 1];
-  await insertUserFact({
-    userId,
+  const fact = {
     content: candidate.content,
     category: candidate.category,
     subject: candidate.subject,
@@ -164,17 +181,46 @@ async function storeCandidate(input: {
     modelId: EMBEDDING_MODEL_ID,
     sourceMessageId: sourceTurn?.userMessage.id ?? null,
     validAt: candidate.validAt,
+  };
+  if (replaced.data === null) {
+    await insertUserFact({ userId, ...fact });
+    return ok('added');
+  }
+  // Null when a pass running alongside superseded it first; its reading stands.
+  await replaceCurrentUserFactOrNull({
+    factId: replaced.data.id,
+    userId,
+    replacement: { ...fact, suppressed: replaced.data.suppressed },
   });
-  return ok(true);
+  return ok('replaced');
+}
+
+/**
+ * The Memory's Facts that name someone or something the Turns mention,
+ * as background for reading them: a segment opening on "he and Kuro"
+ * learns what Kuro is from the Fact that says so.
+ */
+async function knownFactsFor(
+  userId: string,
+  blockedCategories: readonly FactCategory[],
+  turns: { userText: string; assistantText: string | null }[],
+): Promise<string[]> {
+  const facts = await listSeedableUserFacts({ userId, blockedCategories });
+  const text = turns.map((turn) => `${turn.userText}\n${turn.assistantText ?? ''}`).join('\n');
+  return factsNamedIn(
+    facts.map((fact) => fact.content),
+    text,
+  );
 }
 
 /**
  * Captures Facts about the user from an ordered run of Turns, extracting
  * only the ones newer than the segment's pointer (earlier turns ride along
- * as context): drops blocked categories, skips what the Memory already
- * knows, stores the rest. Spend is recorded even when the run fails
- * part-way; Rows stored before a failure stay, and a repeated read finds
- * them known.
+ * as context), with the Facts already known about what they mention as
+ * background: drops blocked categories, then stores each candidate as a
+ * new Fact or in place of the known Fact it restates or corrects. Spend
+ * is recorded even when the run fails part-way; rows stored before a
+ * failure stay, and a repeated read replaces them with its own reading.
  */
 export async function captureFacts({
   userId,
@@ -183,10 +229,10 @@ export async function captureFacts({
   spendMessageId,
   capturedThroughAt,
 }: CaptureFactsProps): Promise<Result<CaptureFactsOutcome>> {
-  const outcome: CaptureFactsOutcome = { added: 0, skippedAsDuplicate: 0 };
+  const outcome: CaptureFactsOutcome = { added: 0, replaced: 0 };
   if (turns.length === 0) return ok(outcome);
 
-  // Turns through the pointer are context; anything after is new.
+  // Scope Turns through the pointer are context; anything after is new.
   const contextCount =
     capturedThroughAt === null
       ? 0
@@ -196,13 +242,15 @@ export async function captureFacts({
 
   const spend = emptySpend();
   try {
+    const extractionTurns = turns.map((turn) => ({
+      date: turn.userMessage.createdAt,
+      userText: turn.userMessage.content.slice(0, MAX_USER_CHARS),
+      assistantText: turn.assistantReply?.content.slice(0, MAX_ASSISTANT_CHARS) ?? null,
+    }));
     const extracted = await extractFacts({
-      turns: turns.map((turn) => ({
-        date: turn.userMessage.createdAt,
-        userText: turn.userMessage.content.slice(0, MAX_USER_CHARS),
-        assistantText: turn.assistantReply?.content.slice(0, MAX_ASSISTANT_CHARS) ?? null,
-      })),
+      turns: extractionTurns,
       contextCount,
+      knownFacts: await knownFactsFor(userId, blockedCategories, extractionTurns),
       blockedCategories,
     });
     if (extracted.type === 'error') return extracted;
@@ -225,8 +273,7 @@ export async function captureFacts({
     for (const candidate of allowed) {
       const stored = await storeCandidate({ userId, candidate, turns, spend });
       if (stored.type === 'error') return stored;
-      if (stored.data) outcome.added += 1;
-      else outcome.skippedAsDuplicate += 1;
+      outcome[stored.data] += 1;
     }
     return ok(outcome);
   } finally {

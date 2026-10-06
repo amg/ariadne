@@ -439,3 +439,29 @@ export async function updateUserSettings(patch: Partial<UserSettings>): Promise<
   }
   return res.json();
 }
+
+/** What an on-demand capture pass did (mirrors the backend report). */
+export interface MemoryCaptureReport {
+  /** False when memory is off: nothing was read. */
+  memoryEnabled: boolean;
+  /** Segments owing a capture; 0 means nothing new since the last pass. */
+  owed: number;
+  failed: number;
+  added: number;
+  /** Known Facts restated or corrected, now replaced by the newer reading. */
+  replaced: number;
+}
+
+/**
+ * Runs the thread's capture pass now, from where the last one stopped.
+ * Throws when the pass fails, carrying the server's reason.
+ */
+export async function captureThreadMemory(threadId: string): Promise<MemoryCaptureReport> {
+  // No body, so no JSON content-type: Fastify rejects an empty JSON body.
+  const res = await fetch(`/api/threads/${threadId}/capture-memory`, { method: 'POST' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to capture memory');
+  }
+  return res.json();
+}

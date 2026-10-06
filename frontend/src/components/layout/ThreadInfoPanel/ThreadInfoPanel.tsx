@@ -1,11 +1,23 @@
 import {
   DEFAULT_THREAD_TITLE,
+  type MemoryCaptureReport,
   TITLE_GENERATING_SENTINEL,
   type ThreadSummary,
+  captureThreadMemory,
 } from '@/services/api';
 import { formatCost, formatTokens } from '@/services/utils';
-import { Bot, Calendar, Clock, Coins, MessageSquare, RefreshCw, TrendingUp } from 'lucide-react';
+import {
+  Bot,
+  Calendar,
+  Clock,
+  Coins,
+  Database,
+  MessageSquare,
+  RefreshCw,
+  TrendingUp,
+} from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { CostBreakdown } from './CostBreakdown';
 import { ModelRow } from './ModelRow';
 import { StatRow } from './StatRow';
@@ -15,6 +27,9 @@ type Props = {
   summary: ThreadSummary | null;
   threadTitle?: string | null;
   onRefreshPricing?: () => Promise<{ rateLimited?: boolean; retryAfter?: number }>;
+  threadId?: string;
+  /** False when thread analysis is off: memory is captured from its segments. */
+  memoryCaptureAvailable?: boolean;
 };
 
 function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
@@ -33,12 +48,53 @@ function useRefreshPricing(onRefreshPricing?: Props['onRefreshPricing']) {
   return { isRefreshing, handleRefresh };
 }
 
+function toastCaptureReport(report: MemoryCaptureReport) {
+  if (!report.memoryEnabled) {
+    toast.info('Memory is off', { description: 'Turn it on in Settings to record facts.' });
+  } else if (report.owed === 0) {
+    toast.info('Nothing new to record', {
+      description: 'Every answered message in this thread has already been read.',
+    });
+  } else {
+    toast.success('Memory updated', {
+      description: `${report.added} new fact(s), ${report.replaced} updated.`,
+    });
+  }
+}
+
+function useMemoryCapture(threadId?: string) {
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  const handleCapture = async () => {
+    if (!threadId || isCapturing) return;
+    setIsCapturing(true);
+    try {
+      toastCaptureReport(await captureThreadMemory(threadId));
+    } catch (error) {
+      toast.error('Memory capture failed', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  return { isCapturing, handleCapture };
+}
+
 /**
  * Right side panel showing thread statistics and usage info.
  * Always visible in 3-column layout: threads | chat | info
  */
-export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing }: Props) {
+export default function ThreadInfoPanel({
+  summary,
+  threadTitle,
+  onRefreshPricing,
+  threadId,
+  memoryCaptureAvailable = false,
+}: Props) {
   const { isRefreshing, handleRefresh } = useRefreshPricing(onRefreshPricing);
+  const { isCapturing, handleCapture } = useMemoryCapture(threadId);
 
   if (!summary) {
     return (
@@ -183,6 +239,29 @@ export default function ThreadInfoPanel({ summary, threadTitle, onRefreshPricing
           <p className="text-xs text-muted-foreground">No model data</p>
         )}
       </div>
+
+      {memoryCaptureAvailable && threadId && (
+        <div className="mt-4 rounded-md border bg-background p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <Database className="h-4 w-4 text-indigo-500" />
+              Memory
+            </div>
+            <button
+              type="button"
+              onClick={handleCapture}
+              disabled={isCapturing}
+              title="Capture memory from this thread"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isCapturing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Process new messages and record facts to memory
+          </p>
+        </div>
+      )}
     </aside>
   );
 }

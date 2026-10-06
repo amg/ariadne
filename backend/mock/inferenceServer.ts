@@ -81,6 +81,8 @@ export type MockJudgesControl = {
 export type MockMemoryControl = {
   /** Total extraction requests received (failed ones included). */
   extractionCount: () => number;
+  /** The turns prompt of the latest extraction request; null before any. */
+  lastExtractionPrompt: () => string | null;
   /** Total duplicate-check requests received. */
   duplicateCheckCount: () => number;
   /** Force every extraction reply to `text`; null restores the deterministic reply. */
@@ -387,7 +389,7 @@ function extractionReply(body: ChatCompletionsBody): string | null {
       category: known.category,
       subject: 'user',
       predicate: known.verb,
-      object: rest.toLowerCase() || null,
+      object: rest || null,
       validAt: null,
     });
   }
@@ -398,9 +400,9 @@ function extractionReply(body: ChatCompletionsBody): string | null {
 const DUPLICATE_MARKER = 'You compare facts about the user';
 
 /**
- * Deterministic duplicate verdict: DUPLICATE when a known fact matches the
- * candidate text exactly (case-insensitive), NEW otherwise. Null when the
- * request is not a duplicate check.
+ * Deterministic duplicate verdict: SAME <n> for the first known fact that
+ * matches the candidate text exactly (case-insensitive), NEW otherwise.
+ * Null when the request is not a duplicate check.
  */
 function duplicateReply(body: ChatCompletionsBody): string | null {
   const system = body.messages?.[0]?.content ?? '';
@@ -410,11 +412,17 @@ function duplicateReply(body: ChatCompletionsBody): string | null {
   const known = [...prompt.matchAll(/^\d+\. (.*)$/gm)].map((m) =>
     (m[1] ?? '').trim().toLowerCase(),
   );
-  return known.includes(candidate) ? 'DUPLICATE' : 'NEW';
+  const index = known.indexOf(candidate);
+  return index >= 0 ? `SAME ${index + 1}` : 'NEW';
 }
 
 /** The Fact classifier's system-prompt marker. */
 const CLASSIFICATION_MARKER = 'You classify one fact about the user';
+
+/** The newest user message of a request; null when it has none. */
+function lastUserContentOrNull(body: ChatCompletionsBody): string | null {
+  return [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? null;
+}
 
 /**
  * Deterministic classification reply for a "The user <verb> …" sentence:
@@ -436,7 +444,7 @@ function classificationReply(body: ChatCompletionsBody): string | null {
     category: known?.category ?? field('Current category') ?? 'other',
     subject: subject === 'null' ? null : subject,
     predicate: known?.verb ?? null,
-    object: known ? (clause?.[2] ?? '').trim().toLowerCase() || null : null,
+    object: known ? (clause?.[2] ?? '').trim() || null : null,
     validAt: fact.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? null,
   });
 }
@@ -458,6 +466,7 @@ export async function startMockInferenceServer(options?: {
   const judgesState = { failAll: false };
   const memoryState: {
     extractionCount: number;
+    lastExtractionPrompt: string | null;
     duplicateCheckCount: number;
     forcedExtraction: string | null;
     failExtractions: boolean;
@@ -465,6 +474,7 @@ export async function startMockInferenceServer(options?: {
     failClassifications: boolean;
   } = {
     extractionCount: 0,
+    lastExtractionPrompt: null,
     duplicateCheckCount: 0,
     forcedExtraction: null,
     failExtractions: false,
@@ -488,6 +498,7 @@ export async function startMockInferenceServer(options?: {
     const extraction = extractionReply(body);
     if (extraction !== null) {
       memoryState.extractionCount += 1;
+      memoryState.lastExtractionPrompt = lastUserContentOrNull(body);
       if (memoryState.failExtractions) {
         return {
           status: 500,
@@ -652,6 +663,7 @@ export async function startMockInferenceServer(options?: {
     },
     memory: {
       extractionCount: () => memoryState.extractionCount,
+      lastExtractionPrompt: () => memoryState.lastExtractionPrompt,
       duplicateCheckCount: () => memoryState.duplicateCheckCount,
       forceExtraction: (text: string | null) => {
         memoryState.forcedExtraction = text;
