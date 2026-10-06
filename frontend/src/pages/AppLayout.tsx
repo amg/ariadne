@@ -2,6 +2,7 @@ import type { GenerateTitleActionResult } from '@/actions/threads/generateTitle'
 import AppShell from '@/components/layout/AppShell';
 import ThreadInfoPanel from '@/components/layout/ThreadInfoPanel';
 import ThreadSidebar from '@/components/layout/ThreadSidebar';
+import { FEATURE_DEFAULTS, type FeatureFlags, featuresFromServer } from '@/config/features';
 import {
   TITLE_GENERATING_SENTINEL,
   type Thread,
@@ -32,22 +33,32 @@ export async function loader() {
   if (!(await Session.doesSessionExist())) {
     return redirect('/auth');
   }
-  // Config failure degrades quietly: treat the analysis surface as on.: treat the analysis surface as on.
+  // Config failure degrades quietly, and the two fallbacks differ on
+  // purpose: the analysis surface stays on (the backend still enforces its
+  // own flag), while every feature toggle falls back off.
   let threadAnalysisMode: ThreadAnalysisMode = 'heuristic';
+  let features: FeatureFlags = FEATURE_DEFAULTS;
   try {
-    threadAnalysisMode = (await fetchConfig()).threadAnalysisMode;
+    const config = await fetchConfig();
+    threadAnalysisMode = config.threadAnalysisMode;
+    features = featuresFromServer(config.features);
   } catch {
-    // Surface falls back on; the backend still enforces its own flag.
+    // Keeps the fallbacks above.
   }
-  return { threads: await fetchThreads(), threadAnalysisMode };
+  const data: RootLoaderData = { threads: await fetchThreads(), threadAnalysisMode, features };
+  return data;
+}
+
+/** What the app shell loads once per navigation: the sidebar's threads and the deployment's surfaces. */
+export interface RootLoaderData {
+  threads: Thread[];
+  threadAnalysisMode: ThreadAnalysisMode;
+  features: FeatureFlags;
 }
 
 // Framework entry for the app chrome: reads route state, delegates to the pure shell.
 function AppLayoutComponent() {
-  const { threads, threadAnalysisMode } = useRouteLoaderData('root') as {
-    threads: Thread[];
-    threadAnalysisMode: ThreadAnalysisMode;
-  };
+  const { threads, threadAnalysisMode, features } = useRouteLoaderData('root') as RootLoaderData;
   const match = useMatch('/threads/:threadId');
   const location = useLocation();
   const navigate = useNavigate();
@@ -244,6 +255,7 @@ function AppLayoutComponent() {
           }
           pendingRename={pendingRename}
           onAbout={() => navigate('/about')}
+          memory={features.memory}
           onMemory={() => navigate('/memory')}
           onSettings={() => navigate('/settings')}
         />
@@ -254,7 +266,7 @@ function AppLayoutComponent() {
           threadTitle={activeThreadTitle}
           onRefreshPricing={handleRefreshPricing}
           threadId={currentThreadId ?? undefined}
-          memoryCaptureAvailable={threadAnalysisMode !== 'off'}
+          memoryCaptureAvailable={features.memory && threadAnalysisMode !== 'off'}
         />
       }
     >
@@ -263,6 +275,7 @@ function AppLayoutComponent() {
         key={match?.params.threadId ?? 'empty'}
         context={{
           analysisMode: threadAnalysisMode,
+          memory: features.memory,
           refreshThreadSummary: handleRefreshThreadSummary,
           // A thread opened outside the sidebar (a handover) joins the list
           // once the navigation has landed.

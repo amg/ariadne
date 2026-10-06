@@ -16,6 +16,7 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import type { MemoryFeature } from '@services/memory';
 import { isValidUuid } from '@services/validation';
 import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -187,9 +188,9 @@ type ChatRequest = { kind: 'submit'; content: string } | { kind: 'retry'; choice
 /** Responds to a submit or a retry: an exchange stream, a pause, or an error. */
 async function respondToChat(
   reply: FastifyReply,
-  input: { userId: string; threadId: string; request: ChatRequest },
+  input: { userId: string; threadId: string; request: ChatRequest; memory: MemoryFeature },
 ) {
-  const { userId, threadId, request } = input;
+  const { userId, threadId, request, memory } = input;
   const signal = clientGoneSignal(reply);
   const result =
     request.kind === 'retry'
@@ -199,16 +200,28 @@ async function respondToChat(
           choice: request.choice,
           judging,
           titling,
+          memory,
           signal,
         })
-      : await submitChat({ userId, threadId, content: request.content, judging, titling, signal });
+      : await submitChat({
+          userId,
+          threadId,
+          content: request.content,
+          judging,
+          titling,
+          memory,
+          signal,
+        });
   if (result.type === 'error') return sendExchangeError(reply, result);
   if (isDriftPause(result.data)) return createPauseResponse(result.data);
   registerActiveExchange(input.threadId, result.data);
   return createStreamResponse(reply, input.threadId, result.data);
 }
 
-export async function setupChatPostRoute(fastify: FastifyInstance) {
+export async function setupChatPostRoute(
+  fastify: FastifyInstance,
+  { memory }: { memory: MemoryFeature },
+) {
   fastify.post(
     '/api/threads/:id/chat',
     {
@@ -239,7 +252,12 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
       // authoritative: DB state decides the exchange, client messages ignored.
       if (trigger === 'regenerate-message') {
         const choice: RetryChoice = request.body?.choice === 'continue' ? 'continue' : 'retry';
-        return respondToChat(reply, { userId, threadId, request: { kind: 'retry', choice } });
+        return respondToChat(reply, {
+          userId,
+          threadId,
+          request: { kind: 'retry', choice },
+          memory,
+        });
       }
 
       const content = extractLastUserText(request.body?.messages);
@@ -247,7 +265,12 @@ export async function setupChatPostRoute(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Missing message content' });
       }
 
-      return respondToChat(reply, { userId, threadId, request: { kind: 'submit', content } });
+      return respondToChat(reply, {
+        userId,
+        threadId,
+        request: { kind: 'submit', content },
+        memory,
+      });
     },
   );
 }

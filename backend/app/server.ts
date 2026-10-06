@@ -1,40 +1,17 @@
 // Must be the first import: loads the repo-root .env before any module
 // reads process.env (db.ts resolves the connection at import time).
 import '@config/dotenv';
+import { featureFlags } from '@config/features';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { startQueue, stopQueue } from '@queue/index';
-import { setupChatPostRoute } from '@routes/chat';
-import { setupConfigRoute } from '@routes/config';
-import { setupEventsGetRoute } from '@routes/events/get';
-import { setupHealthRoute } from '@routes/health/get';
-import { setupMessagesGetRoute, setupMessagesPatchRoute } from '@routes/messages';
-import { setupModelsRefreshRoute } from '@routes/models';
-import {
-  setupMemoryFactsDeleteRoute,
-  setupMemoryFactsGetRoute,
-  setupMemoryFactsPatchRoute,
-  setupSettingsGetRoute,
-  setupSettingsPatchRoute,
-} from '@routes/settings';
-import {
-  setupThreadAnalysisRoute,
-  setupThreadCaptureMemoryRoute,
-  setupThreadDraftRoute,
-  setupThreadHandoverRoute,
-  setupThreadStopRoute,
-  setupThreadSummaryRoute,
-  setupThreadsDeleteRoute,
-  setupThreadsGenerateTitleRoute,
-  setupThreadsGetRoute,
-  setupThreadsPatchRoute,
-  setupThreadsPostRoute,
-} from '@routes/threads';
 import { seedDefaultUser } from '@services/userService';
 import Fastify, { LogController } from 'fastify';
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { logger } from '../src/logger';
+import { memoryFeatureOf } from './memoryFeature';
+import { registerRoutes } from './registerRoutes';
 
 import { initAuth } from '@services/authService';
 import supertokens from 'supertokens-node';
@@ -113,30 +90,9 @@ app.setErrorHandler(errorHandler());
 // which are skipped for routes bound before the plugin finishes registering.
 await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' });
 
-// Register routes
-setupHealthRoute(app);
-setupConfigRoute(app);
-setupEventsGetRoute(app);
-setupThreadsGetRoute(app);
-setupThreadsPostRoute(app);
-setupThreadsGenerateTitleRoute(app);
-setupThreadsPatchRoute(app);
-setupThreadsDeleteRoute(app);
-setupThreadSummaryRoute(app);
-setupThreadAnalysisRoute(app);
-setupMessagesGetRoute(app);
-setupMessagesPatchRoute(app);
-setupModelsRefreshRoute(app);
-setupChatPostRoute(app);
-setupThreadStopRoute(app);
-setupThreadDraftRoute(app);
-setupThreadHandoverRoute(app);
-setupThreadCaptureMemoryRoute(app);
-setupSettingsGetRoute(app);
-setupSettingsPatchRoute(app);
-setupMemoryFactsGetRoute(app);
-setupMemoryFactsPatchRoute(app);
-setupMemoryFactsDeleteRoute(app);
+// Feature toggles are read once, here: changing one takes a restart.
+const features = featureFlags();
+registerRoutes(app, features);
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -154,7 +110,8 @@ function stopOnSignal(signal: NodeJS.Signals) {
 const start = async () => {
   try {
     await seedDefaultUser();
-    await startQueue();
+    await startQueue({ memory: memoryFeatureOf(features) });
+    logger.info({ features }, 'feature toggles read');
     stopOnSignal('SIGINT');
     stopOnSignal('SIGTERM');
     await app.listen({ port: PORT, host: HOST });

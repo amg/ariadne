@@ -23,6 +23,11 @@ function parsePayload(kind: ServerEventKind, data: unknown): ServerEvent | null 
   if (kind === 'thread-titled') {
     return typeof body.title === 'string' ? { kind, threadId, title: body.title } : null;
   }
+  if (kind === 'memory-captured' || kind === 'memory-capture-failed') {
+    return typeof body.segmentId === 'string'
+      ? { kind, threadId, segmentId: body.segmentId }
+      : null;
+  }
 
   const messageId = messageIdOrNull(body);
   if (!messageId) return null;

@@ -8,6 +8,7 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { enqueueThreadGenerateTitle, titleThread } from '@queue/tasks/threadGenerateTitleTask';
 import { queueTasks } from '@queue/worker';
 import { type ServerEvent, subscribe } from '@services/events';
+import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -86,7 +87,7 @@ describe('threadGenerateTitle on the worker', () => {
     );
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
       expect(events).toEqual([
@@ -104,7 +105,7 @@ describe('threadGenerateTitle on the worker', () => {
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
       expect(provider.requests.count).toBe(1);
@@ -127,7 +128,7 @@ describe('threadGenerateTitle on the worker', () => {
     );
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
 
       expect(await titleOf(userId, threadId)).toBe('My important notes');
       expect(provider.requests.count).toBe(0);
@@ -152,7 +153,7 @@ describe('threadGenerateTitle on the worker', () => {
     );
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: true });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engines Explained');
       expect(events).toEqual([
@@ -169,7 +170,7 @@ describe('threadGenerateTitle on the worker', () => {
     await deleteThread({ userId, threadId });
 
     await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-    await drainQueue(queueTasks());
+    await drainQueue(queueTasks(memoryOff));
 
     expect(await findThreadByIdAndUser({ userId, threadId })).toBeUndefined();
   });

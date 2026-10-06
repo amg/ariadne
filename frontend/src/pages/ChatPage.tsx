@@ -76,8 +76,9 @@ export default function ChatPage() {
     threadId: string;
     messages: Message[];
   };
-  const { analysisMode, refreshThreadSummary, openThread } = useOutletContext<{
+  const { analysisMode, memory, refreshThreadSummary, openThread } = useOutletContext<{
     analysisMode: ThreadAnalysisMode;
+    memory: boolean;
     refreshThreadSummary: () => Promise<void>;
     openThread: (id: string) => void;
   }>();
@@ -141,6 +142,7 @@ export default function ChatPage() {
         <ChatController
           threadId={threadId}
           rows={rows}
+          memory={memory}
           onSettle={handleSettle}
           onHandedOver={openThread}
         />

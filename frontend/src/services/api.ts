@@ -12,6 +12,8 @@ export type MessageFinishReason =
 export interface AppConfig {
   /** off|heuristic|always — `off` hides the Analysis tab and bubble tints. */
   threadAnalysisMode: 'off' | 'heuristic' | 'always';
+  /** Which features the deployment runs; read through the feature registry. */
+  features: unknown;
 }
 
 export async function fetchConfig(): Promise<AppConfig> {
@@ -199,24 +201,46 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
 }
 
-type Handover = {
+export type Handover = {
   thread: Thread;
   /** The arrival's stored copy, the fresh thread's first message, awaiting its reply. */
   message: { id: string; content: string };
 };
 
 /**
+ * How a handover request ended: the arrival moved, or nothing moved yet
+ * because the old thread's memory is still being saved; asking again
+ * picks up where it left off.
+ */
+export type HandoverOutcome = { kind: 'moved'; handover: Handover } | { kind: 'saving-memory' };
+
+async function errorCodeOrNull(res: Response): Promise<unknown> {
+  try {
+    const body = (await res.json()) as { errorCode?: unknown };
+    return body.errorCode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Moves the thread's paused arrival out into a fresh thread, where the
  * server stores it as the first message. The caller then asks for its reply.
  */
-export async function handOverArrival(threadId: string, messageId: string): Promise<Handover> {
+export async function handOverArrival(
+  threadId: string,
+  messageId: string,
+): Promise<HandoverOutcome> {
   const res = await fetch(`/api/threads/${threadId}/handover`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageId }),
   });
+  if (res.status === 503 && (await errorCodeOrNull(res)) === 'capture_pending') {
+    return { kind: 'saving-memory' };
+  }
   if (!res.ok) throw new Error(`Failed to start a new chat: ${res.statusText}`);
-  return res.json();
+  return { kind: 'moved', handover: await res.json() };
 }
 
 export type ResumeDraft = { messageId: string; text: string };

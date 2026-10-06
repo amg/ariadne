@@ -25,6 +25,7 @@ import {
 } from '@services/aiService';
 import { editMessage } from '@services/messageService';
 import { getModelConfig } from '@services/modelConfigService';
+import { memoryOn } from '@test/memory';
 import { useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import type { UIMessage } from 'ai';
@@ -147,17 +148,17 @@ async function assertSuccess(
 // Single lifecycle hook for the whole file: useTestDb() destroys the pool in
 // its afterAll, so a per-describe call would kill the DB before later suites.
 useTestDb();
-useTestQueue();
+useTestQueue({ memory: memoryOn });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 const titling = { enqueueThreadGenerateTitle };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging, titling });
+  return submitChat({ ...props, judging, titling, memory: memoryOn });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling });
+  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
 }
 
 describe('submitChat', () => {

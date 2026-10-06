@@ -14,6 +14,7 @@ import {
 import { queueTasks } from '@queue/worker';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { type ServerEvent, subscribe } from '@services/events';
+import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -173,7 +174,7 @@ describe('driftGateJudgeArrival on the worker', () => {
     process.env.DEEPINFRA_API_KEY = '';
     try {
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
     } finally {
       process.env.MOCK_AI_BASE_URL = savedUrl ?? '';
       process.env.DEEPINFRA_API_KEY = savedKey ?? '';
@@ -197,7 +198,7 @@ describe('driftGateJudgeArrival on the worker', () => {
     try {
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
-      await drainQueue(queueTasks());
+      await drainQueue(queueTasks(memoryOff));
     } finally {
       unsubscribe();
     }

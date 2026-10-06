@@ -34,7 +34,27 @@ export interface ThreadTitledEvent {
   title: string;
 }
 
-export type ServerEvent = VerdictOkEvent | VerdictPausedEvent | GateFailedEvent | ThreadTitledEvent;
+/** A segment's Facts were captured. */
+export interface MemoryCapturedEvent {
+  kind: 'memory-captured';
+  threadId: string;
+  segmentId: string;
+}
+
+/** A segment's capture stopped trying; its Facts stay owed. */
+export interface MemoryCaptureFailedEvent {
+  kind: 'memory-capture-failed';
+  threadId: string;
+  segmentId: string;
+}
+
+export type ServerEvent =
+  | VerdictOkEvent
+  | VerdictPausedEvent
+  | GateFailedEvent
+  | ThreadTitledEvent
+  | MemoryCapturedEvent
+  | MemoryCaptureFailedEvent;
 
 export type ServerEventKind = ServerEvent['kind'];
 
@@ -47,4 +67,6 @@ export const SERVER_EVENT_KINDS: readonly ServerEventKind[] = [
   'verdict-paused',
   'gate-failed',
   'thread-titled',
+  'memory-captured',
+  'memory-capture-failed',
 ];

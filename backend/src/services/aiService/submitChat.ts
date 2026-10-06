@@ -10,7 +10,7 @@ import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { inTransaction } from '@queries/transaction/inTransaction';
 import type { ThreadGenerateTitleParams } from '@queue/tasks/threadGenerateTitleTask';
-import { assembledSystemPrompt } from '@services/memory';
+import { type MemoryFeature, assembledSystemPrompt } from '@services/memory';
 import { validateMessageContent } from '@services/validation';
 import type { ModelMessage } from 'ai';
 import { type UIMessageChunk, streamText, toUIMessageStream } from 'ai';
@@ -97,6 +97,7 @@ type SubmitChatProps = {
   content: string;
   judging: ArrivalJudging;
   titling: ThreadTitling;
+  memory: MemoryFeature;
   /** Aborts when the client stops waiting; the judgment carries on without it. */
   signal?: AbortSignal;
 };
@@ -114,6 +115,7 @@ type RetryLastExchangeProps = {
   choice: RetryChoice;
   judging: ArrivalJudging;
   titling: ThreadTitling;
+  memory: MemoryFeature;
   /** Aborts when the client stops waiting; the judgment carries on without it. */
   signal?: AbortSignal;
 };
@@ -160,6 +162,7 @@ type StartExchangeProps = {
   /** The user turn the exchange responds to. */
   userMessage: Message;
   titling: ThreadTitling;
+  memory: MemoryFeature;
 };
 
 /**
@@ -222,7 +225,7 @@ async function settleCrashedExchange(
 
 async function guardOrSettleStaleExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
-  scope: { userId: string; threadId: string },
+  scope: { userId: string; threadId: string; memory: MemoryFeature },
 ): Promise<ResultError | null> {
   let newestAssistantIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -251,6 +254,7 @@ async function startExchange({
   precedingRows,
   userMessage,
   titling,
+  memory,
 }: StartExchangeProps): Promise<ChatStreamHandle> {
   const config = resolveInferenceConfig();
   const assistantMessage = await insertMessage({
@@ -268,6 +272,7 @@ async function startExchange({
     userId,
     threadId,
     basePrompt: SYSTEM_PROMPT,
+    memory,
   });
 
   const exchange = new ChatExchange({
@@ -422,6 +427,7 @@ export async function submitChat({
   content,
   judging,
   titling,
+  memory,
   signal,
 }: SubmitChatProps): Promise<Result<ChatSubmission>> {
   const contentResult = validateMessageContent(content);
@@ -450,7 +456,7 @@ export async function submitChat({
   }
 
   const precedingRows = await listMessagesByThread({ threadId });
-  const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId });
+  const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId, memory });
   if (inFlight) return inFlight;
   const unanswered = await unansweredArrivalErrorOrNull(precedingRows);
   if (unanswered) return unanswered;
@@ -465,7 +471,14 @@ export async function submitChat({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, true, { userId, threadId, precedingRows, userMessage, titling });
+  return submissionForGate(gate, true, {
+    userId,
+    threadId,
+    precedingRows,
+    userMessage,
+    titling,
+    memory,
+  });
 }
 
 /**
@@ -488,6 +501,7 @@ export async function retryLastExchange({
   choice,
   judging,
   titling,
+  memory,
   signal,
 }: RetryLastExchangeProps): Promise<Result<ChatSubmission>> {
   const thread = await findThreadByIdAndUser({ userId, threadId });
@@ -502,7 +516,7 @@ export async function retryLastExchange({
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
 
-  const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId });
+  const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId, memory });
   if (inFlight) return inFlight;
 
   let userIndex = -1;
@@ -521,6 +535,7 @@ export async function retryLastExchange({
     precedingRows: rows.slice(0, userIndex),
     userMessage,
     titling,
+    memory,
   };
   const staleReplyIds = rows
     .slice(userIndex + 1)

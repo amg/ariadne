@@ -2,26 +2,31 @@ import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import { findResumeDraft } from '@queries/messages/findResumeDraft';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
+import { findMemoryCaptureSegmentJobOrNull } from '@queue/tasks/memoryCaptureSegmentTask';
 import {
   type ChatStreamHandle,
+  EMBEDDING_MODEL_ID,
   type RetryChoice,
   isDriftPause,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import { type ServerEvent, subscribe } from '@services/events';
 import { handOverArrival } from '@services/handoverService';
-import { assembledSystemPrompt, captureClosedSegments } from '@services/memory';
+import { assembledSystemPrompt, captureUnreadTurns } from '@services/memory';
 import { editMessage } from '@services/messageService';
-import { useTestQueue } from '@test/queue';
+import { memoryOn } from '@test/memory';
+import { makeWaitingJobsDue, useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
 
 /**
@@ -42,18 +47,51 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue();
+useTestQueue({ memory: memoryOn });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts the move itself, not titles: settlement never asks for one. */
 const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging, titling });
+  return submitChat({ ...props, judging, titling, memory: memoryOn });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling });
+  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
+}
+
+/** A short hold, so a handover waiting on a failing capture answers quickly. */
+const SHORT_HANDOVER_WAIT_MS = '300';
+const savedHandoverWait = process.env.HANDOVER_WAIT_MS;
+
+afterEach(() => {
+  mock.memory.clearFailures();
+  process.env.HANDOVER_WAIT_MS = savedHandoverWait ?? '';
+});
+
+/** The segment the arrival's fire closed. */
+async function closedSegmentIdOf(messageId: string): Promise<string> {
+  const logged = await findSegmentDriftLogByMessageId({ messageId, modelId: EMBEDDING_MODEL_ID });
+  if (!logged) throw new Error('the arrival closed no segment');
+  return logged.segmentId;
+}
+
+/**
+ * Asks for the handover the way the browser does: again whenever the
+ * capture is still pending, with its retry pauses brought forward.
+ */
+async function handOverOnceSettled(props: {
+  userId: string;
+  threadId: string;
+  messageId: string;
+}): Promise<Awaited<ReturnType<typeof handOverArrival>>> {
+  for (let tries = 0; tries < 40; tries += 1) {
+    const result = await handOverArrival({ ...props, memory: memoryOn });
+    if (result.type === 'success' || result.code !== 'capture_pending') return result;
+    await makeWaitingJobsDue();
+  }
+  throw new Error('the capture never settled');
 }
 
 async function drain(handle: ChatStreamHandle): Promise<void> {
@@ -63,8 +101,12 @@ async function drain(handle: ChatStreamHandle): Promise<void> {
   await handle.outcome;
 }
 
-/** A thread with one settled Turn and a second arrival paused on a fire. */
-async function pausedThread() {
+/**
+ * A thread with one settled Turn and a second arrival paused on a fire.
+ * `beforeShift` runs just before the second arrival, while the first
+ * segment is still open, so nothing about its capture has started yet.
+ */
+async function pausedThread(beforeShift: () => void = () => {}) {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ userId, title: 'Pause thread' });
@@ -76,6 +118,7 @@ async function pausedThread() {
   }
   await drain(opening.data);
 
+  beforeShift();
   const shift = await submit({
     userId,
     threadId,
@@ -150,10 +193,24 @@ describe('edit into a new topic', () => {
 describe('handOverArrival', () => {
   it('moves the paused arrival to a fresh Thread seeded with the closed segment', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
+    const segmentId = await closedSegmentIdOf(pausedMessageId);
+    const heard: ServerEvent[] = [];
+    const unsubscribe = subscribe(
+      (event) => event.kind === 'memory-captured' && event.threadId === threadId,
+      (event) => heard.push(event),
+    );
 
-    const result = await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    const result = await handOverArrival({
+      userId,
+      threadId,
+      messageId: pausedMessageId,
+      memory: memoryOn,
+    });
+    unsubscribe();
     if (result.type !== 'success') throw new Error(`handover failed: ${result.code}`);
 
+    // The move waited on the queued capture of the closed segment, not on a clock.
+    expect(heard).toContainEqual({ kind: 'memory-captured', userId, threadId, segmentId });
     const freshThreadId = result.data.thread.id;
     expect(result.data.message).toMatchObject({
       threadId: freshThreadId,
@@ -173,6 +230,7 @@ describe('handOverArrival', () => {
       userId,
       threadId: result.data.thread.id,
       basePrompt: 'Base.',
+      memory: memoryOn,
     });
     expect(prompt).toContain('The user loves hiking in the Alps.');
 
@@ -193,18 +251,52 @@ describe('handOverArrival', () => {
     expect(next.type).toBe('success');
   });
 
-  it('moves the arrival even when the closed segment fails to capture', async () => {
-    const { userId, threadId, pausedMessageId } = await pausedThread();
-    mock.memory.failExtractions();
+  it('holds the move while the capture is still trying, then moves with its Facts', async () => {
+    process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
+    const { userId, threadId, pausedMessageId } = await pausedThread(() =>
+      mock.memory.failExtractions(),
+    );
 
-    const result = await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    const held = await handOverArrival({
+      userId,
+      threadId,
+      messageId: pausedMessageId,
+      memory: memoryOn,
+    });
+
+    expect(held).toMatchObject({ type: 'error', code: 'capture_pending' });
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.find((row) => row.id === pausedMessageId)?.abandoned).toBe(false);
+
     mock.memory.clearFailures();
+    const moved = await handOverOnceSettled({ userId, threadId, messageId: pausedMessageId });
+    if (moved.type !== 'success') throw new Error(`handover failed: ${moved.code}`);
+    const prompt = await assembledSystemPrompt({
+      userId,
+      threadId: moved.data.thread.id,
+      basePrompt: 'Base.',
+      memory: memoryOn,
+    });
+    expect(prompt).toContain('The user loves hiking in the Alps.');
+  });
+
+  it('moves without the closed segment once its capture gives up', async () => {
+    process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
+    const { userId, threadId, pausedMessageId } = await pausedThread(() =>
+      mock.memory.failExtractions(),
+    );
+
+    const result = await handOverOnceSettled({ userId, threadId, messageId: pausedMessageId });
 
     if (result.type !== 'success') throw new Error(`handover failed: ${result.code}`);
+    expect(
+      await findMemoryCaptureSegmentJobOrNull(await closedSegmentIdOf(pausedMessageId)),
+    ).toMatchObject({ state: 'dead' });
     const prompt = await assembledSystemPrompt({
       userId,
       threadId: result.data.thread.id,
       basePrompt: 'Base.',
+      memory: memoryOn,
     });
     expect(prompt).toBe('Base.');
   });
@@ -213,8 +305,8 @@ describe('handOverArrival', () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
 
     const results = await Promise.all([
-      handOverArrival({ userId, threadId, messageId: pausedMessageId }),
-      handOverArrival({ userId, threadId, messageId: pausedMessageId }),
+      handOverArrival({ userId, threadId, messageId: pausedMessageId, memory: memoryOn }),
+      handOverArrival({ userId, threadId, messageId: pausedMessageId, memory: memoryOn }),
     ]);
 
     expect(results.map((result) => result.type).sort()).toEqual(['error', 'success']);
@@ -228,7 +320,7 @@ describe('handOverArrival', () => {
 
   it('retries the last live turn without reviving the handed-over arrival or offering it as a draft', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
-    await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    await handOverArrival({ userId, threadId, messageId: pausedMessageId, memory: memoryOn });
 
     const retried = await retryExchange({ userId, threadId });
     if (retried.type !== 'success' || isDriftPause(retried.data)) {
@@ -247,7 +339,7 @@ describe('handOverArrival', () => {
 
   it('still lets the old thread edit its last live prompt and exchange the fork', async () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
-    await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+    await handOverArrival({ userId, threadId, messageId: pausedMessageId, memory: memoryOn });
     const opening = (await listMessagesByThread({ threadId })).find(
       (row) => row.role === 'user' && !row.abandoned,
     );
@@ -278,13 +370,15 @@ describe('handOverArrival', () => {
     ]);
   });
 
-  it('LOOP-dob7: captures the closed segment later when the handover capture failed', async () => {
-    const { userId, threadId, pausedMessageId } = await pausedThread();
-    mock.memory.failExtractions();
-    await handOverArrival({ userId, threadId, messageId: pausedMessageId });
+  it('leaves the segment of a capture that gave up owed, for a later pass to read', async () => {
+    process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
+    const { userId, threadId, pausedMessageId } = await pausedThread(() =>
+      mock.memory.failExtractions(),
+    );
+    await handOverOnceSettled({ userId, threadId, messageId: pausedMessageId });
     mock.memory.clearFailures();
 
-    await captureClosedSegments({ userId, threadId });
+    await captureUnreadTurns({ userId, threadId });
 
     const facts = await db
       .selectFrom('userFacts')
@@ -299,7 +393,12 @@ describe('handOverArrival', () => {
     const opening = (await listMessagesByThread({ threadId })).find((row) => row.role === 'user');
     if (!opening) throw new Error('opening row');
 
-    const result = await handOverArrival({ userId, threadId, messageId: opening.id });
+    const result = await handOverArrival({
+      userId,
+      threadId,
+      messageId: opening.id,
+      memory: memoryOn,
+    });
 
     expect(result).toMatchObject({ type: 'error', code: 'arrival_not_paused' });
   });

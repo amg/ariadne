@@ -71,10 +71,12 @@ else enters the Thread. An edit of the last message lands a fresh
 arrival, so its fork is judged and paused like any new message.
 
 Starting a new chat first captures the segment the arrival closed, so
-the fresh Thread's Seed already knows what that segment taught. That
-capture is best-effort: if it fails or takes longer than a short wait,
-the new chat opens without it rather than keep the user waiting, and the
-segment's Facts reach later Threads once the capture completes. Then,
+the fresh Thread's Seed already knows what that segment taught. The move
+waits for that capture: while it is still running the handover answers
+"still saving" and moves nothing, and the browser asks again. Only a
+capture that gives up lets the new chat open without it; the segment's
+Facts then stay owed for later Threads. The wait lives in the handover
+alone. Then,
 in one transaction, the arrival is abandoned in its old Thread and
 copied in as the fresh Thread's first message, so it can never end up
 in neither Thread or in both. Its reply is then requested there like a

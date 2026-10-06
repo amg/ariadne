@@ -23,3 +23,9 @@ export interface RestoredDraft {
   text: string;
   nonce: number;
 }
+
+/**
+ * Where moving a paused arrival into a fresh chat stands: not under way,
+ * moving, or first saving what the old chat taught the Memory.
+ */
+export type HandoverProgress = 'idle' | 'moving' | 'saving-memory';

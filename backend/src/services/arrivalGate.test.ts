@@ -16,6 +16,7 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import { memoryOn } from '@test/memory';
 import { addDeadJob, useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
@@ -45,7 +46,7 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue();
+useTestQueue({ memory: memoryOn });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts verdict waits, not titles: settlement never asks for one. */
@@ -55,11 +56,17 @@ function submit(
   props: { userId: string; threadId: string; content: string },
   signal?: AbortSignal,
 ) {
-  return submitChat({ ...props, judging, titling, ...(signal ? { signal } : {}) });
+  return submitChat({
+    ...props,
+    judging,
+    titling,
+    memory: memoryOn,
+    ...(signal ? { signal } : {}),
+  });
 }
 
 function retry(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling });
+  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
 }
 
 async function freshThread() {

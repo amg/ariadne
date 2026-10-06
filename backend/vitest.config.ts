@@ -18,7 +18,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'queue/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'queue/**/*.test.ts', 'app/**/*.test.ts'],
     globalSetup: ['./test/global-setup.ts'],
     // All test files share one real database; keep them serial so
     // per-test truncation cannot interfere across files.

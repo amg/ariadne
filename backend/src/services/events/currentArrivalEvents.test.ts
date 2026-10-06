@@ -10,6 +10,7 @@ import {
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { isDriftPause, submitChat } from '@services/aiService';
 import { currentArrivalEvents } from '@services/events';
+import { memoryOn } from '@test/memory';
 import { addDeadJob, useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
@@ -40,7 +41,7 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue();
+useTestQueue({ memory: memoryOn });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts arrival states, not titles: settlement never asks for one. */
@@ -92,7 +93,14 @@ describe('the current state of a user\u2019s arrivals', () => {
   it('reports nothing for a thread whose last arrival is answered', async () => {
     const { userId, threadId } = await freshThread();
     await drained(
-      await submitChat({ userId, threadId, content: 'A plain question', judging, titling }),
+      await submitChat({
+        userId,
+        threadId,
+        content: 'A plain question',
+        judging,
+        titling,
+        memory: memoryOn,
+      }),
     );
 
     expect(await currentArrivalEvents(userId)).toEqual([]);
@@ -108,6 +116,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       content: 'Left hanging',
       judging,
       titling,
+      memory: memoryOn,
     });
     expect(pending).toMatchObject({ type: 'error', code: 'gate_pending' });
 
@@ -128,6 +137,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         content: 'I love hiking in the Alps',
         judging,
         titling,
+        memory: memoryOn,
       }),
     );
     const shift = await submitChat({
@@ -136,6 +146,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       content: 'Explain how espresso machines work',
       judging,
       titling,
+      memory: memoryOn,
     });
     if (shift.type !== 'success' || !isDriftPause(shift.data)) {
       throw new Error('the second arrival must pause');
@@ -187,6 +198,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         content: 'I love hiking in the Alps too',
         judging,
         titling,
+        memory: memoryOn,
       }),
     );
     await submitChat({
@@ -195,6 +207,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       content: 'Explain how espresso machines work',
       judging,
       titling,
+      memory: memoryOn,
     });
 
     const { userId } = await freshThread();

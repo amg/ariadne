@@ -65,6 +65,18 @@ const origins = getCorsOrigins();
 - `REWRITE_MODEL` - Expanded-signal rewrite model (default: 'Qwen/Qwen3.5-9B')
 - `MEMORY_MODEL` - Fact extraction and duplicate-check model (default: 'Qwen/Qwen3.5-9B')
 
+### Waits on queued work
+- `GATE_WAIT_MS` - How long a chat request holds for the drift gate's verdict
+  before answering "still checking" (default: 10000)
+- `HANDOVER_WAIT_MS` - How long a handover request holds for the closed
+  segment's capture before answering "still saving" (default: 10000)
+
+### Feature toggles
+- `FEATURE_MEMORY` - User memory: Fact capture, Thread Seeds, the Memory
+  screen and settings (default: false). Toggles say whether a feature exists
+  in the deployment; `features.ts` is their registry, read once at boot, so
+  changing one takes a backend restart.
+
 ### CORS
 - `CORS_ORIGINS` - Comma-separated allowed origins (optional, defaults to localhost)
 

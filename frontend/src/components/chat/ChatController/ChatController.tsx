@@ -1,4 +1,5 @@
 import {
+  type Handover,
   type Message,
   fetchResumeDraft,
   handOverArrival,
@@ -9,7 +10,7 @@ import { useChat } from '@ai-sdk/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import ChatView from '../ChatView';
-import type { RestoredDraft } from '../ChatView/types';
+import type { HandoverProgress, RestoredDraft } from '../ChatView/types';
 import {
   type GateWaitOutcome,
   describeChatError,
@@ -32,10 +33,33 @@ import {
 type ChatControllerProps = {
   threadId: string;
   rows: Message[];
+  /** Whether the deployment runs Memory: a handover then saves the old chat's Facts first. */
+  memory: boolean;
   onSettle: () => void;
   /** Opens the fresh thread a paused arrival was moved to. */
   onHandedOver?: (threadId: string) => void;
 };
+
+/** The pause before asking again for a handover still saving memory; the server holds each ask. */
+const HANDOVER_RETRY_DELAY_MS = 1_000;
+
+/**
+ * Asks for the handover until the arrival has moved, asking again while
+ * the old chat's memory is still being saved. Null once `stillWanted`
+ * says nobody is waiting any more; nothing has moved then.
+ */
+async function movedArrivalOrNull(
+  threadId: string,
+  messageId: string,
+  stillWanted: () => boolean,
+): Promise<Handover | null> {
+  for (;;) {
+    const outcome = await handOverArrival(threadId, messageId);
+    if (outcome.kind === 'moved') return outcome.handover;
+    if (!stillWanted()) return null;
+    await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_DELAY_MS));
+  }
+}
 
 /**
  * Owns the live AI exchange for one thread: the thread's registry chat
@@ -47,6 +71,7 @@ type ChatControllerProps = {
 export default function ChatController({
   threadId,
   rows,
+  memory,
   onSettle,
   onHandedOver,
 }: ChatControllerProps) {
@@ -65,9 +90,17 @@ export default function ChatController({
   // judgment still owed. The bubble stays; a retry waits on it again.
   const [gateWait, setGateWait] = useState<GateWaitOutcome | null>(null);
   const [restoredDraft, setRestoredDraft] = useState<RestoredDraft | null>(null);
-  const [handingOver, setHandingOver] = useState(false);
+  const [handover, setHandover] = useState<HandoverProgress>('idle');
   const [handoverError, setHandoverError] = useState<string | null>(null);
   const messagesRef = useRef<UiMessageLike[]>([]);
+  // A handover still saving memory keeps asking only while this view is up.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Settlement handlers keep the render's identity; the registry
   // subscription is tied to the thread alone.
@@ -194,26 +227,30 @@ export default function ChatController({
 
   /**
    * Moves the paused arrival to a fresh thread: the server opens it (seeded
-   * from memory) with the arrival stored as its first message, whose reply
-   * is requested there before the view switches over.
+   * from memory, once what this thread taught is saved) with the arrival
+   * stored as its first message, whose reply is requested there before the
+   * view switches over. Leaving this view stops asking again; an arrival
+   * not moved by then stays here, paused, for the next try, and one that
+   * moved meanwhile still gets its reply without pulling the user over.
    */
   const startNewChat = async () => {
-    if (!pausedMessageId || handingOver) return;
-    setHandingOver(true);
+    if (!pausedMessageId || handover !== 'idle') return;
+    setHandover(memory ? 'saving-memory' : 'moving');
     setHandoverError(null);
     try {
-      const handover = await handOverArrival(threadId, pausedMessageId);
+      const moved = await movedArrivalOrNull(threadId, pausedMessageId, () => mountedRef.current);
+      if (!moved) return;
       // The arrival left this thread: hide its row now, and drop its live
       // copy from the thread's chat object, which outlives this view and
       // would otherwise render it again as an unsaved message.
       setDroppedIds((prev) => new Set([...prev, pausedMessageId]));
-      chat.setMessages(withoutMovedArrival(chat.messages, handover.message.content));
-      replyToStoredMessage(handover.thread.id, handover.message);
-      onHandedOver?.(handover.thread.id);
+      chat.setMessages(withoutMovedArrival(chat.messages, moved.message.content));
+      replyToStoredMessage(moved.thread.id, moved.message);
+      if (mountedRef.current) onHandedOver?.(moved.thread.id);
     } catch {
       setHandoverError('Could not start a new chat from this message. Try again.');
     } finally {
-      setHandingOver(false);
+      setHandover('idle');
     }
   };
 
@@ -286,7 +323,7 @@ export default function ChatController({
       onRetryLast={() => retryLast()}
       onEditMessage={editMessage}
       pausedMessageId={pausedMessageId}
-      handingOver={handingOver}
+      handover={handover}
       onContinueHere={() => retryLast(undefined, true)}
       onStartNewChat={() => void startNewChat()}
     />

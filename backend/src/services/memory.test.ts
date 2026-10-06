@@ -18,8 +18,8 @@ import { parseFactCandidates } from '@services/aiService/extractFacts';
 import { parseFactDuplicateLabel } from '@services/aiService/judgeFactDuplicate';
 import {
   assembledSystemPrompt,
-  captureClosedSegments,
   captureFacts,
+  captureSegment,
   captureUnreadTurns,
   editFactContent,
   factsNamedIn,
@@ -29,6 +29,7 @@ import {
 } from '@services/memory';
 import { updateUserSettings } from '@services/settingsService';
 import { createThread } from '@services/threadService';
+import { memoryOff, memoryOn } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -469,15 +470,15 @@ describe('segmentTurns', () => {
   });
 });
 
-describe('captureClosedSegments', () => {
+describe('captureSegment', () => {
   it('captures a closed segment once and marks it', async () => {
     const { userId, threadId, segmentId } = await threadWithClosedSegment([
       'I love hiking in the Alps',
     ]);
 
-    const first = await captureClosedSegments({ userId, threadId });
+    const first = await captureSegment({ userId, threadId, segmentId });
     const extractions = mock.memory.extractionCount();
-    const second = await captureClosedSegments({ userId, threadId });
+    const second = await captureSegment({ userId, threadId, segmentId });
 
     expect(first).toMatchObject({ memoryEnabled: true, owed: 1, failed: 0, added: 1 });
     expect(second).toMatchObject({ owed: 0, added: 0 });
@@ -491,7 +492,7 @@ describe('captureClosedSegments', () => {
   it('keeps old Turns captured when the closer dies; the fork settles at the next cut', async () => {
     const { userId, threadId, boundary, segmentId, secondSegmentId } =
       await threadWithClosedSegment(['I love hiking in the Alps']);
-    await captureClosedSegments({ userId, threadId });
+    await captureSegment({ userId, threadId, segmentId });
     expect(await capturedThrough(segmentId)).not.toBeNull();
     const extractions = mock.memory.extractionCount();
 
@@ -500,7 +501,7 @@ describe('captureClosedSegments', () => {
     // fork's Turns settle at the next cut in the chain.
     await setMessagesAbandoned({ messageIds: [boundary.id], abandoned: true });
     await addTurn(threadId, 'I work as a carpenter');
-    await captureClosedSegments({ userId, threadId });
+    await captureSegment({ userId, threadId, segmentId });
 
     expect(mock.memory.extractionCount()).toBe(extractions); // nothing was re-extracted
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
@@ -520,7 +521,7 @@ describe('captureClosedSegments', () => {
       startMessageId: reclosing.id,
       modelId: EMBEDDING_MODEL_ID,
     });
-    await captureClosedSegments({ userId, threadId });
+    await captureSegment({ userId, threadId, segmentId: secondSegmentId });
 
     expect(await capturedThrough(secondSegmentId)).not.toBeNull();
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
@@ -533,7 +534,7 @@ describe('captureClosedSegments', () => {
     const { userId, threadId, segmentId } = await threadWithClosedSegment(['I love jazz']);
     await updateUserSettings({ userId, patch: { memoryEnabled: false } });
 
-    const report = await captureClosedSegments({ userId, threadId });
+    const report = await captureSegment({ userId, threadId, segmentId });
 
     expect(report).toMatchObject({ memoryEnabled: false, owed: 0, added: 0 });
     expect(await capturedThrough(segmentId)).not.toBeNull();
@@ -544,14 +545,60 @@ describe('captureClosedSegments', () => {
     const { userId, threadId, segmentId } = await threadWithClosedSegment(['I love jazz']);
     mock.memory.failExtractions();
 
-    const failed = await captureClosedSegments({ userId, threadId });
+    const failed = await captureSegment({ userId, threadId, segmentId });
     expect(failed).toMatchObject({ owed: 1, failed: 1, added: 0 });
     expect(await capturedThrough(segmentId)).toBeNull();
 
     mock.memory.clearFailures();
-    await captureClosedSegments({ userId, threadId });
+    await captureSegment({ userId, threadId, segmentId });
     expect(await capturedThrough(segmentId)).not.toBeNull();
     expect(await factsOf(userId)).toHaveLength(1);
+  });
+
+  it('reads only its own segment, leaving another one owed for its own capture', async () => {
+    const { userId, threadId, segmentId, secondSegmentId } = await threadWithClosedSegment([
+      'I love jazz',
+    ]);
+    await insertMessage({ threadId, role: 'assistant', content: 'Noted.' });
+    const reclosing = await insertMessage({ threadId, role: 'user', content: 'Another topic' });
+    await insertSegmentDriftLog({
+      segmentId: secondSegmentId,
+      messageId: reclosing.id,
+      modelId: EMBEDDING_MODEL_ID,
+      verdict: 'fire',
+      fireChannel: 'immediate',
+    });
+    await insertThreadSegment({
+      threadId,
+      startMessageId: reclosing.id,
+      modelId: EMBEDDING_MODEL_ID,
+    });
+
+    const report = await captureSegment({ userId, threadId, segmentId: secondSegmentId });
+
+    expect(report).toMatchObject({ owed: 1, failed: 0 });
+    expect(await capturedThrough(secondSegmentId)).not.toBeNull();
+    expect(await capturedThrough(segmentId)).toBeNull();
+    expect((await factsOf(userId)).map((fact) => fact.content)).not.toContain(
+      'The user loves jazz.',
+    );
+  });
+
+  it('reads nothing from a segment still drawing Turns', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const turn = await addTurn(threadId, 'I love jazz');
+    const open = await insertThreadSegment({
+      threadId,
+      startMessageId: turn.user.id,
+      modelId: EMBEDDING_MODEL_ID,
+    });
+    const extractions = mock.memory.extractionCount();
+
+    const report = await captureSegment({ userId, threadId, segmentId: open.id });
+
+    expect(report).toMatchObject({ owed: 0, added: 0 });
+    expect(mock.memory.extractionCount()).toBe(extractions);
+    expect(await capturedThrough(open.id)).toBeNull();
   });
 });
 
@@ -593,7 +640,7 @@ describe('captureUnreadTurns', () => {
       verdict: 'fire',
       fireChannel: 'immediate',
     });
-    const settled = await captureClosedSegments({ userId, threadId });
+    const settled = await captureSegment({ userId, threadId, segmentId });
 
     expect(settled).toMatchObject({ owed: 1, added: 1 });
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
@@ -703,11 +750,12 @@ describe('Seed', () => {
     await storeFact(userId, 'The user used to live in Oslo.', { invalidAt: new Date() });
     await storeFact(userId, 'The user password is hunter2.', { category: 'credentials' });
 
-    const thread = await createThread({ userId });
+    const thread = await createThread({ userId, memory: memoryOn });
     const prompt = await assembledSystemPrompt({
       userId,
       threadId: thread.id,
       basePrompt: 'Base.',
+      memory: memoryOn,
     });
 
     expect(prompt).toContain('Base.\n\nWhat you know about the user');
@@ -722,13 +770,18 @@ describe('Seed', () => {
     await insertUserIfNotExists({ id: userId });
     await storeFact(userId, 'The user loves jazz.');
     await storeFact(userId, 'The user lives in Lisbon.', { category: 'location' });
-    const thread = await createThread({ userId });
+    const thread = await createThread({ userId, memory: memoryOn });
 
     await updateUserSettings({
       userId,
       patch: { memoryBlockedCategories: ['credentials', 'location'] },
     });
-    const prompt = await assembledSystemPrompt({ userId, threadId: thread.id, basePrompt: 'B' });
+    const prompt = await assembledSystemPrompt({
+      userId,
+      threadId: thread.id,
+      basePrompt: 'B',
+      memory: memoryOn,
+    });
 
     expect(prompt).toContain('The user loves jazz.');
     expect(prompt).not.toContain('Lisbon');
@@ -738,26 +791,70 @@ describe('Seed', () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
     await storeFact(userId, 'The user loves jazz.');
-    const thread = await createThread({ userId });
-    const before = await assembledSystemPrompt({ userId, threadId: thread.id, basePrompt: 'B' });
+    const thread = await createThread({ userId, memory: memoryOn });
+    const before = await assembledSystemPrompt({
+      userId,
+      threadId: thread.id,
+      basePrompt: 'B',
+      memory: memoryOn,
+    });
 
     await storeFact(userId, 'The user plays chess.');
 
-    expect(await assembledSystemPrompt({ userId, threadId: thread.id, basePrompt: 'B' })).toBe(
-      before,
-    );
+    expect(
+      await assembledSystemPrompt({
+        userId,
+        threadId: thread.id,
+        basePrompt: 'B',
+        memory: memoryOn,
+      }),
+    ).toBe(before);
   });
 
   it('writes no Seed for an empty Memory and stops injecting while memory is off', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
-    const empty = await createThread({ userId });
-    expect(await assembledSystemPrompt({ userId, threadId: empty.id, basePrompt: 'B' })).toBe('B');
+    const empty = await createThread({ userId, memory: memoryOn });
+    expect(
+      await assembledSystemPrompt({
+        userId,
+        threadId: empty.id,
+        basePrompt: 'B',
+        memory: memoryOn,
+      }),
+    ).toBe('B');
 
     await storeFact(userId, 'The user loves jazz.');
-    const seeded = await createThread({ userId });
+    const seeded = await createThread({ userId, memory: memoryOn });
     await updateUserSettings({ userId, patch: { memoryEnabled: false } });
-    expect(await assembledSystemPrompt({ userId, threadId: seeded.id, basePrompt: 'B' })).toBe('B');
+    expect(
+      await assembledSystemPrompt({
+        userId,
+        threadId: seeded.id,
+        basePrompt: 'B',
+        memory: memoryOn,
+      }),
+    ).toBe('B');
+  });
+
+  it('writes and reads no Seed in a deployment without Memory', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    await storeFact(userId, 'The user loves jazz.');
+
+    const unseeded = await createThread({ userId, memory: memoryOff });
+    const seeded = await createThread({ userId, memory: memoryOn });
+
+    const seeds = await db.selectFrom('threadSeeds').select('threadId').execute();
+    expect(seeds.map((seed) => seed.threadId)).toEqual([seeded.id]);
+    expect(
+      await assembledSystemPrompt({
+        userId,
+        threadId: seeded.id,
+        basePrompt: 'B',
+        memory: memoryOff,
+      }),
+    ).toBe('B');
   });
 });
 

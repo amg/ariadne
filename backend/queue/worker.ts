@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { type JobErrorClass, jobErrorClassOrNull } from '@queries/queue/jobError';
+import type { MemoryFeature } from '@services/memory';
 import {
   Logger,
   type Task,
@@ -10,9 +11,10 @@ import {
 import { logger } from '../src/logger';
 import { classifiedTaskError, classifyTaskError } from './errors';
 import { whenArrivalJudged, whenJudgmentAbandoned } from './flows/driftGate';
+import { whenSegmentCaptureAbandoned, whenSegmentCaptured } from './flows/memoryCapture';
 import { whenThreadTitled } from './flows/threadTitling';
 import { judgeArrival } from './tasks/driftGateJudgeArrivalTask';
-import { executeMemoryCaptureSegment } from './tasks/memoryCaptureSegmentTask';
+import { captureMemorySegment } from './tasks/memoryCaptureSegmentTask';
 import { titleThread } from './tasks/threadGenerateTitleTask';
 
 /** The identifier of a task the worker knows, and so the payload its jobs carry. */
@@ -70,23 +72,32 @@ export function registeredTask<Name extends TaskName>(
   };
 }
 
+/** The tasks that exist only while Memory does; jobs of theirs wait while it is off. */
+function memoryTasks(memory: MemoryFeature): TaskList {
+  if (memory.kind === 'off') return {};
+  return {
+    memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
+      execute: async (segment) => whenSegmentCaptured(await captureMemorySegment(segment)),
+      onGivenUp: async (segment) => whenSegmentCaptureAbandoned(segment),
+    }),
+  };
+}
+
 /**
  * Every task this deployment runs. Each task computes its outcome; its
  * flow translates that outcome into announcements and follow-up work.
  */
-export function queueTasks(): TaskList {
+export function queueTasks(memory: MemoryFeature): TaskList {
   return {
     driftGateJudgeArrival: registeredTask('driftGateJudgeArrival', {
       execute: async (params) =>
-        whenArrivalJudged({ params, judgment: await judgeArrival(params) }),
+        whenArrivalJudged({ params, judgment: await judgeArrival(params), memory }),
       onGivenUp: async (params) => whenJudgmentAbandoned(params),
     }),
     threadGenerateTitle: registeredTask('threadGenerateTitle', {
       execute: async (params) => whenThreadTitled(await titleThread(params)),
     }),
-    memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
-      execute: executeMemoryCaptureSegment,
-    }),
+    ...memoryTasks(memory),
   };
 }
 

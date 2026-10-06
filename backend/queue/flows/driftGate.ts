@@ -2,9 +2,8 @@ import type {
   ArrivalJudgment,
   DriftGateJudgeArrivalParams,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
-import { enqueueMemoryCaptureSegment } from '@queue/tasks/memoryCaptureSegmentTask';
 import { publish } from '@services/events';
-import { memoryFeature } from '@services/memory';
+import type { MemoryFeature } from '@services/memory';
 
 /**
  * What a judged arrival means downstream: the verdict is announced, and a
@@ -15,9 +14,11 @@ import { memoryFeature } from '@services/memory';
 export async function whenArrivalJudged({
   params,
   judgment,
+  memory,
 }: {
   params: DriftGateJudgeArrivalParams;
   judgment: ArrivalJudgment;
+  memory: MemoryFeature;
 }): Promise<void> {
   if (judgment.kind === 'gone') return;
   const { userId, threadId, messageId } = judgment;
@@ -27,8 +28,8 @@ export async function whenArrivalJudged({
     return;
   }
 
-  if (memoryFeature().kind === 'on' && judgment.closedSegment) {
-    await enqueueMemoryCaptureSegment(judgment.closedSegment);
+  if (memory.kind === 'on' && judgment.closedSegment) {
+    await memory.enqueueMemoryCaptureSegment(judgment.closedSegment);
   }
   publish({
     kind: 'verdict-paused',

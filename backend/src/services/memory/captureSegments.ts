@@ -2,11 +2,15 @@ import type { Message } from '@db/types';
 import { capturePointersOf } from '@queries/memoryCaptureProgress/capturePointersOf';
 import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import { listSegmentsNeedingCapture } from '@queries/threadSegments/listSegmentsNeedingCapture';
+import {
+  type SegmentNeedingCapture,
+  listSegmentsNeedingCapture,
+} from '@queries/threadSegments/listSegmentsNeedingCapture';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
 import { type CaptureTurn, captureFacts } from './captureFacts';
+import type { SegmentToCapture } from './memoryFeature';
 
 /**
  * The live Turns of a segment up to the row that settles it: from its first
@@ -48,41 +52,21 @@ function unsettledTurns(rows: Message[], startMessageId: string): CaptureTurn[] 
 
 /** What one capture pass did, for a caller that reports it to the user. */
 export interface CapturePassReport {
-  /** False when memory is off: nothing was read. */
+  /** False when the user switched memory off: nothing was read. */
   memoryEnabled: boolean;
   /** Segments that held unread Turns when the pass reached them. */
   owed: number;
   /** Segments whose capture failed; their pointers stay put for a retry. */
   failed: number;
+  /** Why the first failed segment failed; null while none has. */
+  failureCode: string | null;
   added: number;
   /** Known Facts restated or corrected, now superseded by the newer reading. */
   replaced: number;
 }
 
 function emptyReport(memoryEnabled: boolean): CapturePassReport {
-  return { memoryEnabled, owed: 0, failed: 0, added: 0, replaced: 0 };
-}
-
-/** One in-flight capture per thread; later passes within it queue up. */
-const pool: { threadId: string; done: Promise<CapturePassReport> }[] = [];
-
-function pooled(threadId: string, work: Promise<CapturePassReport>): Promise<CapturePassReport> {
-  const entry = { threadId, done: work };
-  pool.push(entry);
-  entry.done.finally(() => {
-    const index = pool.indexOf(entry);
-    if (index >= 0) pool.splice(index, 1);
-  });
-  return entry.done;
-}
-
-/**
- * Resolves once the captures in flight for a Thread settle. With no Thread
- * given, settles every capture anywhere — what the test harness waits on.
- */
-export function capturesSettled(threadId?: string): Promise<void> {
-  const pending = pool.filter((entry) => threadId === undefined || entry.threadId === threadId);
-  return Promise.allSettled(pending.map((entry) => entry.done)).then(() => undefined);
+  return { memoryEnabled, owed: 0, failed: 0, failureCode: null, added: 0, replaced: 0 };
 }
 
 /** One segment's read: its Turns, and where its pointer lands after. */
@@ -96,6 +80,17 @@ type SegmentRead = {
 };
 
 type Settings = Awaited<ReturnType<typeof getUserSettings>>;
+
+/** The read a settled segment owes: its Turns past the pointer, up to its settle row. */
+function settledRead(rows: Message[], segment: SegmentNeedingCapture): SegmentRead {
+  return {
+    segmentId: segment.segmentId,
+    turns: segmentTurns(rows, segment.startMessageId, segment.anchorMessageId),
+    capturedThroughAt: segment.capturedThroughAt,
+    spendMessageId: segment.anchorMessageId,
+    throughAt: segment.anchorAt,
+  };
+}
 
 /**
  * Reads one segment past its pointer and adds the outcome to the report.
@@ -123,6 +118,7 @@ async function readSegment(
       }`,
     );
     report.failed += 1;
+    report.failureCode ??= captured.code;
     return false;
   }
   await upsertCaptureProgress({ segmentId: read.segmentId, throughAt: read.throughAt });
@@ -136,43 +132,52 @@ async function readSegment(
   return true;
 }
 
+/**
+ * Captures one settled segment's Turns past its pointer. A segment that
+ * owes nothing — not settled yet, already read through its settle row, or
+ * gone — is a pass with nothing read, so capturing it twice stores nothing
+ * extra. A user who switched memory off has the pointer jump to the settle
+ * row instead: nothing is gathered, and nothing is deferred until memory
+ * returns.
+ */
+export async function captureSegment({
+  userId,
+  threadId,
+  segmentId,
+}: SegmentToCapture): Promise<CapturePassReport> {
+  const settings = await getUserSettings({ userId });
+  const report = emptyReport(settings.memoryEnabled);
+  const owed = await listSegmentsNeedingCapture({ threadId, modelId: EMBEDDING_MODEL_ID });
+  const segment = owed.find((candidate) => candidate.segmentId === segmentId);
+  if (!segment) return report;
+
+  if (!settings.memoryEnabled) {
+    await upsertCaptureProgress({ segmentId, throughAt: segment.anchorAt });
+    return report;
+  }
+
+  const rows = await listMessagesByThread({ threadId });
+  await readSegment(userId, settings, settledRead(rows, segment), report);
+  return report;
+}
+
+/**
+ * Every settled segment of the thread that owes a capture, oldest first,
+ * stopping at the first failure: a later segment is read with what the
+ * earlier ones taught the Memory.
+ */
 async function captureOwedSegments(
   userId: string,
   threadId: string,
   settings: Settings,
-): Promise<CapturePassReport> {
-  const report = emptyReport(settings.memoryEnabled);
+  report: CapturePassReport,
+): Promise<void> {
   const owed = await listSegmentsNeedingCapture({ threadId, modelId: EMBEDDING_MODEL_ID });
-  if (owed.length === 0) return report;
-
-  if (!settings.memoryEnabled) {
-    // Memory off means nothing is gathered — not deferred until it turns on:
-    // the pointer jumps to each segment's settle row.
-    for (const segment of owed) {
-      await upsertCaptureProgress({ segmentId: segment.segmentId, throughAt: segment.anchorAt });
-    }
-    return report;
-  }
-
-  // Oldest first, stopping at the first failure: a later segment is read
-  // with what the earlier ones taught the Memory.
+  if (owed.length === 0) return;
   const rows = await listMessagesByThread({ threadId });
   for (const segment of owed) {
-    const read = await readSegment(
-      userId,
-      settings,
-      {
-        segmentId: segment.segmentId,
-        turns: segmentTurns(rows, segment.startMessageId, segment.anchorMessageId),
-        capturedThroughAt: segment.capturedThroughAt,
-        spendMessageId: segment.anchorMessageId,
-        throughAt: segment.anchorAt,
-      },
-      report,
-    );
-    if (!read) break;
+    if (!(await readSegment(userId, settings, settledRead(rows, segment), report))) return;
   }
-  return report;
 }
 
 /**
@@ -212,48 +217,23 @@ async function captureNewestSegment(
   );
 }
 
-async function captureEverythingUnread(
-  userId: string,
-  threadId: string,
-): Promise<CapturePassReport> {
-  const settings = await getUserSettings({ userId });
-  if (!settings.memoryEnabled) return emptyReport(false);
-  const report = await captureOwedSegments(userId, threadId, settings);
-  if (report.failed > 0) return report;
-  await captureNewestSegment(userId, threadId, settings, report);
-  return report;
-}
-
-/**
- * Runs one capture pass over a thread's settled segments. Each pass is a
- * separate promise; overlapping passes on the same thread read the same
- * state and guard their pointer writes, so they do no more than re-check
- * each other.
- */
-export function captureClosedSegments({
-  userId,
-  threadId,
-}: {
-  userId: string;
-  threadId: string;
-}): Promise<CapturePassReport> {
-  return pooled(
-    threadId,
-    getUserSettings({ userId }).then((settings) => captureOwedSegments(userId, threadId, settings)),
-  );
-}
-
 /**
  * The on-demand pass: everything in the thread not yet read, the newest
  * segment included even though it has not settled. Settled segments are
- * read first, as `captureClosedSegments` would.
+ * read first, oldest first, and a failure stops the pass there.
  */
-export function captureUnreadTurns({
+export async function captureUnreadTurns({
   userId,
   threadId,
 }: {
   userId: string;
   threadId: string;
 }): Promise<CapturePassReport> {
-  return pooled(threadId, captureEverythingUnread(userId, threadId));
+  const settings = await getUserSettings({ userId });
+  const report = emptyReport(settings.memoryEnabled);
+  if (!settings.memoryEnabled) return report;
+  await captureOwedSegments(userId, threadId, settings, report);
+  if (report.failed > 0) return report;
+  await captureNewestSegment(userId, threadId, settings, report);
+  return report;
 }

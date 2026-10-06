@@ -7,7 +7,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
 import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
-import type { ChatViewStatus, DisplayRow, RestoredDraft } from './types';
+import type { ChatViewStatus, DisplayRow, HandoverProgress, RestoredDraft } from './types';
 
 const FOLLOW_BOTTOM_PX = 80;
 
@@ -55,8 +55,8 @@ type ChatViewProps = {
    * continues; null when nothing waits. The input stays locked meanwhile.
    */
   pausedMessageId: string | null;
-  /** True while the paused arrival is moving to a fresh chat. */
-  handingOver: boolean;
+  /** How far moving the paused arrival into a fresh chat has got. */
+  handover: HandoverProgress;
   onContinueHere: () => void;
   onStartNewChat: () => void;
 };
@@ -101,7 +101,7 @@ export default function ChatView({
   onRetryLast,
   onEditMessage,
   pausedMessageId,
-  handingOver,
+  handover,
   onContinueHere,
   onStartNewChat,
 }: ChatViewProps) {
@@ -248,8 +248,8 @@ export default function ChatView({
                   />
                   {row.id === pausedMessageId ? (
                     <DriftChoice
-                      busy={busy || handingOver}
-                      handingOver={handingOver}
+                      busy={busy || handover !== 'idle'}
+                      handover={handover}
                       onContinueHere={onContinueHere}
                       onStartNewChat={onStartNewChat}
                     />

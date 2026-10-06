@@ -217,11 +217,11 @@ async function main() {
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
   setupThreadsGetRoute(app);
-  setupThreadsPostRoute(app);
+  setupThreadsPostRoute(app, { memory: { kind: 'off' } });
   setupThreadsPatchRoute(app);
   setupThreadsDeleteRoute(app);
   setupMessagesGetRoute(app);
-  setupChatPostRoute(app);
+  setupChatPostRoute(app, { memory: { kind: 'off' } });
   await seedDefaultUser();
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();

@@ -1,5 +1,6 @@
 import { env } from '@config/env';
 import { listLockingWorkerIds } from '@queries/queue/listLockingWorkerIds';
+import type { MemoryFeature } from '@services/memory';
 import { type Runner, type WorkerUtils, makeWorkerUtils, run } from 'graphile-worker';
 import { logger } from '../src/logger';
 import { queueRuntime, queueTasks } from './worker';
@@ -26,10 +27,11 @@ async function releaseLocksOfPastProcesses(utils: WorkerUtils): Promise<void> {
 
 /**
  * Installs or upgrades the queue's schema, then starts working every task
- * in this process. Jobs already waiting, including those a restart
- * interrupted, run from here on.
+ * the deployment runs in this process. Jobs already waiting, including
+ * those a restart interrupted, run from here on; jobs of a task the
+ * deployment does not run stay queued, untouched, until it does.
  */
-export async function startQueue(): Promise<void> {
+export async function startQueue({ memory }: { memory: MemoryFeature }): Promise<void> {
   if (active) return;
   const utils = await makeWorkerUtils({
     connectionString: env.DATABASE_URL,
@@ -37,7 +39,7 @@ export async function startQueue(): Promise<void> {
   });
   await utils.migrate();
   await releaseLocksOfPastProcesses(utils);
-  const runtime = queueRuntime(queueTasks(), utils);
+  const runtime = queueRuntime(queueTasks(memory), utils);
   const runner = await run({
     connectionString: env.DATABASE_URL,
     schema: QUEUE_SCHEMA,

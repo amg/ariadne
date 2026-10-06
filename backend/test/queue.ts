@@ -3,6 +3,7 @@ import { db } from '@db/db';
 import { type JobErrorClass, jobKeyOf, taggedJobError } from '@queries/queue/jobError';
 import { QUEUE_SCHEMA, startQueue, stopQueue } from '@queue/index';
 import { queueRuntime } from '@queue/worker';
+import type { MemoryFeature } from '@services/memory';
 import { type TaskList, makeWorkerUtils, runOnce } from 'graphile-worker';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
@@ -95,13 +96,13 @@ async function queueIdle(limitMs = 20_000): Promise<void> {
 
 /**
  * Runs the app's worker in the test process for the whole file, the way
- * the server does, so a request waiting on a task sees it complete. Call
- * after `useTestDb()`: each test's jobs finish before its tables are
- * cleared.
+ * the server does with the given Memory decision, so a request waiting on
+ * a task sees it complete. Call after `useTestDb()`: each test's jobs
+ * finish before its tables are cleared.
  */
-export function useTestQueue(): void {
+export function useTestQueue({ memory }: { memory: MemoryFeature }): void {
   beforeAll(async () => {
-    await startQueue();
+    await startQueue({ memory });
   });
   afterEach(async () => {
     await queueIdle();

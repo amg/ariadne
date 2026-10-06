@@ -32,5 +32,23 @@ export interface ThreadTitledEvent extends EventScope {
   title: string;
 }
 
+/** A segment's Facts were captured, as far as the segment had settled. */
+export interface MemoryCapturedEvent extends EventScope {
+  kind: 'memory-captured';
+  segmentId: string;
+}
+
+/** A segment's capture stopped trying on its own; its Facts stay owed. */
+export interface MemoryCaptureFailedEvent extends EventScope {
+  kind: 'memory-capture-failed';
+  segmentId: string;
+}
+
 /** News for a user that happened outside any request of theirs. */
-export type ServerEvent = VerdictOkEvent | VerdictPausedEvent | GateFailedEvent | ThreadTitledEvent;
+export type ServerEvent =
+  | VerdictOkEvent
+  | VerdictPausedEvent
+  | GateFailedEvent
+  | ThreadTitledEvent
+  | MemoryCapturedEvent
+  | MemoryCaptureFailedEvent;

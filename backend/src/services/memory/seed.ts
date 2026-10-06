@@ -7,6 +7,7 @@ import {
 } from '@queries/userFacts/listSeedableUserFacts';
 import { countTextTokens } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
+import type { MemoryFeature } from './memoryFeature';
 
 /** The most prompt tokens a Seed's memory block may take. */
 export const SEED_TOKEN_BUDGET = 800;
@@ -20,6 +21,9 @@ export interface RenderedSeed {
   lines: SeedLine[];
   factCount: number;
 }
+
+/** A Seed with nothing to say; a handed-over Thread records one all the same. */
+export const EMPTY_SEED: RenderedSeed = { lines: [], factCount: 0 };
 
 /**
  * The lines of a Seed: a bullet per Fact, dated by its stated date, or by
@@ -58,7 +62,7 @@ export async function currentSeed({ userId }: { userId: string }): Promise<Rende
         limit: SEED_CANDIDATE_LIMIT,
       })
     : [];
-  return renderedSeedOrNull(facts) ?? { lines: [], factCount: 0 };
+  return renderedSeedOrNull(facts) ?? EMPTY_SEED;
 }
 
 /**
@@ -82,17 +86,20 @@ export async function seedThread({
  * The system prompt an Exchange runs with: the base prompt, followed by
  * the Thread's Seed while memory is on, minus any category blocked since
  * the Seed froze. Identical on every Exchange of the Thread as long as the
- * settings stay put.
+ * settings stay put. A deployment without Memory gets the base prompt.
  */
 export async function assembledSystemPrompt({
   userId,
   threadId,
   basePrompt,
+  memory,
 }: {
   userId: string;
   threadId: string;
   basePrompt: string;
+  memory: MemoryFeature;
 }): Promise<string> {
+  if (memory.kind === 'off') return basePrompt;
   const seed = await findThreadSeedByThreadIdOrNull({ threadId });
   if (seed === null || seed.lines.length === 0) return basePrompt;
   const settings = await getUserSettings({ userId });

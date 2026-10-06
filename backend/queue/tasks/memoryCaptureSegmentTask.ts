@@ -1,8 +1,8 @@
 import type { DbExecutor } from '@db/types';
 import { enqueueJob } from '@queries/queue/enqueueJob';
 import { type QueuedJob, findJobByKeyOrNull } from '@queries/queue/findJobByKey';
-import { captureClosedSegments } from '@services/memory';
-import type { SegmentToCapture } from '@services/memory';
+import { type SegmentToCapture, captureSegment } from '@services/memory';
+import { TaskFailure } from '../errors';
 
 export const MEMORY_CAPTURE_SEGMENT = 'memoryCaptureSegment';
 const MAX_ATTEMPTS = 3;
@@ -37,13 +37,20 @@ export function findMemoryCaptureSegmentJobOrNull(segmentId: string): Promise<Qu
 }
 
 /**
- * Captures the Facts this segment owes. The pass settles whatever is
- * closed by the segment's pointer, so capturing the segment twice leaves
- * nothing extra to store.
+ * Captures the Facts this segment owes past its pointer and resolves with
+ * the segment once everything it owed is read. A failed read throws with
+ * its cause, so the queue retries what a retry can fix and gives up at
+ * once on what it cannot; the pointer stays put until a read succeeds. A
+ * segment that owes nothing, gone or already read, is a capture with
+ * nothing to store, so running it twice stores nothing extra.
  */
-export async function executeMemoryCaptureSegment({
-  userId,
-  threadId,
-}: SegmentToCapture): Promise<void> {
-  await captureClosedSegments({ userId, threadId });
+export async function captureMemorySegment(segment: SegmentToCapture): Promise<SegmentToCapture> {
+  const report = await captureSegment(segment);
+  if (report.failed > 0) {
+    throw new TaskFailure(
+      report.failureCode ?? 'capture_failed',
+      `segment ${segment.segmentId} could not be read`,
+    );
+  }
+  return segment;
 }

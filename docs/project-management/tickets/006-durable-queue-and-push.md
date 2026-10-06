@@ -93,10 +93,22 @@ that replays the stored fire (ADR 0010).
 
 ### Handover
 
-Unchanged in shape: enqueue `memoryCaptureSegment` for the open segment (memory
-on), wait on its completion via the bus for up to 20 s, then move the
-arrival in one transaction. The Handover never captures inline. With
-memory off, skip both the capture and the seed insert.
+With memory on, the move waits for the closed segment's capture, the
+same way a chat waits for its verdict:
+
+```
+POST /handover ─► subscribe(bus, segmentId) then look up its capture task   (no race)
+   task dead            → move without it (Facts stay owed)
+   no task              → enqueueMemoryCaptureSegment, then wait
+   task queued/running  → wait on it as it is (asking again never resets its attempts)
+   wait ≤ HANDOVER_WAIT_MS (default 10000)
+       memory-captured        → move, Seed included
+       memory-capture-failed  → move without it
+       cap reached            → 503 capture_pending, nothing moved; the browser asks again
+```
+
+The move is one transaction. The Handover never captures inline. With
+memory off, skip the capture and record an empty Seed.
 
 ### Titling
 
@@ -113,6 +125,7 @@ down.
 | 503 + `Retry-After: 5` | `gate_pending` | verdict not in yet | keep the user bubble, show calm "still checking" + Retry |
 | 503 + `Retry-After: 5` | `gate_failed` | the gate's task died | keep the bubble, show "couldn't check this message" + Retry |
 | 409 | `arrival_unanswered` | submit while the last arrival has no reply | composer disabled, point at the bubble's Retry |
+| 503 + `Retry-After: 1` | `capture_pending` | handover still saving the old segment's Facts; nothing moved | keep "Remembering this chat…" and ask again |
 
 The existing 503 `provider_not_configured` stays an error. The frontend
 discriminates on `errorCode`, never on status alone.
@@ -174,6 +187,37 @@ Frontend:
 Enabling later: owed segments from the off period are picked up by the
 next capture pass in each thread (the pointer covers everything past
 it). No retroactive sweep.
+
+### Settled while building it
+
+- **Flipping a toggle takes a restart.** The backend reads its toggles
+  once at boot and decides from them which routes and tasks exist, so a
+  change lands only when the backend restarts; each browser picks it up
+  on its next load.
+- **Capture tasks exist only while memory is on.** The queue engine only
+  fetches jobs for tasks the worker registered, so capture jobs queued
+  before memory was switched off wait untouched and run once it is back
+  on. Nothing dies or retries in the meantime.
+- **The handover waits at the handover, not at the first reply.** It
+  holds each request up to `HANDOVER_WAIT_MS` and the browser asks again
+  until the capture lands or gives up; nothing moves in between. Waiting
+  at the fresh Thread's first reply instead is logged as a future
+  improvement.
+- **A capture fails with its cause.** A missing provider configuration
+  kills the capture at once (only a fix and `queue:retry-failed` help),
+  so a waiting handover moves without it right away; anything else gets
+  the queue's remaining attempts.
+- **The capture task reads its own segment only**, past its pointer.
+  Segments owed from a period without memory are read by the on-demand
+  capture pass (the panel button), which still covers the whole thread.
+- **A handover without memory still writes a Seed row, empty.** The row
+  is also the handover's record (it keeps the moved arrival out of the old
+  Thread's resume draft), and it carries no Facts.
+- **Settings go with memory.** Every user setting today is a memory
+  setting, so the Settings link and page hide along with the Memory ones.
+- **`messages/patch` takes no memory decision.** An edit only forks and
+  queues a judgment; the capture that may follow is decided by the
+  worker's own copy of the decision.
 
 ## Layout and boundaries
 

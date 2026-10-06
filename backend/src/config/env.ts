@@ -38,6 +38,8 @@ export type EnvConfig = {
   EXCHANGE_STALENESS_MS: number;
   /** How long a chat request holds its response open for the drift gate's verdict. */
   GATE_WAIT_MS: number;
+  /** How long a handover request holds for the closed segment's capture. */
+  HANDOVER_WAIT_MS: number;
 
   // Global spend budget (rate limiting ticket)
   /** Daily spend budget in USD. Unset = no gate, fail open. */
@@ -54,6 +56,9 @@ export type EnvConfig = {
 
   // User memory: Fact extraction and duplicate checks
   MEMORY_MODEL: string;
+
+  // Feature toggles, read once at boot
+  FEATURE_MEMORY: boolean;
 
   // CORS (required for SuperTokens)
   CORS_ORIGINS: string;
@@ -204,6 +209,11 @@ export const env: EnvConfig = {
   get GATE_WAIT_MS() {
     return getNumber('GATE_WAIT_MS', 10_000);
   },
+  // Past this wait the handover answers "still saving" and the browser asks
+  // again; the capture itself carries on in the background.
+  get HANDOVER_WAIT_MS() {
+    return getNumber('HANDOVER_WAIT_MS', 10_000);
+  },
 
   // Global spend budget (rate limiting ticket)
   /** Daily spend budget in USD. Unset = no gate, fail open by design. */
@@ -244,6 +254,11 @@ export const env: EnvConfig = {
   // Fact extraction and the duplicate check share one small model.
   get MEMORY_MODEL() {
     return process.env.MEMORY_MODEL?.trim() || 'Qwen/Qwen3.5-9B';
+  },
+
+  // Feature toggles: whether a feature exists in this deployment at all.
+  get FEATURE_MEMORY() {
+    return getBoolean('FEATURE_MEMORY', false);
   },
 
   // CORS (required for SuperTokens - defaults to local dev)
