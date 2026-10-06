@@ -4,6 +4,7 @@ import '@config/dotenv';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import { startQueue, stopQueue } from '@queue/index';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupConfigRoute } from '@routes/config';
 import { setupHealthRoute } from '@routes/health/get';
@@ -138,9 +139,22 @@ setupMemoryFactsDeleteRoute(app);
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
+/** Lets running background jobs finish before the process exits. */
+function stopOnSignal(signal: NodeJS.Signals) {
+  process.once(signal, () => {
+    logger.info(`${signal} received, stopping the queue`);
+    void stopQueue()
+      .catch((error: unknown) => logger.error({ err: error }, 'queue did not stop cleanly'))
+      .finally(() => process.exit(0));
+  });
+}
+
 const start = async () => {
   try {
     await seedDefaultUser();
+    await startQueue([]);
+    stopOnSignal('SIGINT');
+    stopOnSignal('SIGTERM');
     await app.listen({ port: PORT, host: HOST });
     logger.info(`Server is running on http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`);
   } catch (err) {

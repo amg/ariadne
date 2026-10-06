@@ -1,4 +1,4 @@
-import type { Generated, Insertable, Selectable } from 'kysely';
+import type { Generated, Insertable, Kysely, Selectable } from 'kysely';
 
 /**
  * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
@@ -20,6 +20,32 @@ export interface Database {
   userFacts: UserFactsTable;
   threadSeeds: ThreadSeedsTable;
   userSettings: UserSettingsTable;
+  'queues.jobs': QueueJobsView;
+}
+
+/**
+ * A handle queries run on: the app database, or a transaction opened on
+ * it. Writes that must commit together take the same handle.
+ */
+export type DbExecutor = Kysely<Database>;
+
+/**
+ * The background work queue's read-only job view, owned and migrated by
+ * the queue engine. A job is deleted once it succeeds, so every row is
+ * waiting, running, or dead.
+ */
+export interface QueueJobsView {
+  id: string;
+  taskIdentifier: string;
+  /** The key duplicates merge on; null once a newer job took it over. */
+  key: string | null;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  lockedAt: Date | null;
+  lockedBy: string | null;
+  runAt: Date;
+  createdAt: Date;
 }
 
 export interface UsersTable {

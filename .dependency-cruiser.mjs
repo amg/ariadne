@@ -56,5 +56,21 @@ export default {
       },
       to: { path: '^@db/db$|^backend/src/db/db(\\.ts)?$' },
     },
+    {
+      name: 'backend-queue-started-by-server-only',
+      comment:
+        'Only the server entry point starts the worker; everything else reaches a task through the enqueue function it is handed, so the worker can move to its own process.',
+      severity: 'error',
+      from: { path: '^backend/(src|app)/', pathNot: '^backend/app/server\\.ts$' },
+      to: { path: '^@queue/(worker|index)$|^backend/queue/(worker|index)(\\.ts)?$' },
+    },
+    {
+      name: 'backend-queue-kysely-free',
+      comment:
+        'Queue code composes queries like a service does; it never builds SQL or holds the db singleton.',
+      severity: 'error',
+      from: { path: '^backend/queue/', pathNot: '\\.test\\.ts$' },
+      to: { path: '(^|/)kysely|^@db/db$|^backend/src/db/db(\\.ts)?$' },
+    },
   ],
 };

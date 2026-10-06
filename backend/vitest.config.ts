@@ -10,6 +10,7 @@ export default defineConfig({
       '@config': path.resolve(rootDir, 'src/config'),
       '@db': path.resolve(rootDir, 'src/db'),
       '@queries': path.resolve(rootDir, 'src/db/queries'),
+      '@queue': path.resolve(rootDir, 'queue'),
       '@services': path.resolve(rootDir, 'src/services'),
       '@routes': path.resolve(rootDir, 'app/routes'),
       '@test': path.resolve(rootDir, 'test'),
@@ -17,7 +18,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'queue/**/*.test.ts'],
     globalSetup: ['./test/global-setup.ts'],
     // All test files share one real database; keep them serial so
     // per-test truncation cannot interfere across files.

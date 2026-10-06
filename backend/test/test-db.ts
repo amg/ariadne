@@ -7,6 +7,8 @@ export async function cleanDatabase(): Promise<void> {
   await sql`truncate table messages, message_embeddings, thread_segments, segment_drift_logs, threads, users, model_configs cascade`.execute(
     db,
   );
+  // The queue's jobs live in the engine's own tables; no view can clear them.
+  await sql`truncate table queues._private_jobs`.execute(db);
 }
 
 /**
