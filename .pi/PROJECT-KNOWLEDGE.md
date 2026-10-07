@@ -67,9 +67,9 @@ each dot-separated part to snake_case at query time.
 ## Agent Environment
 
 - `cd backend && npm test` works from both the host and the agent
-  container (real Postgres, no mocks; always against `chatbot_test`
-  next to the `.env`-configured database — see README/Testing and
-  `.testing/db.md`).
+  container (real Postgres, no mocks; files run in parallel, each worker
+  on its own clone of `chatbot_test` next to the `.env`-configured
+  database — see README/Testing and `.testing/db.md`).
 - Probing the host database from the agent container (connection string,
   one-off probe recipes): see `.testing/db.md` (gitignored — throwaway
   scripts and probes live there, never in the repo).
