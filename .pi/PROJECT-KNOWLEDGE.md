@@ -1,8 +1,8 @@
 # Chat Bot Project Knowledge
 
 A dockerized, single-user chatbot with streaming replies and cost
-observability plus a planned cross-session factual memory (ADR 0003 is
-accepted, its pipeline unimplemented). It also carries a thread-health
+observability plus cross-session factual memory (Facts captured at
+segment close, Seeds at Thread creation; ADR 0010). It also carries a thread-health
 analyzer for topic-drift detection (ADR 0006); its live gate now runs
 with every conversation — arrivals are expanded, embedded, judged, and
 persisted — with the reading surfaced under Conversation/Analysis tabs

@@ -1,7 +1,8 @@
 # Research: RAG over User Facts
 
-Open exploration supporting ADR 0003 (memory and RAG strategy), whose
-extraction/retrieval pipeline is still unimplemented. Everything here is
+Open exploration supporting ADR 0003 (memory and RAG strategy). ADR 0010
+shipped Fact capture and Thread Seeds; retrieving Facts on each turn is
+still open. Everything here is
 reported from primary sources — papers, first-party product documentation,
 and direct quotes from shipped prompts — with nothing invented in between.
 The four questions asked were: what constitutes a fact about the user,

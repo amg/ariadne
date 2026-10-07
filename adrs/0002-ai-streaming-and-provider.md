@@ -38,6 +38,5 @@ provider package; we pivot to it.
 *   Hand-rolled SSE parsing — unchanged rejection from the original Context.
 
 ## Consequences (Amendment 1)
-*   Plan/implementation docs (`features/ai-connector/MVP.md`) now specify
-    `@ai-sdk/deepinfra`; this amendment supersedes the package named in the
-    original Decision. `useChat` on the frontend is unaffected.
+*   The implementation uses `@ai-sdk/deepinfra`; this amendment supersedes
+    the package named in the original Decision. `useChat` on the frontend is unaffected.
