@@ -1,6 +1,7 @@
 import type { Message, MessageDriftVerdict } from '@/services/api';
 import type { UIMessage } from 'ai';
-import type { DisplayRow } from '../ChatView';
+import type { DisplayRow, UnansweredArrival } from '../ChatView';
+import type { GateWaitOutcome } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 
 /** Join the text parts of a useChat message into one content string. */
@@ -38,14 +39,32 @@ export function countByKey(rows: Message[]): Map<string, number> {
  */
 export function readVerdictData(part: { data?: unknown }): StreamVerdict | null {
   if (part.data === undefined || typeof part.data !== 'object') return null;
-  const data = part.data as { verdict?: string; fireChannel?: string | null };
+  // An unchecked stream payload: every field is optional here and is
+  // validated one by one below.
+  const data = part.data as { verdict?: string; fireChannel?: string | null; messageId?: unknown };
   if (data.verdict !== 'muted' && data.verdict !== 'pass' && data.verdict !== 'fire') return null;
   return {
     userMessageId: '',
+    messageId: typeof data.messageId === 'string' ? data.messageId : null,
     verdict: data.verdict,
     fireChannel:
       data.fireChannel === 'immediate' || data.fireChannel === 'slow' ? data.fireChannel : null,
   };
+}
+
+/**
+ * Live chat state without a handed-over arrival: the newest user message
+ * carrying its text and everything after it are cut. Unchanged when no
+ * such message is held.
+ */
+export function withoutMovedArrival<T extends UiMessageLike>(messages: T[], content: string): T[] {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const candidate = messages[i];
+    if (candidate?.role === 'user' && joinTextParts(candidate.parts).trim() === content.trim()) {
+      return messages.slice(0, i);
+    }
+  }
+  return messages;
 }
 
 /** The most recent user message in live chat state — the pending arrival. */
@@ -128,7 +147,15 @@ export function buildSettledRow(
   sdkMsg: UiMessageLike | undefined,
   streaming: boolean,
   reasoningCache: Map<string, string>,
+  liveVerdict: StreamVerdict | null = null,
 ): DisplayRow {
+  // A saved arrival judged by the running exchange (a retry, an edit's
+  // fork) wears the streamed verdict until the refetch stores it.
+  const verdict =
+    row.driftVerdict ??
+    (liveVerdict && row.role === 'user' && liveVerdict.messageId === row.id
+      ? { verdict: liveVerdict.verdict, fireChannel: liveVerdict.fireChannel }
+      : null);
   const needsOverlay = sdkMsg && sdkMsg.role === 'assistant' && (streaming || row.content === '');
   if (needsOverlay) {
     const content = joinTextParts(sdkMsg.parts);
@@ -139,7 +166,7 @@ export function buildSettledRow(
       usage: row.usage ?? null,
       streaming: streaming,
       reasoning: reasoning || null,
-      verdict: row.driftVerdict ?? null,
+      verdict,
     };
   }
   return {
@@ -148,7 +175,7 @@ export function buildSettledRow(
     usage: row.usage ?? null,
     streaming: false,
     reasoning: reasoningCache.get(row.id) ?? null,
-    verdict: row.driftVerdict ?? null,
+    verdict,
   };
 }
 
@@ -204,6 +231,7 @@ export function mergeDisplayRows(
       sdkMessages.get(row.id),
       row.id === lastStreamingAssistantId,
       reasoningCache,
+      liveVerdict,
     ),
   );
 
@@ -244,12 +272,71 @@ export function mergeDisplayRows(
   return [...settled, ...pending];
 }
 
+/**
+ * The arrival the drift gate paused on: the thread's last visible row is a
+ * settled, fired user message with no reply, and no exchange is running.
+ * Null otherwise — an optimistic row is never offered, its id is not the
+ * server's yet.
+ */
+export function pausedArrivalIdOrNull(
+  display: DisplayRow[],
+  settledRows: Message[],
+  status: 'submitted' | 'streaming' | 'ready' | 'error',
+): string | null {
+  if (status === 'submitted' || status === 'streaming') return null;
+  const last = display[display.length - 1];
+  if (!last || last.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
+  return settledRows.some((row) => row.id === last.id) ? last.id : null;
+}
+
+type UnansweredArrivalFacts = {
+  display: DisplayRow[];
+  settledRows: Message[];
+  status: 'submitted' | 'streaming' | 'ready' | 'error';
+  /** How the thread's last chat request ended, when it ended in a gate wait. */
+  gateWait: GateWaitOutcome | null;
+  /** Whether the Drift gate judges arrivals; with it off every arrival is clear. */
+  arrivalsJudged: boolean;
+};
+
+/**
+ * Where the thread's unanswered arrival stands: the last visible row is a
+ * user message with no reply, no exchange is running, and the gate did not
+ * pause it. Derived from the rows, so it survives a reload, a thread
+ * switch, or a judgment landing by push. An optimistic row counts only
+ * once its request ended in a gate wait; any other outcome either settles
+ * it or rolls it back. Null when no arrival waits on a retry.
+ */
+export function unansweredArrivalOrNull({
+  display,
+  settledRows,
+  status,
+  gateWait,
+  arrivalsJudged,
+}: UnansweredArrivalFacts): UnansweredArrival | null {
+  if (status === 'submitted' || status === 'streaming') return null;
+  const last = display[display.length - 1];
+  if (!last || last.message.role !== 'user') return null;
+  if (!gateWait && !settledRows.some((row) => row.id === last.id)) return null;
+
+  const verdict = last.verdict?.verdict;
+  if (verdict === 'fire') return null;
+  if (verdict === 'pass' || verdict === 'muted' || !arrivalsJudged) return 'cleared';
+  if (gateWait === 'gate_failed' || last.message.gateFailed) return 'failed';
+  return 'pending';
+}
+
+/**
+ * Index of the row with `overrideId`, or else of the newest live user row
+ * (an abandoned arrival, such as one handed over, never counts); -1 when
+ * there is none.
+ */
 export function findTargetUserMessageIndex(rows: Message[], overrideId?: string): number {
   if (overrideId) {
     return rows.findIndex((row) => row.id === overrideId);
   }
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i].role === 'user') return i;
+    if (rows[i].role === 'user' && !rows[i].abandoned) return i;
   }
   return -1;
 }

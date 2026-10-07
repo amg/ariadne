@@ -12,7 +12,7 @@ import { sql } from 'kysely';
  * replicas by construction.
  *
  * Sums all spend sources: chat (messageUsage), embeddings (messageEmbeddings),
- * and expansion costs (messageExpansionCosts: rewrite + judge).
+ * and side-call costs (messageSideCosts: rewrite, judge, and Fact capture).
  */
 export async function sumDailySpend(): Promise<string> {
   const [chatResult, embeddingResult, expansionResult] = await Promise.all([
@@ -36,9 +36,9 @@ export async function sumDailySpend(): Promise<string> {
         sql<Date>`date_trunc('day', now() at time zone 'UTC')`,
       )
       .executeTakeFirst(),
-    // Expansion costs (rewrite + judge)
+    // Side-call costs (rewrite, judge, and Fact capture)
     db
-      .selectFrom('messageExpansionCosts')
+      .selectFrom('messageSideCosts')
       .select(sql<string>`coalesce(sum(cost_usd), 0)::numeric(14,10)`.as('total'))
       .where(
         sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,

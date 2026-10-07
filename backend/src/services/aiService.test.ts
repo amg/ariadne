@@ -9,15 +9,24 @@ import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import {
+  enqueueDriftGateJudgeArrival,
+  findDriftGateJudgeArrivalJobOrNull,
+} from '@queue/tasks/driftGateJudgeArrivalTask';
+import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
+import {
   type ChatStreamHandle,
   type EmbedTextData,
+  type RetryChoice,
   computeCostUsd,
   embedText,
+  isDriftPause,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
 import { editMessage } from '@services/messageService';
 import { getModelConfig } from '@services/modelConfigService';
+import { memoryOn } from '@test/memory';
+import { useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import type { UIMessage } from 'ai';
 import { readUIMessageStream } from 'ai';
@@ -132,18 +141,31 @@ async function assertSuccess(
 ): Promise<ChatStreamHandle> {
   expect(result.type).toBe('success');
   if (result.type !== 'success') throw new Error('expected success');
+  if (isDriftPause(result.data)) throw new Error('expected an exchange, got a drift pause');
   return result.data;
 }
 
 // Single lifecycle hook for the whole file: useTestDb() destroys the pool in
 // its afterAll, so a per-describe call would kill the DB before later suites.
 useTestDb();
+useTestQueue({ memory: memoryOn });
+
+const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
+const titling = { enqueueThreadGenerateTitle };
+
+function submit(props: { userId: string; threadId: string; content: string }) {
+  return submitChat({ ...props, judging, titling, memory: memoryOn });
+}
+
+function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
+  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
+}
 
 describe('submitChat', () => {
   it('returns thread_not_found for unknown/foreign threads', async () => {
     const { userId } = await createRandomThread();
 
-    const result = await submitChat({ userId, threadId: randomUUID(), content: 'hi' });
+    const result = await submit({ userId, threadId: randomUUID(), content: 'hi' });
 
     expect(result).toEqual({ type: 'error', code: 'thread_not_found' });
   });
@@ -151,9 +173,7 @@ describe('submitChat', () => {
   it('streams the reply, pins the UI message id to the DB row and persists usage', async () => {
     const { userId, threadId } = await createRandomThread();
 
-    const handle = await assertSuccess(
-      await submitChat({ userId, threadId, content: 'Hello world' }),
-    );
+    const handle = await assertSuccess(await submit({ userId, threadId, content: 'Hello world' }));
 
     const messages: UIMessage[] = [];
     for await (const message of readUIMessageStream({ stream: handle.stream })) {
@@ -224,7 +244,7 @@ describe('submitChat', () => {
 
     const handle = await assertSuccess(
       // PAUSE:200 suspends the mock between token 1 and 2 → room to stop.
-      await submitChat({ userId, threadId, content: 'stop me please PAUSE:200' }),
+      await submit({ userId, threadId, content: 'stop me please PAUSE:200' }),
     );
 
     const reader = handle.stream.getReader();
@@ -275,7 +295,7 @@ describe('submitChat', () => {
     const thread = await insertThread({ userId });
 
     const handle = await assertSuccess(
-      await submitChat({
+      await submit({
         userId,
         threadId: thread.id,
         content: `${'abcd '.repeat(12).trim()}`,
@@ -301,13 +321,38 @@ describe('submitChat', () => {
     );
   });
 
+  it('queues a still-untitled thread\u2019s titling once its Exchange settles', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+
+    const handle = await assertSuccess(
+      await submit({ userId, threadId: thread.id, content: 'Hello world' }),
+    );
+    await drain(handle);
+    await handle.outcome;
+
+    // The titling runs on the queue after settlement; poll until it lands.
+    const deadline = Date.now() + 20_000;
+    let title: string | null = null;
+    while (Date.now() < deadline) {
+      title = (await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title ?? null;
+      if (title) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    // A generated title, not the interrupted-exchange preview of the arrival.
+    expect(title).toBeTruthy();
+    expect(title).not.toBe('Hello world');
+  });
+
   it('an interrupted exchange leaves no resume draft; retrying completes it', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });
     const thread = await insertThread({ userId });
 
     const interrupted = await assertSuccess(
-      await submitChat({ userId, threadId: thread.id, content: 'retry me please PAUSE:200' }),
+      await submit({ userId, threadId: thread.id, content: 'retry me please PAUSE:200' }),
     );
     interrupted.abort();
     await interrupted.outcome;
@@ -315,7 +360,7 @@ describe('submitChat', () => {
     expect(await findResumeDraft({ threadId: thread.id })).toBeUndefined();
 
     // Retrying the interrupted exchange completes it beneath the partial reply.
-    const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
+    const retry = await assertSuccess(await retryExchange({ userId, threadId: thread.id }));
     await drain(retry);
     expect(await retry.outcome).toMatchObject({
       type: 'success',
@@ -330,7 +375,7 @@ describe('submitChat', () => {
     const thread = await insertThread({ userId });
 
     const original = await assertSuccess(
-      await submitChat({ userId, threadId: thread.id, content: 'original question PAUSE:200' }),
+      await submit({ userId, threadId: thread.id, content: 'original question PAUSE:200' }),
     );
     const reader = original.stream.getReader();
     let sawText = false;
@@ -349,6 +394,7 @@ describe('submitChat', () => {
 
     // The edit forks: abandoned arrival kept intact, edited text inserted.
     const edit = await editMessage({
+      judging,
       userId,
       threadId: thread.id,
       messageId: originalUserRow?.id as string,
@@ -358,7 +404,7 @@ describe('submitChat', () => {
 
     // The retry exchanges the forked row — its live gate runs for the
     // first time there — and completes.
-    const retry = await assertSuccess(await retryLastExchange({ userId, threadId: thread.id }));
+    const retry = await assertSuccess(await retryExchange({ userId, threadId: thread.id }));
     await drain(retry);
     expect(await retry.outcome).toMatchObject({
       type: 'success',
@@ -389,7 +435,7 @@ describe('submitChat', () => {
     const { userId, threadId } = await createRandomThread();
 
     const handle = await assertSuccess(
-      await submitChat({ userId, threadId, content: 'stopped before any token' }),
+      await submit({ userId, threadId, content: 'stopped before any token' }),
     );
     // Never consuming the stream means no token is ever recorded; the stop
     // aborts with nothing to persist but the exchange state.
@@ -412,12 +458,11 @@ describe('submitChat', () => {
     expect(usage?.promptTokens ?? 0).toBeGreaterThan(0);
     expect(usage?.completionTokens).toBe(0);
 
-    // The settled row must not trip the in-flight guard on the next exchange.
-    const next = await assertSuccess(
-      await submitChat({ userId, threadId, content: 'all clear again' }),
-    );
-    await drain(next);
-    await expect(next.outcome).resolves.toMatchObject({ type: 'success' });
+    // The settled row must not trip the in-flight guard on the next submit.
+    // (The mock embeds every distinct text far apart, so this second
+    // arrival is a drift fire and pauses instead of exchanging.)
+    const next = await submit({ userId, threadId, content: 'all clear again' });
+    expect(next.type).toBe('success');
   });
 
   it('aborts on the inter-token idle deadline with stream_timeout', async () => {
@@ -427,7 +472,7 @@ describe('submitChat', () => {
     try {
       const handle = await assertSuccess(
         // 300ms gap blows the 30ms idle deadline after the first token.
-        await submitChat({ userId, threadId, content: 'slow reply PAUSE:300' }),
+        await submit({ userId, threadId, content: 'slow reply PAUSE:300' }),
       );
 
       const outcome = await handle.outcome;
@@ -453,7 +498,7 @@ describe('exchange in-flight guard', () => {
   /** Starts a paused exchange: first token out, stream suspended between tokens. */
   async function startRunningExchange(threadId: string, userId: string) {
     const handle = await assertSuccess(
-      await submitChat({ userId, threadId, content: 'hold still PAUSE:20000' }),
+      await submit({ userId, threadId, content: 'hold still PAUSE:20000' }),
     );
     const reader = handle.stream.getReader();
     let sawText = false;
@@ -470,14 +515,14 @@ describe('exchange in-flight guard', () => {
     const running = await startRunningExchange(threadId, userId);
 
     try {
-      const second = await submitChat({ userId, threadId, content: 'double bill' });
+      const second = await submit({ userId, threadId, content: 'double bill' });
       expect(second).toEqual({
         type: 'error',
         code: 'exchange_in_flight',
         message: 'An exchange is already running in this thread.',
       });
 
-      const retry = await retryLastExchange({ userId, threadId });
+      const retry = await retryExchange({ userId, threadId });
       expect(retry).toMatchObject({ type: 'error', code: 'exchange_in_flight' });
     } finally {
       running.abort();
@@ -504,7 +549,7 @@ describe('exchange in-flight guard', () => {
         createdAt: new Date(Date.now() - 120_000),
       });
 
-      const handle = await assertSuccess(await retryLastExchange({ userId, threadId }));
+      const handle = await assertSuccess(await retryExchange({ userId, threadId }));
       await drain(handle);
       await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
 
@@ -535,11 +580,8 @@ describe('exchange in-flight guard', () => {
         exchangeStatus: 'pending',
         createdAt: new Date(Date.now() - 120_000),
       });
-      await insertMessage({ threadId, role: 'user', content: 'life after the crash' });
 
-      const handle = await assertSuccess(
-        await submitChat({ userId, threadId, content: 'recovered' }),
-      );
+      const handle = await assertSuccess(await submit({ userId, threadId, content: 'recovered' }));
       await drain(handle);
       await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
 
@@ -559,8 +601,8 @@ describe('retryLastExchange', () => {
   it('returns thread_not_found for unknown/foreign threads and nothing_to_regenerate on empty ones', async () => {
     const { userId, threadId } = await createRandomThread();
 
-    const unknown = await retryLastExchange({ userId, threadId: randomUUID() });
-    const empty = await retryLastExchange({ userId, threadId });
+    const unknown = await retryExchange({ userId, threadId: randomUUID() });
+    const empty = await retryExchange({ userId, threadId });
 
     expect(unknown).toEqual({ type: 'error', code: 'thread_not_found' });
     expect(empty).toEqual({ type: 'error', code: 'nothing_to_regenerate' });
@@ -569,11 +611,11 @@ describe('retryLastExchange', () => {
   it('keeps the stale reply abandoned and answers fresh beneath it', async () => {
     const { userId, threadId } = await createRandomThread();
 
-    const first = await assertSuccess(await submitChat({ userId, threadId, content: 'retry me' }));
+    const first = await assertSuccess(await submit({ userId, threadId, content: 'retry me' }));
     await drain(first);
     await expect(first.outcome).resolves.toMatchObject({ type: 'success' });
 
-    const retry = await assertSuccess(await retryLastExchange({ userId, threadId }));
+    const retry = await assertSuccess(await retryExchange({ userId, threadId }));
     const messages: UIMessage[] = [];
     for await (const message of readUIMessageStream({ stream: retry.stream })) {
       messages.push(message);
@@ -606,7 +648,7 @@ describe('retryLastExchange', () => {
       content: 'stuck prompt',
     });
 
-    const handle = await assertSuccess(await retryLastExchange({ userId, threadId }));
+    const handle = await assertSuccess(await retryExchange({ userId, threadId }));
     const messages: UIMessage[] = [];
     for await (const message of readUIMessageStream({ stream: handle.stream })) {
       messages.push(message);

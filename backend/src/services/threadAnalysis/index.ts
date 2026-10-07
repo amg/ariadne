@@ -26,6 +26,7 @@ export {
   type GateDivergenceRow,
   type GateReplayPoint,
   type GateReplaySection,
+  type FireChannel,
   type GateVerdict,
   type ThreadReport,
   type TopicSegmentTurn,

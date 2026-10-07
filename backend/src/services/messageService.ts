@@ -6,7 +6,10 @@ import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
+import { inTransaction } from '@queries/transaction/inTransaction';
+import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { type Result, err, ok } from '../types/result';
+import { type ArrivalJudging, judgmentFailed } from './aiService/arrivalGate';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
 import { validateMessageContent } from './validation';
 
@@ -28,12 +31,18 @@ export type MessageWithUsage = Message & {
   /** Inference telemetry for assistant messages; null until available. */
   usage: UsagePayload | null;
   driftVerdict: DriftVerdictPayload;
+  /**
+   * True on the Thread's Unanswered arrival when the Drift gate could not
+   * judge it and gave up for good; false everywhere else.
+   */
+  gateFailed: boolean;
 };
 
 /** Flattens the join aliases from `listMessagesByThread` into a nested row. */
 export function messageRowToMessageWithUsage(
   row: MessageWithUsageRow,
   driftVerdict: DriftVerdictPayload = null,
+  gateFailed = false,
 ): MessageWithUsage {
   const {
     usageModel: model,
@@ -52,7 +61,7 @@ export function messageRowToMessageWithUsage(
   } = row;
 
   if (model === null || costUsd === null || finishReason === null) {
-    return { ...message, usage: null, driftVerdict };
+    return { ...message, usage: null, driftVerdict, gateFailed };
   }
   return {
     ...message,
@@ -73,6 +82,7 @@ export function messageRowToMessageWithUsage(
       estimated: estimated === true,
     },
     driftVerdict,
+    gateFailed,
   };
 }
 
@@ -81,16 +91,19 @@ type UpdateMessageProps = {
   threadId: string;
   messageId: string;
   content: string;
+  judging: Pick<ArrivalJudging, 'enqueueDriftGateJudgeArrival'>;
 };
 
 /**
- * The edit fork — prompts only. The thread's last user message is
- * editable, and an edit ABANDONS its arrival rather than rewriting it:
+ * The edit fork — prompts only. The thread's last live user message is
+ * editable; an abandoned arrival after it (one handed over to another
+ * Thread, say) never counts. An edit ABANDONS its arrival rather than
+ * rewriting it:
  * the old row keeps its text and its arrival analysis (still correct for
  * the untouched reading), so its spend keeps tracking the pre-edit costs;
  * every reply grown from the old text is abandoned with it. The edited
- * text lands as a NEW user row after them — the arrival the retry
- * exchanges and the live gate judges. Abandoned rows are never rewritten
+ * text lands as a NEW user row after them — a fresh arrival, its Drift
+ * gate judgment queued with it; the retry then exchanges or pauses it. Abandoned rows are never rewritten
  * and never deleted; inference memory, listing, drafting and the analysis
  * surface simply skip them. Assistant replies themselves are never edited
  * — retry (chat regenerate) is their recovery path. "not_last" (409) and
@@ -102,6 +115,7 @@ export async function editMessage({
   threadId,
   messageId,
   content,
+  judging,
 }: UpdateMessageProps): Promise<Result<MessageWithUsage>> {
   const contentResult = validateMessageContent(content);
   if (contentResult.type === 'error') return contentResult;
@@ -115,7 +129,7 @@ export async function editMessage({
 
   let lastUserIndex = -1;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user') {
+    if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
       lastUserIndex = i;
       break;
     }
@@ -128,13 +142,25 @@ export async function editMessage({
   // The old arrival and every reply grown from its text are abandoned in
   // place: rows stay — text, arrival analysis and usage keep tracking what
   // the thread burned — while retry, inference memory and listing skip
-  // them. The fork lands after them.
-  await setMessagesAbandoned({
-    messageIds: [lastUser.id, ...rows.slice(lastUserIndex + 1).map((row) => row.id)],
-    abandoned: true,
+  // them. The fork lands after them, in the same step as its judgment.
+  const forked = await inTransaction(async (trx) => {
+    await setMessagesAbandoned(
+      {
+        messageIds: [
+          lastUser.id,
+          ...rows
+            .slice(lastUserIndex + 1)
+            .filter((row) => !row.abandoned)
+            .map((row) => row.id),
+        ],
+        abandoned: true,
+      },
+      trx,
+    );
+    const fork = await insertMessage({ threadId, role: 'user', content: normalized }, trx);
+    await judging.enqueueDriftGateJudgeArrival({ userId, threadId, messageId: fork.id }, trx);
+    return fork;
   });
-
-  const forked = await insertMessage({ threadId, role: 'user', content: normalized });
   return ok(
     messageRowToMessageWithUsage({
       ...forked,
@@ -152,6 +178,21 @@ export async function editMessage({
       usageEstimated: null,
     }),
   );
+}
+
+/**
+ * The Thread's Unanswered arrival whose judgment gave up for good, or null.
+ * Only the newest live row can be one, and a stored verdict means it was
+ * judged after all.
+ */
+async function gateFailedArrivalIdOrNull(
+  rows: MessageWithUsageRow[],
+  verdictByMessageId: ReadonlyMap<string, unknown>,
+): Promise<string | null> {
+  const newestLive = rows.filter((row) => !row.abandoned).at(-1);
+  if (newestLive?.role !== 'user' || verdictByMessageId.has(newestLive.id)) return null;
+  const job = await findDriftGateJudgeArrivalJobOrNull(newestLive.id);
+  return judgmentFailed(job) ? newestLive.id : null;
 }
 
 type GetMessagesProps = {
@@ -183,10 +224,17 @@ export async function getMessages({
     ]),
   );
 
+  // With the gate switched off nothing is judged, so nothing can fail.
+  const gateFailedId =
+    env.THREAD_ANALYSIS_MODE === 'off'
+      ? null
+      : await gateFailedArrivalIdOrNull(rows, verdictByMessageId);
+
   const messages = rows.map((row) =>
     messageRowToMessageWithUsage(
       row,
       row.role === 'user' ? (verdictByMessageId.get(row.id) ?? null) : null,
+      row.id === gateFailedId,
     ),
   );
 
@@ -200,6 +248,7 @@ export async function getMessages({
     createdAt: thread.createdAt,
     usage: null,
     driftVerdict: null,
+    gateFailed: false,
   };
 
   if (messages.length === 0 || messages[0]?.role !== 'system') {

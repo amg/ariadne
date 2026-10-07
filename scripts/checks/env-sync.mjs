@@ -37,7 +37,7 @@ const EXEMPT = new Set([
  */
 const COMPOSE_DEV_PASSTHROUGH = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_PORT'];
 
-const BACKEND_SCAN_DIRS = ['src', 'app', 'mock', 'smoke', 'test'];
+const BACKEND_SCAN_DIRS = ['src', 'app', 'queue', 'scripts', 'mock', 'smoke', 'test'];
 
 function collectTsFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {

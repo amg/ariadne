@@ -3,6 +3,7 @@ import { deleteThread as deleteThreadQuery } from '@queries/threads/deleteThread
 import { insertThread } from '@queries/threads/insertThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { updateThreadTitle } from '@queries/threads/updateThreadTitle';
+import { type MemoryFeature, seedThread } from '@services/memory';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -59,8 +60,15 @@ export async function getThreads({ userId }: GetThreadsProps): Promise<Thread[]>
 
 type CreateThreadProps = {
   userId: string;
+  memory: MemoryFeature;
 };
 
-export async function createThread({ userId }: CreateThreadProps): Promise<Thread> {
-  return insertThread({ userId });
+/**
+ * Opens a fresh Thread, seeded with what the Memory knows about the user;
+ * without Memory it opens unseeded.
+ */
+export async function createThread({ userId, memory }: CreateThreadProps): Promise<Thread> {
+  const thread = await insertThread({ userId });
+  if (memory.kind === 'on') await seedThread({ userId, threadId: thread.id });
+  return thread;
 }

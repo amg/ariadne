@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 /**
  * The one address for a thread's spend totals: the assistant exchanges'
  * chat telemetry, plus the arrival pipeline's embedding, rewrite, and
- * judge spend. Adding a spend source means adding it here (and its test),
+ * judge spend, plus the Fact capture its Boundary arrivals triggered. Adding a spend source means adding it here (and its test),
  * so totals cannot silently under-count.
  */
 export interface ThreadSpendTotals {
@@ -12,6 +12,8 @@ export interface ThreadSpendTotals {
   embedding: string;
   rewrite: string;
   judge: string;
+  /** Fact extraction, duplicate checks, and Fact embeddings. */
+  memory: string;
 }
 
 /**
@@ -31,7 +33,7 @@ export async function sumThreadSpend({
       .executeTakeFirst(),
     db
       .selectFrom('messages as m')
-      .innerJoin('messageExpansionCosts as ec', 'ec.messageId', 'm.id')
+      .innerJoin('messageSideCosts as ec', 'ec.messageId', 'm.id')
       .where('m.threadId', '=', threadId)
       .select([
         sql<string>`coalesce(sum(ec.cost_usd) filter (where ec.kind = 'rewrite'), 0)::numeric(14,10)`.as(
@@ -39,6 +41,9 @@ export async function sumThreadSpend({
         ),
         sql<string>`coalesce(sum(ec.cost_usd) filter (where ec.kind = 'judge'), 0)::numeric(14,10)`.as(
           'judge',
+        ),
+        sql<string>`coalesce(sum(ec.cost_usd) filter (where ec.kind in ('fact_extraction', 'fact_duplicate_check', 'fact_embedding')), 0)::numeric(14,10)`.as(
+          'memory',
         ),
       ])
       .executeTakeFirst(),
@@ -54,13 +59,21 @@ export async function sumThreadSpend({
   const rewriteTotal = expansion?.rewrite;
   const judgeTotal = expansion?.judge;
   const embeddingTotal = embedding?.embedding;
+  const memoryTotal = expansion?.memory;
   if (
     chatTotal === undefined ||
     rewriteTotal === undefined ||
     judgeTotal === undefined ||
-    embeddingTotal === undefined
+    embeddingTotal === undefined ||
+    memoryTotal === undefined
   ) {
     throw new Error('thread spend totals returned no row');
   }
-  return { chat: chatTotal, embedding: embeddingTotal, rewrite: rewriteTotal, judge: judgeTotal };
+  return {
+    chat: chatTotal,
+    embedding: embeddingTotal,
+    rewrite: rewriteTotal,
+    judge: judgeTotal,
+    memory: memoryTotal,
+  };
 }

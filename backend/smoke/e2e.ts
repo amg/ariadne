@@ -169,6 +169,12 @@ async function testInFlightGuard(base: string, threadId: string) {
   }
 }
 
+async function createSmokeThread(base: string): Promise<string> {
+  const response = await fetch(`${base}/api/threads`, { method: 'POST' });
+  const thread = (await response.json()) as { id: string };
+  return thread.id;
+}
+
 async function main() {
   // 1. Provision DB and configure env before importing anything that pools.
   process.env.DATABASE_URL = await ensureSmokeDatabase();
@@ -211,11 +217,11 @@ async function main() {
   const app = Fastify({ logger: false });
   await app.register(cors, { origin: true });
   setupThreadsGetRoute(app);
-  setupThreadsPostRoute(app);
+  setupThreadsPostRoute(app, { memory: { kind: 'off' } });
   setupThreadsPatchRoute(app);
   setupThreadsDeleteRoute(app);
   setupMessagesGetRoute(app);
-  setupChatPostRoute(app);
+  setupChatPostRoute(app, { memory: { kind: 'off' } });
   await seedDefaultUser();
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();
@@ -244,12 +250,14 @@ async function main() {
   // 5. Verify the persisted states and usage telemetry.
   await logMessages(base, thread.id, 'message');
 
+  // Each flow below opens its own thread: a second fresh topic in one
+  // thread is a drift fire, which pauses instead of exchanging.
   // 6. Interruption flow: abort mid-stream and verify persisted partial text.
-  await testInterruption(base, thread.id);
+  await testInterruption(base, await createSmokeThread(base));
 
   // 7. Concurrency guard: a running exchange bounces a second submit, and
   //    the thread recovers once the running connection closes.
-  await testInFlightGuard(base, thread.id);
+  await testInFlightGuard(base, await createSmokeThread(base));
 
   await app.close();
   await mock.stop();

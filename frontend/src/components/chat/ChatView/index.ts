@@ -1,2 +1,2 @@
 export { default } from './ChatView';
-export type { DisplayRow } from './types';
+export type { DisplayRow, UnansweredArrival } from './types';

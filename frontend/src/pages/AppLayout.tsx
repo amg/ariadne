@@ -2,6 +2,7 @@ import type { GenerateTitleActionResult } from '@/actions/threads/generateTitle'
 import AppShell from '@/components/layout/AppShell';
 import ThreadInfoPanel from '@/components/layout/ThreadInfoPanel';
 import ThreadSidebar from '@/components/layout/ThreadSidebar';
+import { FEATURE_DEFAULTS, type FeatureFlags, featuresFromServer } from '@/config/features';
 import {
   TITLE_GENERATING_SENTINEL,
   type Thread,
@@ -13,6 +14,7 @@ import {
   refreshModelPricing,
 } from '@/services/api';
 import { friendlyErrorMessage } from '@/services/errorCodes';
+import { pushClient } from '@/services/push';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Outlet,
@@ -20,6 +22,7 @@ import {
   useLocation,
   useMatch,
   useNavigate,
+  useRevalidator,
   useRouteLoaderData,
 } from 'react-router';
 import { redirect } from 'react-router';
@@ -30,25 +33,36 @@ export async function loader() {
   if (!(await Session.doesSessionExist())) {
     return redirect('/auth');
   }
-  // Config failure degrades quietly: treat the analysis surface as on.: treat the analysis surface as on.
+  // Config failure degrades quietly, and the two fallbacks differ on
+  // purpose: the analysis surface stays on (the backend still enforces its
+  // own flag), while every feature toggle falls back off.
   let threadAnalysisMode: ThreadAnalysisMode = 'heuristic';
+  let features: FeatureFlags = FEATURE_DEFAULTS;
   try {
-    threadAnalysisMode = (await fetchConfig()).threadAnalysisMode;
+    const config = await fetchConfig();
+    threadAnalysisMode = config.threadAnalysisMode;
+    features = featuresFromServer(config.features);
   } catch {
-    // Surface falls back on; the backend still enforces its own flag.
+    // Keeps the fallbacks above.
   }
-  return { threads: await fetchThreads(), threadAnalysisMode };
+  const data: RootLoaderData = { threads: await fetchThreads(), threadAnalysisMode, features };
+  return data;
+}
+
+/** What the app shell loads once per navigation: the sidebar's threads and the deployment's surfaces. */
+export interface RootLoaderData {
+  threads: Thread[];
+  threadAnalysisMode: ThreadAnalysisMode;
+  features: FeatureFlags;
 }
 
 // Framework entry for the app chrome: reads route state, delegates to the pure shell.
 function AppLayoutComponent() {
-  const { threads, threadAnalysisMode } = useRouteLoaderData('root') as {
-    threads: Thread[];
-    threadAnalysisMode: ThreadAnalysisMode;
-  };
+  const { threads, threadAnalysisMode, features } = useRouteLoaderData('root') as RootLoaderData;
   const match = useMatch('/threads/:threadId');
   const location = useLocation();
   const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const createFetcher = useFetcher();
   const renameFetcher = useFetcher({ key: 'rename-thread' });
   const deleteFetcher = useFetcher({ key: 'delete-thread' });
@@ -58,17 +72,56 @@ function AppLayoutComponent() {
     ? String(generateTitleFetcher.formData.get('threadId') ?? '')
     : null;
 
+  // One push connection per tab: opened when the app shell mounts, closed
+  // when it unmounts. Screens subscribe to the kinds they care about.
+  useEffect(() => {
+    pushClient.connect();
+    return () => pushClient.disconnect();
+  }, []);
+
+  // A queued titling accepted by the backend keeps the loading pulse until
+  // the title actually lands — announced by the push channel, or visible on
+  // the next refetch when push is down.
+  const [queuedTitlingThreadId, setQueuedTitlingThreadId] = useState<string | null>(null);
+
+  // A Thread that was titled outside any request of this tab joins the
+  // sidebar through the root loader — one revalidation settles it.
+  useEffect(
+    () =>
+      pushClient.subscribe('thread-titled', (event) => {
+        setQueuedTitlingThreadId((queued) => (queued === event.threadId ? null : queued));
+        revalidator.revalidate();
+      }),
+    [revalidator.revalidate],
+  );
+
+  // The refetch fallback: the loader's refresh shows the title, so the
+  // pulse ends even if the announcement never arrived.
+  useEffect(() => {
+    if (!queuedTitlingThreadId) return;
+    const titled = threads.some(
+      (thread) => thread.id === queuedTitlingThreadId && thread.title !== null,
+    );
+    if (titled) setQueuedTitlingThreadId(null);
+  }, [threads, queuedTitlingThreadId]);
+
   // Titling failures were previously invisible: the action swallowed them so
   // the pulse would still stop. Now the action settles a curated errorCode
   // (backend contract → friendly copy; raw provider text stays server-side)
   // and this effect toasts it — once per settled submission.
-  const lastToastedTitleResultRef = useRef<GenerateTitleActionResult | null>(null);
+  const lastTitleResultRef = useRef<GenerateTitleActionResult | null>(null);
   useEffect(() => {
     const { state, data } = generateTitleFetcher;
     if (state !== 'idle' || !data) return;
     const result = data as GenerateTitleActionResult;
-    if (result.ok !== false || lastToastedTitleResultRef.current === result) return;
-    lastToastedTitleResultRef.current = result;
+    if (lastTitleResultRef.current === result) return;
+    lastTitleResultRef.current = result;
+    if (result.ok) {
+      if (result.queued && result.threadId) {
+        setQueuedTitlingThreadId(result.threadId);
+      }
+      return;
+    }
     toast.error('Title regeneration failed', {
       description: friendlyErrorMessage(result.errorCode),
     });
@@ -90,9 +143,11 @@ function AppLayoutComponent() {
     return threads
       .filter((t) => t.id !== pendingDeleteId)
       .map((t) =>
-        t.id === generatingTitleThreadId ? { ...t, title: TITLE_GENERATING_SENTINEL } : t,
+        t.id === generatingTitleThreadId || t.id === queuedTitlingThreadId
+          ? { ...t, title: TITLE_GENERATING_SENTINEL }
+          : t,
       );
-  }, [threads, pendingDeleteId, generatingTitleThreadId]);
+  }, [threads, pendingDeleteId, generatingTitleThreadId, queuedTitlingThreadId]);
 
   // Thread summary state
   const [threadSummary, setThreadSummary] = useState<ThreadSummary | null>(null);
@@ -200,6 +255,9 @@ function AppLayoutComponent() {
           }
           pendingRename={pendingRename}
           onAbout={() => navigate('/about')}
+          memory={features.memory}
+          onMemory={() => navigate('/memory')}
+          onSettings={() => navigate('/settings')}
         />
       }
       infoPanel={
@@ -207,6 +265,8 @@ function AppLayoutComponent() {
           summary={threadSummary}
           threadTitle={activeThreadTitle}
           onRefreshPricing={handleRefreshPricing}
+          threadId={currentThreadId ?? undefined}
+          memoryCaptureAvailable={features.memory && threadAnalysisMode !== 'off'}
         />
       }
     >
@@ -215,13 +275,14 @@ function AppLayoutComponent() {
         key={match?.params.threadId ?? 'empty'}
         context={{
           analysisMode: threadAnalysisMode,
-          generateTitle: (id: string) => {
-            generateTitleFetcher.submit(
-              { threadId: id },
-              { method: 'post', action: `/threads/${id}/generate-title` },
-            );
-          },
+          memory: features.memory,
           refreshThreadSummary: handleRefreshThreadSummary,
+          // A thread opened outside the sidebar (a handover) joins the list
+          // once the navigation has landed.
+          openThread: async (id: string) => {
+            await navigate(`/threads/${id}`);
+            await revalidator.revalidate();
+          },
         }}
       />
     </AppShell>

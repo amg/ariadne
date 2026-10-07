@@ -1,9 +1,10 @@
 # ADR 0003: Memory and RAG Strategy (pgvector)
 
 ## Status
-Accepted — storage foundation landed (pgvector extension in migration 001,
-embeddings table in use by thread health); the extraction/retrieval pipeline
-itself remains unimplemented.
+Accepted. The extraction pipeline and the read side are decided and built
+in ADR 0010: Facts are captured at segment close and fresh Threads are
+seeded with a snapshot. Per-turn retrieval by query similarity is still to
+come.
 
 ## Context
 The chatbot needs to remember factual information about a user across multiple sessions (e.g., preferences, personal facts). We evaluated standard relational databases vs. vector search, as well as whether to adopt the Model Context Protocol (MCP) for extensible data fetching.

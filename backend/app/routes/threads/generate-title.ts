@@ -1,8 +1,8 @@
-import { autoTitleThread } from '@services/titlingService';
+import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
+import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionRequest } from 'supertokens-node/framework/fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-import { httpStatusFor } from '../../../src/types/errorCodes';
 
 type GenerateTitleParams = {
   id: string;
@@ -13,6 +13,12 @@ type GenerateTitleBody = {
   forced?: unknown;
 };
 
+/**
+ * Queues the thread's titling and answers at once; the title lands with
+ * the queue and reaches open tabs through the push channel. Regeneration
+ * (`forced`) names the thread from its first segment and replaces any
+ * title it already has.
+ */
 export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
   fastify.post(
     '/api/threads/:id/generate-title',
@@ -24,24 +30,17 @@ export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const userId = (request as SessionRequest).session?.getUserId() as string;
       const params = request.params as GenerateTitleParams;
+      if (!isValidUuid(params.id)) {
+        return reply.code(400).send({ error: 'Invalid thread id' });
+      }
 
       const body = (request.body ?? {}) as GenerateTitleBody;
-      const outcome = await autoTitleThread(userId, params.id, body.forced === true);
-
-      if (outcome.type === 'titled') {
-        return reply.send({ success: true, title: outcome.title });
-      }
-      if (outcome.type === 'settled') {
-        // Nothing to learn from (or provider refused).
-        return reply.send({ success: true, fallback: true });
-      }
-
-      request.log.warn(
-        `generate-title failed for thread ${params.id} [${outcome.code}]: ${outcome.message}`,
-      );
-      return reply
-        .code(httpStatusFor(outcome.code))
-        .send({ success: false, errorCode: outcome.code });
+      await enqueueThreadGenerateTitle({
+        userId,
+        threadId: params.id,
+        forced: body.forced === true,
+      });
+      return reply.code(202).send({ success: true, queued: true });
     },
   );
 }

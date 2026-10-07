@@ -12,6 +12,8 @@ export type MessageFinishReason =
 export interface AppConfig {
   /** off|heuristic|always — `off` hides the Analysis tab and bubble tints. */
   threadAnalysisMode: 'off' | 'heuristic' | 'always';
+  /** Which features the deployment runs; read through the feature registry. */
+  features: unknown;
 }
 
 export async function fetchConfig(): Promise<AppConfig> {
@@ -143,6 +145,11 @@ export interface Message {
   /** Live-gate verdict on user arrivals; null elsewhere and when off. */
   driftVerdict?: MessageDriftVerdict | null;
   /**
+   * True on the Thread's Unanswered arrival when the Drift gate could not
+   * judge it and gave up for good.
+   */
+  gateFailed?: boolean;
+  /**
    * Rows of a forked-away or failed exchange: kept for usage tracking but
    * hidden from the chat stream and live analysis.
    */
@@ -199,6 +206,48 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to delete thread: ${res.statusText}`);
 }
 
+export type Handover = {
+  thread: Thread;
+  /** The arrival's stored copy, the fresh thread's first message, awaiting its reply. */
+  message: { id: string; content: string };
+};
+
+/**
+ * How a handover request ended: the arrival moved, or nothing moved yet
+ * because the old thread's memory is still being saved; asking again
+ * picks up where it left off.
+ */
+export type HandoverOutcome = { kind: 'moved'; handover: Handover } | { kind: 'saving-memory' };
+
+async function errorCodeOrNull(res: Response): Promise<unknown> {
+  try {
+    const body = (await res.json()) as { errorCode?: unknown };
+    return body.errorCode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Moves the thread's paused arrival out into a fresh thread, where the
+ * server stores it as the first message. The caller then asks for its reply.
+ */
+export async function handOverArrival(
+  threadId: string,
+  messageId: string,
+): Promise<HandoverOutcome> {
+  const res = await fetch(`/api/threads/${threadId}/handover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId }),
+  });
+  if (res.status === 503 && (await errorCodeOrNull(res)) === 'capture_pending') {
+    return { kind: 'saving-memory' };
+  }
+  if (!res.ok) throw new Error(`Failed to start a new chat: ${res.statusText}`);
+  return { kind: 'moved', handover: await res.json() };
+}
+
 export type ResumeDraft = { messageId: string; text: string };
 
 /**
@@ -241,7 +290,10 @@ export async function updateMessage(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
   });
-  if (!res.ok) throw new Error(`Failed to update message: ${res.statusText}`);
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update message');
+  }
   return res.json();
 }
 
@@ -259,6 +311,7 @@ export interface ThreadSummary {
     embedding: string;
     rewrite: string;
     judge: string;
+    memory: string;
   };
   totalTokens: {
     prompt: number;
@@ -271,7 +324,7 @@ export interface ThreadSummary {
   /** Every model the thread spent on, grouped by model id. */
   models: Array<{
     modelId: string;
-    roles: Array<'chat' | 'embedding' | 'rewrite' | 'judge'>;
+    roles: Array<'chat' | 'embedding' | 'rewrite' | 'judge' | 'memory'>;
     pricing: {
       inputPricePerMillion: number | null;
       outputPricePerMillion: number | null;
@@ -331,4 +384,113 @@ export async function refreshModelPricing(): Promise<{
     };
   }
   return data;
+}
+
+// ── Memory API ─────────────────────────────────────────────────────────────
+
+export const FACT_CATEGORIES = [
+  'preferences',
+  'interests',
+  'goals',
+  'relationships',
+  'work',
+  'location',
+  'credentials',
+  'other',
+] as const;
+
+export interface UserFact {
+  id: string;
+  content: string;
+  category: string;
+  subject: string | null;
+  predicate: string | null;
+  object: string | null;
+  modelId: string;
+  sourceMessageId: string | null;
+  /** When the Fact became true, as stated in conversation; null when never stated. */
+  validAt: string | null;
+  invalidAt: string | null;
+  suppressed: boolean;
+  createdAt: string;
+}
+
+export interface UserSettings {
+  memoryEnabled: boolean;
+  memoryBlockedCategories: string[];
+}
+
+export async function fetchUserFacts(): Promise<UserFact[]> {
+  const res = await fetch('/api/memory/facts');
+  if (!res.ok) throw new Error(`Failed to fetch user facts: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateUserFact(
+  factId: string,
+  patch: { content?: string } | { suppressed: boolean },
+): Promise<UserFact> {
+  const res = await fetch(`/api/memory/facts/${factId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update fact');
+  }
+  return res.json();
+}
+
+export async function deleteUserFact(factId: string): Promise<void> {
+  const res = await fetch(`/api/memory/facts/${factId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to delete fact');
+  }
+}
+
+export async function fetchUserSettings(): Promise<UserSettings> {
+  const res = await fetch('/api/settings');
+  if (!res.ok) throw new Error(`Failed to fetch user settings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateUserSettings(patch: Partial<UserSettings>): Promise<UserSettings> {
+  const res = await fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to update settings');
+  }
+  return res.json();
+}
+
+/** What an on-demand capture pass did (mirrors the backend report). */
+export interface MemoryCaptureReport {
+  /** False when memory is off: nothing was read. */
+  memoryEnabled: boolean;
+  /** Segments owing a capture; 0 means nothing new since the last pass. */
+  owed: number;
+  failed: number;
+  added: number;
+  /** Known Facts restated or corrected, now replaced by the newer reading. */
+  replaced: number;
+}
+
+/**
+ * Runs the thread's capture pass now, from where the last one stopped.
+ * Throws when the pass fails, carrying the server's reason.
+ */
+export async function captureThreadMemory(threadId: string): Promise<MemoryCaptureReport> {
+  // No body, so no JSON content-type: Fastify rejects an empty JSON body.
+  const res = await fetch(`/api/threads/${threadId}/capture-memory`, { method: 'POST' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(error.error ?? 'Failed to capture memory');
+  }
+  return res.json();
 }

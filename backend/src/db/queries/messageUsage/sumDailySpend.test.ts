@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
-import { upsertExpansionCost } from '@queries/messageExpansionCosts/upsertExpansionCost';
+import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -72,14 +72,14 @@ describe('sumDailySpend', () => {
       embeddingCostUsd: 0.0000005,
     });
 
-    // Expansion spend (rewrite + judge)
-    await upsertExpansionCost({
+    // Side-call spend (rewrite + judge)
+    await upsertSideCost({
       messageId: user.id,
       kind: 'rewrite',
       model: 'test-model',
       costUsd: '0.0000003000',
     });
-    await upsertExpansionCost({
+    await upsertSideCost({
       messageId: user.id,
       kind: 'judge',
       model: 'test-model',

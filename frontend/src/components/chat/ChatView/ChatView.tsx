@@ -5,8 +5,15 @@ import { chatStatusText } from '@/services/utils';
 import { ArrowDown, Send, Square } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
+import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
-import type { ChatViewStatus, DisplayRow, RestoredDraft } from './types';
+import type {
+  ChatViewStatus,
+  DisplayRow,
+  HandoverProgress,
+  RestoredDraft,
+  UnansweredArrival,
+} from './types';
 
 const FOLLOW_BOTTOM_PX = 80;
 
@@ -35,6 +42,11 @@ type ChatViewProps = {
   rows: DisplayRow[];
   status: ChatViewStatus;
   errorMessage?: string | null;
+  /**
+   * The thread's last message is an arrival with no reply; the notice
+   * offers its retry. Null when no arrival waits on one.
+   */
+  unansweredArrival?: UnansweredArrival | null;
   /** A failed submit's draft; restoring puts it back in the input. */
   restoredDraft?: RestoredDraft | null;
   onSend: (content: string) => void;
@@ -42,22 +54,66 @@ type ChatViewProps = {
   /** Regenerates the last exchange server-side (works on stuck/failed replies). */
   onRetryLast: () => void;
   /** Persists an edit of the thread's last message; rejects empty content. */
-  onEditMessage: (messageId: string, content: string) => void;
+  onEditMessage: (messageId: string, content: string) => Promise<boolean>;
+  /**
+   * The arrival the gate paused on, waiting for the user to choose where it
+   * continues; null when nothing waits. The input stays locked meanwhile.
+   */
+  pausedMessageId: string | null;
+  /** How far moving the paused arrival into a fresh chat has got. */
+  handover: HandoverProgress;
+  onContinueHere: () => void;
+  onStartNewChat: () => void;
 };
+
+const UNANSWERED_ARRIVAL_COPY: Record<UnansweredArrival, string> = {
+  pending: 'This message is still being checked.',
+  cleared: 'This message is checked and ready for a reply.',
+  failed: 'This message could not be checked.',
+};
+
+/**
+ * The calm line over the composer while an arrival owes its reply: the
+ * message stays, and a retry waits on the same judgment again. It sits
+ * where an error line sits, but never shouts.
+ */
+function UnansweredArrivalNotice({
+  kind,
+  onRetry,
+}: { kind: UnansweredArrival; onRetry: () => void }) {
+  return (
+    <p className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+      {UNANSWERED_ARRIVAL_COPY[kind]}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="underline underline-offset-2 transition-colors hover:text-foreground"
+      >
+        retry
+      </button>
+    </p>
+  );
+}
 
 export default function ChatView({
   rows,
   status,
   errorMessage,
+  unansweredArrival,
   restoredDraft,
   onSend,
   onStop,
   onRetryLast,
   onEditMessage,
+  pausedMessageId,
+  handover,
+  onContinueHere,
+  onStartNewChat,
 }: ChatViewProps) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === 'submitted' || status === 'streaming';
+  const paused = pausedMessageId !== null;
 
   // The draft never dies on a failed submit: it returns to the input, and
   // recovery is a resend.
@@ -137,7 +193,7 @@ export default function ChatView({
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!input.trim() || busy) return;
+    if (!input.trim() || busy || paused) return;
     onSend(input.trim());
     setInput('');
     // Reset textarea height
@@ -156,7 +212,7 @@ export default function ChatView({
     // Enter alone sends the message
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (!input.trim() || busy) return;
+      if (!input.trim() || busy || paused) return;
       onSend(input.trim());
       setInput('');
       // Reset textarea height
@@ -181,7 +237,7 @@ export default function ChatView({
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full min-w-0 max-w-[900px] flex-col">
-          <div className="flex flex-col gap-4 py-4">
+          <div className="flex flex-col gap-4 py-4 px-4">
             {rows.map((row, index) => {
               return (
                 <Fragment key={row.id}>
@@ -195,6 +251,14 @@ export default function ChatView({
                     onRetryLast={onRetryLast}
                     onEditMessage={onEditMessage}
                   />
+                  {row.id === pausedMessageId ? (
+                    <DriftChoice
+                      busy={busy || handover !== 'idle'}
+                      handover={handover}
+                      onContinueHere={onContinueHere}
+                      onStartNewChat={onStartNewChat}
+                    />
+                  ) : null}
                 </Fragment>
               );
             })}
@@ -225,14 +289,20 @@ export default function ChatView({
         </button>
       ) : null}
       <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
-        {errorMessage ? <p className="mb-2 text-sm text-red-400">{errorMessage}</p> : null}
+        {unansweredArrival ? (
+          <UnansweredArrivalNotice kind={unansweredArrival} onRetry={onRetryLast} />
+        ) : errorMessage ? (
+          <p className="mb-2 text-sm text-red-400">{errorMessage}</p>
+        ) : null}
         <form className="flex gap-2" onSubmit={handleSubmit}>
           <Textarea
             ref={inputRef}
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder="Type your message..."
+            placeholder={
+              paused ? 'Choose where the last message continues first' : 'Type your message...'
+            }
             className="flex-1 resize-none"
             rows={1}
             autoFocus
@@ -242,7 +312,7 @@ export default function ChatView({
               <Square className="h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="icon" disabled={!input.trim()}>
+            <Button type="submit" size="icon" disabled={!input.trim() || paused}>
               <Send className="h-4 w-4" />
             </Button>
           )}

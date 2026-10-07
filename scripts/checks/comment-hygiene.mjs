@@ -23,6 +23,8 @@ const SCAN_ALL = process.argv.includes('--all');
 const SCAN_DIRS = [
   'backend/src',
   'backend/app',
+  'backend/queue',
+  'backend/scripts',
   'backend/mock',
   'backend/smoke',
   'backend/test',

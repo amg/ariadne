@@ -8,6 +8,7 @@
       "@routes/*": ["./app/routes/*"],
       "@db/*": ["./src/db/*"],
       "@queries/*": ["./src/db/queries/*"],
+      "@queue/*": ["./queue/*"],
       "@test/*": ["./test/*"]
     },
     // "rootDir": "./src",

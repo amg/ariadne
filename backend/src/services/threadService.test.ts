@@ -13,6 +13,7 @@ import {
   renameThread,
 } from '@services/threadService';
 import { DEFAULT_USER_ID, seedDefaultUser } from '@services/userService';
+import { memoryOff } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
@@ -23,7 +24,7 @@ describe('threadService', () => {
     it('creates a thread for the given user with null title', async () => {
       await seedDefaultUser();
 
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
 
       expect(thread.title).toBeNull();
       expect(thread.userId).toBe(DEFAULT_USER_ID);
@@ -31,16 +32,18 @@ describe('threadService', () => {
     });
 
     it('rejects when user does not exist (FK violation)', async () => {
-      await expect(createThread({ userId: randomUUID() })).rejects.toMatchObject({
-        code: '23503',
-      });
+      await expect(createThread({ userId: randomUUID(), memory: memoryOff })).rejects.toMatchObject(
+        {
+          code: '23503',
+        },
+      );
     });
   });
 
   describe('renameThread', () => {
     it('renames a thread and returns the updated row', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
 
       const renamed = await renameThread({
         userId: DEFAULT_USER_ID,
@@ -56,7 +59,7 @@ describe('threadService', () => {
 
     it('trims surrounding whitespace before persisting', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
 
       const renamed = await renameThread({
         userId: DEFAULT_USER_ID,
@@ -69,7 +72,7 @@ describe('threadService', () => {
 
     it('rejects a blank or whitespace-only title', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       await renameThread({ userId: DEFAULT_USER_ID, threadId: thread.id, title: 'Kept' });
 
       for (const bad of ['', '   ']) {
@@ -83,7 +86,7 @@ describe('threadService', () => {
 
     it('rejects titles longer than 50 characters', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
 
       await expect(
         renameThread({ userId: DEFAULT_USER_ID, threadId: thread.id, title: 'x'.repeat(51) }),
@@ -98,7 +101,7 @@ describe('threadService', () => {
 
     it('refuses to rename another user thread and leaves it untouched', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       await renameThread({ userId: DEFAULT_USER_ID, threadId: thread.id, title: 'Owned' });
       const stranger = randomUUID();
       await insertUserIfNotExists({ id: stranger });
@@ -122,9 +125,9 @@ describe('threadService', () => {
 
     it('returns only given user threads, newest first', async () => {
       await seedDefaultUser();
-      const first = await createThread({ userId: DEFAULT_USER_ID });
+      const first = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       await renameThread({ userId: DEFAULT_USER_ID, threadId: first.id, title: 'First' });
-      const second = await createThread({ userId: DEFAULT_USER_ID });
+      const second = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       await renameThread({ userId: DEFAULT_USER_ID, threadId: second.id, title: 'Second' });
 
       // Another user thread must not leak into the list
@@ -142,7 +145,7 @@ describe('threadService', () => {
   describe('deleteThread', () => {
     it('deletes the thread and its messages', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       await insertMessage({ threadId: thread.id, role: 'user', content: 'hello' });
 
       const deleted = await deleteThread({ userId: DEFAULT_USER_ID, threadId: thread.id });
@@ -164,7 +167,7 @@ describe('threadService', () => {
 
     it('refuses to delete another user thread', async () => {
       await seedDefaultUser();
-      const thread = await createThread({ userId: DEFAULT_USER_ID });
+      const thread = await createThread({ userId: DEFAULT_USER_ID, memory: memoryOff });
       const stranger = randomUUID();
       await insertUserIfNotExists({ id: stranger });
 

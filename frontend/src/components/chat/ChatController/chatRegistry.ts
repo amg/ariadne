@@ -23,6 +23,54 @@ export type ThreadChatListener = {
   onFailedSubmit?: (draft: string) => void;
 };
 
+/**
+ * The outcomes a chat request settles to while the Drift gate is still
+ * reaching its verdict: `gate_pending` while the judgment runs, or
+ * `gate_failed` once it has given up. In neither did the submit fail —
+ * the arrival is stored, so the optimistic message and its wait stay on
+ * screen and a retry re-waits on the same judgment.
+ */
+export type GateWaitOutcome = 'gate_pending' | 'gate_failed';
+
+/**
+ * The response body a failed chat request delivered. The transport
+ * throws with the raw body text, which the server always sends as JSON
+ * with a stable `errorCode`; null when the failure carried no such
+ * body (a network fault).
+ */
+function chatErrorBody(error: unknown): { error?: unknown; errorCode?: unknown } | null {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  try {
+    const parsed = JSON.parse(message) as unknown;
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as { error?: unknown; errorCode?: unknown })
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The gate-wait class of a failed chat request; null for any other failure. */
+export function gateWaitOutcomeOf(error: unknown): GateWaitOutcome | null {
+  const { errorCode } = chatErrorBody(error) ?? {};
+  if (errorCode === 'gate_pending' || errorCode === 'gate_failed') return errorCode;
+  return null;
+}
+
+/**
+ * Friendly text for a failed chat request: the server's curated message
+ * when the body carries one, else whatever the failure said. Null when
+ * there was no failure, or when it was a gate wait, which is not an
+ * error and has its own notice.
+ */
+export function describeChatError(error: unknown): string | null {
+  if (!error || gateWaitOutcomeOf(error)) return null;
+  const body = chatErrorBody(error);
+  if (body && typeof body.error === 'string' && body.error.length > 0) return body.error;
+  if (error instanceof Error && error.message) return error.message;
+  return typeof error === 'string' && error.length > 0 ? error : null;
+}
+
 const chats = new Map<string, Chat<UIMessage>>();
 const listeners = new Map<string, Set<ThreadChatListener>>();
 /** Draft text of the thread's in-flight submit, when one is running. */
@@ -60,6 +108,20 @@ function rollBackFailedSubmit(threadId: string): void {
   notify(threadId, (listener) => listener.onFailedSubmit?.(draft));
 }
 
+/**
+ * A failure's handling, keyed by the kind of failure. A gate wait leaves
+ * the optimistic message and its draft alone — the arrival is stored and
+ * owed an answer, not rejected; the outcome stays readable on the chat's
+ * error until the next request. Any other failure rolls the submit back.
+ */
+function handleFailedRequest(threadId: string, error: unknown): void {
+  if (gateWaitOutcomeOf(error)) {
+    pendingSubmits.delete(threadId);
+    return;
+  }
+  rollBackFailedSubmit(threadId);
+}
+
 /** Returns the thread's chat object, creating it on first use in this tab. */
 export function getThreadChat(threadId: string): Chat<UIMessage> {
   const existing = chats.get(threadId);
@@ -75,7 +137,7 @@ export function getThreadChat(threadId: string): Chat<UIMessage> {
       notify(threadId, (listener) => listener.onSettle?.());
     },
     // Fires before onFinish on failures; the submit record still exists here.
-    onError: () => rollBackFailedSubmit(threadId),
+    onError: (error) => handleFailedRequest(threadId, error),
   });
   chats.set(threadId, chat);
   return chat;
@@ -92,6 +154,22 @@ export function subscribeToThreadChat(threadId: string, listener: ThreadChatList
   return () => {
     set.delete(listener);
   };
+}
+
+/**
+ * Asks for the reply to a user message the server already stored as the
+ * thread's newest row (a handed-over arrival). Nothing is sent: a failed
+ * request leaves the message in place, retryable like any failed reply.
+ */
+export function replyToStoredMessage(
+  threadId: string,
+  message: { id: string; content: string },
+): void {
+  const chat = getThreadChat(threadId);
+  chat.messages = [
+    { id: message.id, role: 'user', parts: [{ type: 'text', text: message.content }] },
+  ];
+  void chat.regenerate();
 }
 
 /** Sends a user message and records its draft for failed-submit recovery. */

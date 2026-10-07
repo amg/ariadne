@@ -5,7 +5,9 @@ import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDbFromPool } from '@db/db';
-import { type Kysely, sql } from 'kysely';
+import { QUEUE_SCHEMA } from '@queue/index';
+import { runMigrations } from 'graphile-worker';
+import { sql } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 
@@ -167,11 +169,13 @@ export default async function globalSetup(): Promise<void> {
   process.env[DB_URL_ENV] = databaseUrl;
   console.log(`[test-db] ${mode}: ${redactUrl(databaseUrl)}`);
 
-  // Fresh, deterministic schema on every run, then run migrations.
+  // Fresh, deterministic schemas on every run, then run migrations: the
+  // app's own, and the queue's, which its engine installs itself.
   const pool = new Pool({ connectionString: databaseUrl });
   const db = createDbFromPool(pool);
   try {
     await sql`drop schema if exists public cascade`.execute(db);
+    await sql`drop schema if exists ${sql.id(QUEUE_SCHEMA)} cascade`.execute(db);
     await sql`create schema public`.execute(db);
     const migrationsFolder = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
@@ -184,6 +188,8 @@ export default async function globalSetup(): Promise<void> {
     const { error, results } = await migrator.migrateToLatest();
     if (error) throw error;
     console.log(`[test-db] applied ${results?.length ?? 0} migrations`);
+    await runMigrations({ connectionString: databaseUrl, schema: QUEUE_SCHEMA });
+    console.log(`[test-db] installed the "${QUEUE_SCHEMA}" queue schema`);
   } finally {
     await db.destroy();
   }

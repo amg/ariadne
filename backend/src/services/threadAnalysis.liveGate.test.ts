@@ -1,11 +1,12 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { getExpansionCostByMessageId } from '@queries/messageExpansionCosts/getExpansionCostByMessageId';
+import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { editMessage, getMessages } from '@services/messageService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
@@ -473,8 +474,8 @@ describe('runLiveGate — the fill-forward walk', () => {
       // only the embedding step spends, and its cost rides the arrival row.
       expect(row?.rewrittenText).toBeNull();
       expect(Number(row?.embeddingCostUsd)).toBeGreaterThan(0);
-      expect(await getExpansionCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
-      expect(await getExpansionCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
+      expect(await getSideCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
+      expect(await getSideCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
     }
     for (const messageId of assistantMessageIds) {
       expect(byMessage.get(messageId)?.modelId).toBe(EMBEDDING_MODEL_ID);
@@ -612,6 +613,7 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     // The edit forks: the arrival is abandoned, never rewritten.
     const editedContent = `${originalContent} — revised${PAD}`;
     const edit = await editMessage({
+      judging: { enqueueDriftGateJudgeArrival },
       userId: USER_ID,
       threadId,
       messageId: lastUser,

@@ -27,6 +27,11 @@ When a task matches a description below, you MUST use the `read` tool to load th
     <location>alex-chat-bot/.pi/agent/skills/db/SKILL.md</location>
   </skill>
   <skill>
+    <name>queue</name>
+    <description>Conventions for the durable queue (graphile-worker on the queues schema) — task payloads are typed by task name through the GraphileWorker.Tasks registry, never re-validated or re-shaped at runtime. Use when creating or editing queue tasks, enqueuing jobs, changing a task's payload, or writing queue tests.</description>
+    <location>alex-chat-bot/.pi/agent/skills/queue/SKILL.md</location>
+  </skill>
+  <skill>
     <name>domain-language</name>
     <description>Enforces linguistic philosophy, naming conventions, and domain vocabulary rules to ensure clear, precise, and unambiguous communication across the codebase.</description>
     <location>alex-chat-bot/.pi/agent/skills/domain-language/SKILL.md</location>

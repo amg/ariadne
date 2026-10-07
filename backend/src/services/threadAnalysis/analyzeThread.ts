@@ -9,16 +9,13 @@ import {
   type ContextDependenceVerdict,
   EMBEDDING_MODEL_ID,
   type JudgeContextDependenceInput,
+  computeEmbeddingCostUsd,
+  computeInferenceCostUsd,
   embedText,
   judgeContextDependence,
   rewriteFollowUp,
 } from '../aiService';
-import {
-  buildCostProfile,
-  computeEmbeddingCostUsd,
-  computeInferenceCostUsd,
-  round10,
-} from './cost';
+import { buildCostProfile, round10 } from './cost';
 import { type DriftScoring, buildDriftProfile } from './drift';
 import { buildEmdMatrix } from './emd';
 import { simulateGateReplay } from './gateReplay';

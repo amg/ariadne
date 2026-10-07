@@ -3,11 +3,19 @@ import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsag
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import {
+  DRIFT_GATE_JUDGE_ARRIVAL,
+  enqueueDriftGateJudgeArrival,
+} from '@queue/tasks/driftGateJudgeArrivalTask';
 import { SYSTEM_PROMPT } from '@services/aiService/config';
 import { editMessage, getMessages } from '@services/messageService';
+import { addDeadJob } from '@test/queue';
 import { useTestDb } from '@test/test-db';
+
+const judging = { enqueueDriftGateJudgeArrival };
 import { describe, expect, it } from 'vitest';
 
 async function createRandomThread() {
@@ -76,6 +84,38 @@ describe('messageService', () => {
         estimated: false,
       });
     });
+
+    it('flags the unanswered arrival whose judgment gave up for good, and no other row', async () => {
+      const { userId, threadId } = await createRandomThread();
+      await insertMessage({ threadId, role: 'user', content: 'answered' });
+      await insertMessage({ threadId, role: 'assistant', content: 'reply' });
+      const arrival = await insertMessage({ threadId, role: 'user', content: 'died on the gate' });
+      await addDeadJob({
+        task: DRIFT_GATE_JUDGE_ARRIVAL,
+        key: arrival.id,
+        payload: { userId, threadId, messageId: arrival.id },
+        errorClass: 'fatal',
+      });
+
+      const messages = await getMessages({ userId, threadId });
+
+      expect(messages?.map((m) => m.gateFailed)).toEqual([false, false, false, true]);
+    });
+
+    it('leaves an arrival unflagged while its judgment can still be retried', async () => {
+      const { userId, threadId } = await createRandomThread();
+      const arrival = await insertMessage({ threadId, role: 'user', content: 'gave up for now' });
+      await addDeadJob({
+        task: DRIFT_GATE_JUDGE_ARRIVAL,
+        key: arrival.id,
+        payload: { userId, threadId, messageId: arrival.id },
+        errorClass: 'recoverable',
+      });
+
+      const messages = await getMessages({ userId, threadId });
+
+      expect(messages?.some((m) => m.gateFailed)).toBe(false);
+    });
   });
 
   describe('editMessage', () => {
@@ -102,6 +142,7 @@ describe('messageService', () => {
       });
 
       const result = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: user.id,
@@ -133,8 +174,15 @@ describe('messageService', () => {
       const { userId, threadId } = await createRandomThread();
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
-      const empty = await editMessage({ userId, threadId, messageId: message.id, content: '' });
+      const empty = await editMessage({
+        judging,
+        userId,
+        threadId,
+        messageId: message.id,
+        content: '',
+      });
       const blank = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: message.id,
@@ -161,6 +209,7 @@ describe('messageService', () => {
       const message = await insertMessage({ threadId: threadId, role: 'user', content: 'hi' });
 
       const result = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: message.id,
@@ -169,6 +218,34 @@ describe('messageService', () => {
 
       expect(result.type).toBe('error');
       if (result.type === 'error') expect(result.code).toBe('invalid_content');
+    });
+
+    it('edits the last visible prompt when a handed-over arrival trails it', async () => {
+      const { userId, threadId } = await createRandomThread();
+      await insertMessage({ threadId, role: 'user', content: 'I love rabbits' });
+      await insertMessage({ threadId, role: 'assistant', content: 'Lovely.' });
+      const lastVisible = await insertMessage({
+        threadId,
+        role: 'user',
+        content: 'Had them for years',
+      });
+      await insertMessage({ threadId, role: 'assistant', content: 'Wonderful.' });
+      const handedOver = await insertMessage({
+        threadId,
+        role: 'user',
+        content: 'Best hot spring?',
+      });
+      await setMessagesAbandoned({ messageIds: [handedOver.id], abandoned: true });
+
+      const result = await editMessage({
+        judging,
+        userId,
+        threadId,
+        messageId: lastVisible.id,
+        content: 'Had them for years.',
+      });
+
+      expect(result).toMatchObject({ type: 'success', data: { content: 'Had them for years.' } });
     });
 
     it('refuses to edit assistant replies or earlier prompts', async () => {
@@ -187,12 +264,14 @@ describe('messageService', () => {
       });
 
       const editEarlierUser = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: earlier.id,
         content: 'rewritten',
       });
       const editAssistant = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: reply.id,
@@ -223,6 +302,7 @@ describe('messageService', () => {
 
       // Unknown thread id.
       const unknownThread = await editMessage({
+        judging,
         userId,
         threadId: randomUUID(),
         messageId: message.id,
@@ -230,6 +310,7 @@ describe('messageService', () => {
       });
       // Foreign thread id.
       const foreignThread = await editMessage({
+        judging,
         userId,
         threadId: foreign.threadId,
         messageId: foreignMessage.id,
@@ -237,6 +318,7 @@ describe('messageService', () => {
       });
       // Unknown message id in a valid thread.
       const unknownMessage = await editMessage({
+        judging,
         userId,
         threadId,
         messageId: randomUUID(),

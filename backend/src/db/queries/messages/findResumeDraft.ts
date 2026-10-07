@@ -9,7 +9,8 @@ export type ResumeDraft = {
  * The resume draft of a thread: the newest user row's text when that
  * arrival was abandoned and the exchange was never completed afterwards —
  * interrupted/failed exchanges hand their text back to the input; a
- * completed exchange has already settled the draft.
+ * completed exchange has already settled the draft. A handed-over arrival
+ * owes nothing here: it lives on in its fresh Thread.
  */
 export async function findResumeDraft({
   threadId,
@@ -26,6 +27,13 @@ export async function findResumeDraft({
     .limit(1)
     .executeTakeFirst();
   if (!newestUser || !newestUser.abandoned) return undefined;
+
+  const handedOver = await db
+    .selectFrom('threadSeeds')
+    .select('threadId')
+    .where('handoverMessageId', '=', newestUser.id)
+    .executeTakeFirst();
+  if (handedOver) return undefined;
 
   const completedAfter = await db
     .selectFrom('messages')

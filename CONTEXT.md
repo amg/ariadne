@@ -37,7 +37,8 @@ _Avoid_: generation, request, job
 **Abandoned**:
 Marked only by deliberate user actions: (1) an edit abandons the old
 arrival + every reply grown from its text; (2) a retry/regenerate flags
-stale assistant rows abandoned in place. Interruption, failure, timeout,
+stale assistant rows abandoned in place; (3) a Handover abandons the
+paused arrival it moves out. Interruption, failure, timeout,
 and crash abandon nothing — user prompt and partial assistant reply stay
 live in the thread (empty assistant rows are skipped in model context
 but remain in DB/UI). A still-untitled Thread titles from a short preview
@@ -138,13 +139,79 @@ Context that is still sent on every Turn but no longer contributes to the
 answer. Baggage is paid for on every Turn after it becomes baggage.
 _Avoid_: dead context, bloat, cruft, noise
 
+### Memory
+
+**Fact**:
+One memory record: a self-contained, durable sentence about the user —
+useful in a future conversation without any surrounding context, e.g.
+"the user is vegetarian". Carries its source Turn, a category from a
+fixed set, a stated date when the conversation dates when the Fact took
+effect (null otherwise) plus the record time at capture, and optional
+entity subject/object columns with a normalized predicate. Stated dates
+are pinned to absolute days at extraction, inferring the user's day-
+month order from their own dates and the conversation's date; where the
+meaning stays genuinely ambiguous, no date is stored. A near-duplicate
+of an existing Fact is not stored twice. A category the user blocks is
+never captured and never seeded; Facts already stored under it stay,
+hidden.
+_Avoid_: memory item, note, observation
+
+**Memory**:
+The durable store of Facts that outlives any Thread. Captured piecemeal
+as segments settle, keeping a pointer to the last Turn read; namespaced
+per user even though it holds one user today.
+_Avoid_: knowledge base, profile store, memory bank
+
+**Seed**:
+What a fresh Thread's context receives at creation: a snapshot of what
+the Memory store knows about the user, bounded by a token-budget
+policy. A Thread born from a Handover also records which arrival it
+took over; that arrival enters as the Thread's first message, never as
+part of the Seed. The Seed is composed by the assembler, stays
+byte-stable for the Thread's life, and never appears in the chat
+stream.
+_Avoid_: carryover, handoff block, preamble
+
+**Memory Screen**:
+The separate surface for viewing, editing, deleting, and suppressing
+Facts. Facts never surface inside Threads; the Screen is their only
+home. Deletion removes a Fact; suppression only stops it being injected.
+_Avoid_: memory panel, profile editor
+
 ### Flow
 
 **Drift gate**:
-The check that scores an incoming user Message *before* inference. It is
-advisory: a fire marks the arriving Message and the reply proceeds; it
-never blocks silently.
+The check that scores an incoming user Message *before* inference. A fire
+on an arrival judged for the first time — a new message, or an Edit's
+fork — pauses the reply: the arrival becomes a Paused arrival and the
+user decides where it continues. The gate never decides for the user,
+and a retry that replays a stored verdict never pauses. It judges only
+the live conversation: an abandoned arrival never counts as context.
 _Avoid_: guard, interceptor, blocker, middleware
+
+**Paused arrival**:
+A fresh user Message the Drift gate fired on, stored with no reply. It
+waits for the user's choice: continue in this Thread (a Retry) or a
+Handover. Nothing else enters the Thread until the user chooses. An Edit
+lands a fresh arrival, judged anew, which may pause again.
+_Avoid_: blocked message, held message
+
+**Unanswered arrival**:
+A live user Message with no reply that is not paused: its Drift gate
+verdict is still being reached, has come back clear while nobody was
+waiting for it, or could not be reached at all. No reply is generated
+until the gate has judged it, and nothing else enters the Thread until it
+is answered. A Retry waits for the verdict and replies once it is clear.
+_Avoid_: pending message, stuck message
+
+**Handover**:
+Moving a Paused arrival into a fresh Thread. Memory capture runs over
+the Turns up to the arrival first — a capture point, not a close, since
+the old segment stays open — so the fresh Thread's Seed already knows
+it; then, as one step, the arrival is abandoned in its old Thread and
+becomes the fresh Thread's first message, never in both and never in
+neither.
+_Avoid_: split, fork, transfer
 
 **Replay**:
 Offline re-scoring of an existing Thread's Turns through the same Drift

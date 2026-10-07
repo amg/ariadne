@@ -1,9 +1,9 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { computeEmbeddingCostUsd } from '@services/aiService/pricing';
 import { type Result, err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
-import { computeEmbeddingCostUsd } from '../cost';
 import { formattedProspectiveTurn } from '../turns';
 import type { MessageStep } from './messageStep';
 

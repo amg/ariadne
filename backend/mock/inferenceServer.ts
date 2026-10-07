@@ -38,6 +38,8 @@ export type MockInferenceServer = {
   rewrites: MockRewritesControl;
   /** Test hooks for judge calls (expansion trigger backstop). */
   judges: MockJudgesControl;
+  /** Test hooks for the memory pipeline's extraction, duplicate-check and classification calls. */
+  memory: MockMemoryControl;
 };
 
 export type MockEmbeddingsControl = {
@@ -73,6 +75,25 @@ export type MockJudgesControl = {
   /** Fail every judge chat-completion request with a 500. */
   failAll: () => void;
   /** Stop failing judge requests. */
+  clearFailures: () => void;
+};
+
+export type MockMemoryControl = {
+  /** Total extraction requests received (failed ones included). */
+  extractionCount: () => number;
+  /** The turns prompt of the latest extraction request; null before any. */
+  lastExtractionPrompt: () => string | null;
+  /** Total duplicate-check requests received. */
+  duplicateCheckCount: () => number;
+  /** Force every extraction reply to `text`; null restores the deterministic reply. */
+  forceExtraction: (text: string | null) => void;
+  /** Fail every extraction request with a 500. */
+  failExtractions: () => void;
+  /** Total classification requests received (failed ones included). */
+  classificationCount: () => number;
+  /** Fail every classification request with a 500. */
+  failClassifications: () => void;
+  /** Stop failing extraction and classification requests. */
   clearFailures: () => void;
 };
 
@@ -237,19 +258,40 @@ async function streamReply(args: {
   end();
 }
 
+/** Single JSON `chat.completion` carrying a memory-pipeline reply in full. */
+function memoryJsonReply(body: ChatCompletionsBody, replyText: string) {
+  counter += 1;
+  return {
+    id: `chatcmpl-mock-${counter}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model ?? 'mock-model',
+    choices: [
+      { index: 0, message: { role: 'assistant', content: replyText }, finish_reason: 'stop' },
+    ],
+    usage: buildUsage({
+      promptTokens: MOCK_CACHE.basePromptTokens + (body.messages ?? []).length,
+      completionTokens: Math.max(1, Math.ceil(replyText.length / 4)),
+    }),
+  };
+}
+
 /** Single JSON `chat.completion` for non-streaming callers (`generateText`).
  *  The reply is capped like a real short-form completion (auto-titling),
  *  so deterministic callers never hit the 255-char title guard. Rewrite
  *  requests get a deterministic
  *  `Rewritten: <follow-up>` derived from the request itself, so the
- *  thread-health e2e can assert the expanded signal without a real model. */
+ *  thread-health e2e can assert the expanded signal without a real model.
+ *  Titling requests answer a short title, as a bounded titling model
+ *  would. */
 function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
   const messages = body.messages ?? [];
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
 
   const rewrite = rewriteOverride ?? rewriteReply(body);
   const judge = judgeReply(body);
-  const replyText = (rewrite ?? judge ?? buildReply(lastUser)).slice(0, 80);
+  const title = titlingReply(body);
+  const replyText = (rewrite ?? judge ?? title ?? buildReply(lastUser)).slice(0, 80);
   const tokens = replyText.split(/(?<=\s)/);
 
   counter += 1;
@@ -274,6 +316,16 @@ function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
 
 /** The rewriter's system-prompt marker the expansion tier sends. */
 const REWRITER_MARKER = 'You rewrite chat follow-ups';
+
+/** The titling prompt's opening line; titling sends it as the user message. */
+const TITLING_MARKER = 'Given the following conversation';
+
+/** Deterministic titling reply: a short title within the rename limit. */
+function titlingReply(body: ChatCompletionsBody): string | null {
+  const lastUser =
+    [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  return lastUser.startsWith(TITLING_MARKER) ? 'Mock Thread Title' : null;
+}
 
 /**
  * Deterministic rewrite reply: the follow-up text with the prior Turn's
@@ -318,6 +370,98 @@ function judgeReply(body: ChatCompletionsBody): string | null {
   return depends ? 'CONTEXT_DEPENDENT' : 'SELF_CONTAINED';
 }
 
+/** The Fact extractor's system-prompt marker. */
+const EXTRACTION_MARKER = 'You extract durable facts about the user';
+
+const MOCK_FACT_VERBS: Record<string, { verb: string; category: string }> = {
+  love: { verb: 'loves', category: 'preference' },
+  like: { verb: 'likes', category: 'preference' },
+  live: { verb: 'lives', category: 'location' },
+  work: { verb: 'works', category: 'work' },
+  am: { verb: 'is', category: 'identity' },
+};
+
+/**
+ * Deterministic extraction reply: one Fact per turn whose user line holds
+ * an "I love/like/live/work/am …" clause, rephrased in the third person.
+ * Null when the request is not an extraction call.
+ */
+function extractionReply(body: ChatCompletionsBody): string | null {
+  const system = body.messages?.[0]?.content ?? '';
+  if (!system.startsWith(EXTRACTION_MARKER)) return null;
+  const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const facts: unknown[] = [];
+  for (const match of prompt.matchAll(/Turn (\d+)(?: \[[A-Z]+\])? \([^)]*\):\nUser: ([^\n]*)/g)) {
+    const clause = match[2]?.match(/\bI (love|like|live|work|am)\b([^.?!,]*)/i);
+    const known = MOCK_FACT_VERBS[(clause?.[1] ?? '').toLowerCase()];
+    if (!clause || !known) continue;
+    const rest = (clause[2] ?? '').trim();
+    facts.push({
+      turn: Number(match[1]),
+      content: `The user ${known.verb} ${rest}.`,
+      category: known.category,
+      subject: 'user',
+      predicate: known.verb,
+      object: rest || null,
+      validAt: null,
+    });
+  }
+  return JSON.stringify({ facts });
+}
+
+/** The duplicate check's system-prompt marker. */
+const DUPLICATE_MARKER = 'You compare facts about the user';
+
+/**
+ * Deterministic duplicate verdict: SAME <n> for the first known fact that
+ * matches the candidate text exactly (case-insensitive), NEW otherwise.
+ * Null when the request is not a duplicate check.
+ */
+function duplicateReply(body: ChatCompletionsBody): string | null {
+  const system = body.messages?.[0]?.content ?? '';
+  if (!system.startsWith(DUPLICATE_MARKER)) return null;
+  const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const candidate = (prompt.match(/^Candidate: (.*)$/m)?.[1] ?? '').trim().toLowerCase();
+  const known = [...prompt.matchAll(/^\d+\. (.*)$/gm)].map((m) =>
+    (m[1] ?? '').trim().toLowerCase(),
+  );
+  const index = known.indexOf(candidate);
+  return index >= 0 ? `SAME ${index + 1}` : 'NEW';
+}
+
+/** The Fact classifier's system-prompt marker. */
+const CLASSIFICATION_MARKER = 'You classify one fact about the user';
+
+/** The newest user message of a request; null when it has none. */
+function lastUserContentOrNull(body: ChatCompletionsBody): string | null {
+  return [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? null;
+}
+
+/**
+ * Deterministic classification reply for a "The user <verb> …" sentence:
+ * a known verb files it like extraction does, anything else keeps the
+ * current category; the subject is kept; an ISO date in the sentence
+ * becomes validAt. Null when the request is not a classification call.
+ */
+function classificationReply(body: ChatCompletionsBody): string | null {
+  const system = body.messages?.[0]?.content ?? '';
+  if (!system.startsWith(CLASSIFICATION_MARKER)) return null;
+  const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const field = (name: string) => prompt.match(new RegExp(`^${name}: (.*)$`, 'm'))?.[1]?.trim();
+  const fact = field('Fact') ?? '';
+  const clause = fact.match(/^The user (\w+)\s*([^.]*)/i);
+  const verb = (clause?.[1] ?? '').toLowerCase();
+  const known = Object.values(MOCK_FACT_VERBS).find((entry) => entry.verb === verb);
+  const subject = field('Current subject');
+  return JSON.stringify({
+    category: known?.category ?? field('Current category') ?? 'other',
+    subject: subject === 'null' ? null : subject,
+    predicate: known?.verb ?? null,
+    object: known ? (clause?.[2] ?? '').trim() || null : null,
+    validAt: fact.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] ?? null,
+  });
+}
+
 export async function startMockInferenceServer(options?: {
   port?: number;
 }): Promise<MockInferenceServer> {
@@ -333,6 +477,23 @@ export async function startMockInferenceServer(options?: {
     replySequence: string[];
   } = { failAll: false, requestCount: 0, forcedReply: null, replySequence: [] };
   const judgesState = { failAll: false };
+  const memoryState: {
+    extractionCount: number;
+    lastExtractionPrompt: string | null;
+    duplicateCheckCount: number;
+    forcedExtraction: string | null;
+    failExtractions: boolean;
+    classificationCount: number;
+    failClassifications: boolean;
+  } = {
+    extractionCount: 0,
+    lastExtractionPrompt: null,
+    duplicateCheckCount: 0,
+    forcedExtraction: null,
+    failExtractions: false,
+    classificationCount: 0,
+    failClassifications: false,
+  };
 
   // The next override for a rewrite call: the queued reply if any, else the
   // forced reply if armed, else undefined (deterministic). Consumes the queue.
@@ -341,8 +502,58 @@ export async function startMockInferenceServer(options?: {
     return rewritesState.forcedReply ?? undefined;
   };
 
+  // Memory calls answer in full (no short-form cap): an extraction reply
+  // is a JSON document. Null when the request is not a memory call.
+  const memoryResponseOrNull = (
+    body: ChatCompletionsBody,
+  ): { status: number; payload: unknown } | null => {
+    if (body.stream === true) return null;
+    const extraction = extractionReply(body);
+    if (extraction !== null) {
+      memoryState.extractionCount += 1;
+      memoryState.lastExtractionPrompt = lastUserContentOrNull(body);
+      if (memoryState.failExtractions) {
+        return {
+          status: 500,
+          payload: {
+            error: { message: 'Injected extraction failure (mock).', type: 'mock_memory_failure' },
+          },
+        };
+      }
+      return {
+        status: 200,
+        payload: memoryJsonReply(body, memoryState.forcedExtraction ?? extraction),
+      };
+    }
+    const classification = classificationReply(body);
+    if (classification !== null) {
+      memoryState.classificationCount += 1;
+      if (memoryState.failClassifications) {
+        return {
+          status: 500,
+          payload: {
+            error: {
+              message: 'Injected classification failure (mock).',
+              type: 'mock_memory_failure',
+            },
+          },
+        };
+      }
+      return { status: 200, payload: memoryJsonReply(body, classification) };
+    }
+    const duplicate = duplicateReply(body);
+    if (duplicate === null) return null;
+    memoryState.duplicateCheckCount += 1;
+    return { status: 200, payload: memoryJsonReply(body, duplicate) };
+  };
+
   app.post('/v1/openai/chat/completions', async (request, reply) => {
     const body = (request.body ?? {}) as ChatCompletionsBody;
+
+    const memoryResponse = memoryResponseOrNull(body);
+    if (memoryResponse !== null) {
+      return reply.code(memoryResponse.status).send(memoryResponse.payload);
+    }
 
     // Rewrite calls are identified by the rewriter's system-prompt marker.
     // Account every one (failed ones too) so tests can assert the exact
@@ -461,6 +672,25 @@ export async function startMockInferenceServer(options?: {
       },
       clearFailures: () => {
         judgesState.failAll = false;
+      },
+    },
+    memory: {
+      extractionCount: () => memoryState.extractionCount,
+      lastExtractionPrompt: () => memoryState.lastExtractionPrompt,
+      duplicateCheckCount: () => memoryState.duplicateCheckCount,
+      forceExtraction: (text: string | null) => {
+        memoryState.forcedExtraction = text;
+      },
+      failExtractions: () => {
+        memoryState.failExtractions = true;
+      },
+      classificationCount: () => memoryState.classificationCount,
+      failClassifications: () => {
+        memoryState.failClassifications = true;
+      },
+      clearFailures: () => {
+        memoryState.failExtractions = false;
+        memoryState.failClassifications = false;
       },
     },
   };

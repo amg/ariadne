@@ -1,24 +1,68 @@
-import { type Message, fetchResumeDraft, stopThreadExchange, updateMessage } from '@/services/api';
+import {
+  type Handover,
+  type Message,
+  fetchResumeDraft,
+  handOverArrival,
+  stopThreadExchange,
+  updateMessage,
+} from '@/services/api';
 import { useChat } from '@ai-sdk/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import ChatView from '../ChatView';
-import type { RestoredDraft } from '../ChatView/types';
-import { getThreadChat, sendThreadMessage, subscribeToThreadChat } from './chatRegistry';
+import type { HandoverProgress, RestoredDraft } from '../ChatView/types';
+import {
+  describeChatError,
+  gateWaitOutcomeOf,
+  getThreadChat,
+  replyToStoredMessage,
+  sendThreadMessage,
+  subscribeToThreadChat,
+} from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 import {
   buildRetrySeed,
   extractReasoning,
   lastUserMessage,
   mergeDisplayRows,
+  pausedArrivalIdOrNull,
   readVerdictData,
+  unansweredArrivalOrNull,
+  withoutMovedArrival,
 } from './utils';
 
 type ChatControllerProps = {
   threadId: string;
   rows: Message[];
+  /** Whether the deployment runs Memory: a handover then saves the old chat's Facts first. */
+  memory: boolean;
+  /** Whether the Drift gate judges arrivals; with it off every arrival is clear. */
+  arrivalsJudged: boolean;
   onSettle: () => void;
-  onGenerateTitle?: () => void;
+  /** Opens the fresh thread a paused arrival was moved to. */
+  onHandedOver?: (threadId: string) => void;
 };
+
+/** The pause before asking again for a handover still saving memory; the server holds each ask. */
+const HANDOVER_RETRY_DELAY_MS = 1_000;
+
+/**
+ * Asks for the handover until the arrival has moved, asking again while
+ * the old chat's memory is still being saved. Null once `stillWanted`
+ * says nobody is waiting any more; nothing has moved then.
+ */
+async function movedArrivalOrNull(
+  threadId: string,
+  messageId: string,
+  stillWanted: () => boolean,
+): Promise<Handover | null> {
+  for (;;) {
+    const outcome = await handOverArrival(threadId, messageId);
+    if (outcome.kind === 'moved') return outcome.handover;
+    if (!stillWanted()) return null;
+    await new Promise((resolve) => setTimeout(resolve, HANDOVER_RETRY_DELAY_MS));
+  }
+}
 
 /**
  * Owns the live AI exchange for one thread: the thread's registry chat
@@ -30,8 +74,10 @@ type ChatControllerProps = {
 export default function ChatController({
   threadId,
   rows,
+  memory,
+  arrivalsJudged,
   onSettle,
-  onGenerateTitle,
+  onHandedOver,
 }: ChatControllerProps) {
   // The chat object lives in the per-tab registry (module level), keyed by
   // thread; useChat attaches to it externally instead of owning one, so no
@@ -45,14 +91,24 @@ export default function ChatController({
   // applied to the pending user bubble before the reply grows.
   const [streamVerdict, setStreamVerdict] = useState<StreamVerdict | null>(null);
   const [restoredDraft, setRestoredDraft] = useState<RestoredDraft | null>(null);
+  const [handover, setHandover] = useState<HandoverProgress>('idle');
+  const [handoverError, setHandoverError] = useState<string | null>(null);
   const messagesRef = useRef<UiMessageLike[]>([]);
+  // A handover still saving memory keeps asking only while this view is up.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Settlement handlers keep the render's identity; the registry
   // subscription is tied to the thread alone.
-  const settleRef = useRef({ onSettle, onGenerateTitle });
+  const settleRef = useRef({ onSettle });
   useMemo(() => {
-    settleRef.current = { onSettle, onGenerateTitle };
-  }, [onSettle, onGenerateTitle]);
+    settleRef.current = { onSettle };
+  }, [onSettle]);
 
   // The registry fans exchange events to whichever view is subscribed.
   useEffect(() => {
@@ -72,7 +128,6 @@ export default function ChatController({
       onSettle: () => {
         setStreamVerdict(null);
         settleRef.current.onSettle();
-        settleRef.current.onGenerateTitle?.();
       },
       // A failed submit puts the draft back in the input; recovery is a resend.
       onFailedSubmit: (draft) => {
@@ -138,13 +193,60 @@ export default function ChatController({
     [visibleRows, chat.messages, chat.status, liveVerdict],
   );
 
+  const pausedMessageId = pausedArrivalIdOrNull(display, visibleRows, chat.status);
+
+  // The chat object outlives this view, so a gate wait its last request
+  // ended in is still known after a remount; a new request clears it.
+  const gateWait = gateWaitOutcomeOf(chat.error);
+  const unansweredArrival = unansweredArrivalOrNull({
+    display,
+    settledRows: visibleRows,
+    status: chat.status,
+    gateWait,
+    arrivalsJudged,
+  });
+
+  /**
+   * Moves the paused arrival to a fresh thread: the server opens it (seeded
+   * from memory, once what this thread taught is saved) with the arrival
+   * stored as its first message, whose reply is requested there before the
+   * view switches over. Leaving this view stops asking again; an arrival
+   * not moved by then stays here, paused, for the next try, and one that
+   * moved meanwhile still gets its reply without pulling the user over.
+   */
+  const startNewChat = async () => {
+    if (!pausedMessageId || handover !== 'idle') return;
+    setHandover(memory ? 'saving-memory' : 'moving');
+    setHandoverError(null);
+    try {
+      const moved = await movedArrivalOrNull(threadId, pausedMessageId, () => mountedRef.current);
+      if (!moved) return;
+      // The arrival left this thread: hide its row now, and drop its live
+      // copy from the thread's chat object, which outlives this view and
+      // would otherwise render it again as an unsaved message.
+      setDroppedIds((prev) => new Set([...prev, pausedMessageId]));
+      chat.setMessages(withoutMovedArrival(chat.messages, moved.message.content));
+      replyToStoredMessage(moved.thread.id, moved.message);
+      if (mountedRef.current) onHandedOver?.(moved.thread.id);
+    } catch {
+      setHandoverError('Could not start a new chat from this message. Try again.');
+    } finally {
+      setHandover('idle');
+    }
+  };
+
   const send = (content: string) => {
     const trimmed = content.trim();
     if (!trimmed || chat.status === 'submitted' || chat.status === 'streaming') return;
     sendThreadMessage(threadId, trimmed);
   };
 
-  const retryLast = (override?: { messageId: string; content: string }) => {
+  /**
+   * Asks the server for the last arrival's reply again. `continueHere`
+   * carries the user's choice to keep a Paused arrival in this thread;
+   * without it, a Paused arrival only reports its pause again.
+   */
+  const retryLast = (override?: { messageId: string; content: string }, continueHere = false) => {
     if (chat.status === 'submitted' || chat.status === 'streaming') return;
     if (rows.length === 0) return;
 
@@ -160,7 +262,7 @@ export default function ChatController({
 
     chat.setMessages(plan.seeded);
     try {
-      void chat.regenerate();
+      void chat.regenerate(continueHere ? { body: { choice: 'continue' } } : undefined);
     } catch {
       // No settled rows: nothing to retry.
     }
@@ -168,7 +270,8 @@ export default function ChatController({
 
   /**
    * Saves a prompt edit: the server abandons the old turn in place and
-   * returns the fork; the exchange then regenerates from the fork.
+   * returns the fork; the exchange then regenerates from the fork. A
+   * rejected edit is reported, and resolves false.
    */
   const editMessage = async (messageId: string, content: string): Promise<boolean> => {
     const trimmed = content.trim();
@@ -178,7 +281,10 @@ export default function ChatController({
       onSettle(); // refetch: abandoned turn vanishes, the fork appears
       retryLast({ messageId: forked.id, content: trimmed });
       return true;
-    } catch {
+    } catch (error) {
+      toast.error('Could not save the edit', {
+        description: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   };
@@ -187,7 +293,8 @@ export default function ChatController({
     <ChatView
       rows={display}
       status={chat.status}
-      errorMessage={chat.error?.message ?? null}
+      errorMessage={handoverError ?? describeChatError(chat.error)}
+      unansweredArrival={unansweredArrival}
       restoredDraft={restoredDraft}
       onSend={send}
       onStop={() => {
@@ -196,6 +303,10 @@ export default function ChatController({
       }}
       onRetryLast={() => retryLast()}
       onEditMessage={editMessage}
+      pausedMessageId={pausedMessageId}
+      handover={handover}
+      onContinueHere={() => retryLast(undefined, true)}
+      onStartNewChat={() => void startNewChat()}
     />
   );
 }

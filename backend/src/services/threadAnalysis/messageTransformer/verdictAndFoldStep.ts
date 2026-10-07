@@ -302,18 +302,14 @@ async function processArrival(input: {
  */
 async function fillForwardToArrival(input: {
   threadId: string;
+  /** The live conversation's arrivals: abandoned rows are already out. */
   arrivals: LiveTurnRow[];
   targetIndex: number;
+  /** Abandoned user Messages, whose stored segments and logs the ledger skips. */
+  abandonedIds: Set<string>;
 }): Promise<Result<undefined>> {
-  const { threadId, arrivals, targetIndex } = input;
+  const { threadId, arrivals, targetIndex, abandonedIds } = input;
   const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
-
-  // Abandoned arrivals stay out of the live ledger: their rows, segments
-  // and drift logs stay stored (usage keeps tracking them) but the chain
-  // replays only the live conversation.
-  const abandonedIds = new Set(
-    arrivals.filter((row) => row.userMessage.abandoned).map((row) => row.userMessage.id),
-  );
   const [storedSegments, storedLogs] = await Promise.all([
     listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
     listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
@@ -363,8 +359,14 @@ async function fillForwardToArrival(input: {
 export const verdictAndFoldStep: MessageStep = {
   name: 'verdict-and-fold',
   async run({ threadId, userMessageId }) {
+    // Abandoned rows stay out of the live ledger: their segments and drift
+    // logs stay stored (usage keeps tracking them) but the chain walks and
+    // folds only the live conversation.
     const rows = await listMessagesByThread({ threadId });
-    const arrivals = buildLiveTurns(rows);
+    const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
+    const abandonedIds = new Set(
+      rows.filter((row) => row.abandoned && row.role === 'user').map((row) => row.id),
+    );
     const targetIndex = arrivals.findIndex((turn) => turn.userMessage.id === userMessageId);
     const target = targetIndex >= 0 ? arrivals[targetIndex] : undefined;
     if (!target) return err('thread_not_found');
@@ -377,7 +379,7 @@ export const verdictAndFoldStep: MessageStep = {
     });
     if (logged && (await foldComplete(target))) return ok(undefined);
 
-    const filled = await fillForwardToArrival({ threadId, arrivals, targetIndex });
+    const filled = await fillForwardToArrival({ threadId, arrivals, targetIndex, abandonedIds });
     if (filled.type === 'error') return filled;
     return ok(undefined);
   },

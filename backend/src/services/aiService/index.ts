@@ -5,13 +5,26 @@
  * usageMap.ts (usage → message_usage row), embedText.ts (embedding export
  * for thread-health window embeddings), rewrite.ts (the expanded-signal
  * decontextualising rewrite call), judge.ts (the expansion trigger's
- * context-clarity verdict call),
- * exchange.ts (per-exchange lifecycle/persistence + idle watchdog), submitChat.ts (flow).
+ * context-clarity verdict call), extractFacts.ts, judgeFactDuplicate.ts and
+ * classifyFact.ts (the memory pipeline's extraction, duplicate-check and
+ * edit-classification calls),
+ * exchange.ts (per-exchange lifecycle/persistence + idle watchdog),
+ * arrivalGate.ts (waiting on the Drift gate's verdict), submitChat.ts (flow).
  */
 export { computeCostUsd } from './cost';
+export { computeEmbeddingCostUsd, computeInferenceCostUsd } from './pricing';
 export { EMBEDDING_MODEL_ID } from './config';
 export { embedText, type EmbedTextData } from './embedText';
 export { rewriteFollowUp } from './rewrite';
+export {
+  buildFactExtractionPrompt,
+  extractFacts,
+  type FactCandidate,
+  factExtractionSystemPrompt,
+} from './extractFacts';
+export { judgeFactDuplicate } from './judgeFactDuplicate';
+export { classifyFact } from './classifyFact';
+export { countTextTokens } from './usageMap';
 export {
   judgeContextDependence,
   type ContextDependenceVerdict,
@@ -22,4 +35,14 @@ export {
   registerActiveExchange,
   clearActiveExchange,
 } from './exchangeRegistry';
-export { retryLastExchange, submitChat, type ChatStreamHandle } from './submitChat';
+export { pausedArrivalOrNull } from './pausedArrival';
+export type { ArrivalJudging } from './arrivalGate';
+export {
+  isDriftPause,
+  retryLastExchange,
+  submitChat,
+  type ChatStreamHandle,
+  type DriftPause,
+  type RetryChoice,
+  type ThreadTitling,
+} from './submitChat';

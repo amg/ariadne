@@ -1,15 +1,9 @@
 import { ChatController } from '@/components/chat';
 import AnalysisTab from '@/components/chat/AnalysisTab';
 import { type Message, type ThreadAnalysisMode, fetchMessages } from '@/services/api';
-import type { Thread } from '@/services/api';
+import { pushClient } from '@/services/push';
 import { useEffect, useState } from 'react';
-import {
-  useLoaderData,
-  useOutletContext,
-  useRevalidator,
-  useRouteLoaderData,
-  useSearchParams,
-} from 'react-router';
+import { useLoaderData, useOutletContext, useRevalidator, useSearchParams } from 'react-router';
 
 /** Framework glue only: loader + revalidation. The exchange lives in
  *  components/chat/ChatController. See PK "Framework files" policy. */
@@ -82,18 +76,33 @@ export default function ChatPage() {
     threadId: string;
     messages: Message[];
   };
-  const { threads } = useRouteLoaderData('root') as { threads: Thread[] };
-  const { analysisMode, generateTitle, refreshThreadSummary } = useOutletContext<{
+  const { analysisMode, memory, refreshThreadSummary, openThread } = useOutletContext<{
     analysisMode: ThreadAnalysisMode;
-    generateTitle: (id: string) => void;
+    memory: boolean;
     refreshThreadSummary: () => Promise<void>;
+    openThread: (id: string) => void;
   }>();
   const revalidator = useRevalidator();
   useRefetchOnTabFocus(revalidator.revalidate);
+
+  // A verdict landing while this thread is open settles its rows through
+  // the loader — same code path as tab focus, prompted a moment earlier.
+  useEffect(() => {
+    const kinds = ['verdict-ok', 'verdict-paused', 'gate-failed'] as const;
+    const unsubscribes = kinds.map((kind) =>
+      pushClient.subscribe(kind, (event) => {
+        if (event.threadId === threadId) revalidator.revalidate();
+      }),
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [threadId, revalidator.revalidate]);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [analysisRefreshKey, setAnalysisRefreshKey] = useState(0);
-
-  const title = threads?.find((thread) => thread.id === threadId)?.title;
 
   // Off = surface gone entirely: no tabs, and a stale ?mode=analyze renders
   // the conversation instead of a hidden page.
@@ -133,12 +142,10 @@ export default function ChatPage() {
         <ChatController
           threadId={threadId}
           rows={rows}
+          memory={memory}
+          arrivalsJudged={analysisMode !== 'off'}
           onSettle={handleSettle}
-          onGenerateTitle={() => {
-            if (title === null) {
-              generateTitle(threadId);
-            }
-          }}
+          onHandedOver={openThread}
         />
       )}
     </div>

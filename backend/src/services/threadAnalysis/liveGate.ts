@@ -1,9 +1,10 @@
 import { env } from '@config/env';
+import { withThreadLock } from '@queries/locks/withThreadLock';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { type Result, err, ok } from '../../types/result';
 import { buildLiveTurns } from './messageTransformer/liveTurns';
 import { transformMessage } from './messageTransformer/transformMessage';
-import type { GateVerdict } from './types';
+import type { FireChannel, GateVerdict } from './types';
 
 /**
  * The live lane of the thread-health gate. Every arriving user message
@@ -18,7 +19,7 @@ import type { GateVerdict } from './types';
 export interface LiveArrivalOutcome {
   /** Verdict on the last processed arrival; null when nothing arrived. */
   verdict: GateVerdict | null;
-  fireChannel: 'immediate' | 'slow' | null;
+  fireChannel: FireChannel | null;
   slowDriftStartMessageId: string | null;
   /** The user Message the last arrival landed on; null when nothing arrived. */
   messageId: string | null;
@@ -50,44 +51,22 @@ const EMPTY_OUTCOME: LiveArrivalOutcome = {
 /**
  * The live lane's entry: gate the thread's arrivals up to (and including)
  * the target Message, or fill the whole thread when no target is given.
- * Off means no pass runs and the caller sees the empty outcome. Every
- * pass runs under per-thread serialization (see `runSequentially`).
+ * Off means no pass runs and the caller sees the empty outcome.
+ *
+ * Passes on one thread run strictly one at a time, wherever they run:
+ * each pass snapshots the arrivals at its start, so two overlapping passes
+ * would re-judge and re-log what the other writes after its snapshot. The
+ * later pass re-reads the store, finds the arrivals done, and degrades to
+ * a pure read.
  */
 export async function runLiveGate({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
   if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
-  return runSequentially(threadId, () =>
+  return withThreadLock({ threadId, kind: 'live-chain' }, () =>
     transformArrivals(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
   );
-}
-
-/**
- * One backend serves every surface, but two surfaces call the gate at
- * once — the exchange judges up to its arrival while the analysis surface
- * backfills the thread. Each pass snapshots the arrivals at its start, so
- * overlapping passes re-judge and re-log arrivals the other writes after
- * the snapshot, duplicating rows. Passes on one thread therefore run
- * strictly serialized: the LATER pass re-reads the store, finds the
- * arrivals done, and degrades to a pure read.
- */
-const runsByThread = new Map<string, Promise<unknown>>();
-
-function runSequentially<T>(threadId: string, body: () => Promise<T>): Promise<T> {
-  const previous = runsByThread.get(threadId) ?? Promise.resolve();
-  let release!: () => void;
-  const holding = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  runsByThread.set(threadId, holding);
-  // Even a failed pass hands the queue along intact.
-  const run = previous.then(body, body);
-  run.then(release, release);
-  void run.finally(() => {
-    if (runsByThread.get(threadId) === holding) runsByThread.delete(threadId);
-  });
-  return run;
 }
 
 /**
@@ -113,7 +92,8 @@ async function transformArrivals({
   // advanced between the caller's request and its turn under the lock.
   if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
   const rows = await listMessagesByThread({ threadId });
-  const arrivals = buildLiveTurns(rows);
+  // Only the live conversation is gated; abandoned rows keep what they had.
+  const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
   if (arrivals.length === 0) return ok(EMPTY_OUTCOME);
 
   let endIndex = arrivals.length;
