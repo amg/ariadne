@@ -1,6 +1,6 @@
+import { categoryDisplay } from '@/components/memory/categoryDisplay';
 import type { UserFact } from '@/services/api';
 import { cn } from '@/services/utils';
-import { categoryDisplay } from './categoryDisplay';
 import { formattedNotedDate, formattedStatedDate } from './factDates';
 
 interface Props {

@@ -388,16 +388,18 @@ export async function refreshModelPricing(): Promise<{
 
 // ── Memory API ─────────────────────────────────────────────────────────────
 
+/** Mirrors the backend's Fact category set; the API rejects anything else. */
 export const FACT_CATEGORIES = [
-  'preferences',
-  'interests',
-  'goals',
+  'identity',
+  'preference',
+  'health',
   'relationships',
   'work',
   'location',
   'credentials',
   'other',
 ] as const;
+export type FactCategory = (typeof FACT_CATEGORIES)[number];
 
 export interface UserFact {
   id: string;

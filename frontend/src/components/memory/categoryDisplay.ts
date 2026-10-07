@@ -1,3 +1,4 @@
+import { FACT_CATEGORIES, type FactCategory } from '@/services/api';
 import {
   Briefcase,
   Heart,
@@ -16,7 +17,7 @@ interface CategoryDisplay {
   label: string;
 }
 
-const CATEGORY_DISPLAYS: Record<string, CategoryDisplay> = {
+const CATEGORY_DISPLAYS: Record<FactCategory, CategoryDisplay> = {
   identity: { Icon: IdCard, label: 'Identity' },
   preference: { Icon: Heart, label: 'Preference' },
   health: { Icon: HeartPulse, label: 'Health' },
@@ -29,5 +30,9 @@ const CATEGORY_DISPLAYS: Record<string, CategoryDisplay> = {
 
 /** Icon and readable name for a Fact category; unknown categories get a generic tag. */
 export function categoryDisplay(category: string): CategoryDisplay {
-  return CATEGORY_DISPLAYS[category] ?? { Icon: Tag, label: category };
+  return isFactCategory(category) ? CATEGORY_DISPLAYS[category] : { Icon: Tag, label: category };
+}
+
+function isFactCategory(value: string): value is FactCategory {
+  return FACT_CATEGORIES.some((category) => category === value);
 }
