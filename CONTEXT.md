@@ -1,4 +1,4 @@
-# Alex Chat Bot
+# Ari
 
 A local single-user assistant chat. One conversation (a Thread) is replayed
 in full to the model on every Turn, so cost accumulates and stale context

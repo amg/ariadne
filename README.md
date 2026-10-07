@@ -1,4 +1,4 @@
-# Alex Chat Bot
+# Ari
 
 A self-hosted chat application with real-time streaming, per-Turn cost tracking, and user authentication. Everything runs in Docker — your data stays yours.
 

@@ -4,7 +4,15 @@ import { defineConfig } from 'vite';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Tell the dev tab apart from prod: only `vite` (serve) renames it.
+    {
+      name: 'dev-title',
+      apply: 'serve',
+      transformIndexHtml: (html) => html.replace('<title>Ari</title>', '<title>Dev Ari</title>'),
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),

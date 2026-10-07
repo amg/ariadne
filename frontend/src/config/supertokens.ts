@@ -4,7 +4,7 @@ import Session from 'supertokens-auth-react/recipe/session';
 
 SuperTokens.init({
   appInfo: {
-    appName: 'Alex Chat Bot',
+    appName: 'Ari',
     apiDomain: window.location.origin,
     websiteDomain: window.location.origin,
     apiBasePath: '/api/auth',

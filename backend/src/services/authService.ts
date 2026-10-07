@@ -23,7 +23,7 @@ export function initAuth() {
     framework: 'fastify',
     supertokens: supertokensConfig,
     appInfo: {
-      appName: 'Alex Chat Bot',
+      appName: 'Ari',
       apiDomain: apiDomain,
       websiteDomain: websiteDomain,
       origin: (request) => {

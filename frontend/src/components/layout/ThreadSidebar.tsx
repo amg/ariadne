@@ -80,7 +80,10 @@ export default function ThreadSidebar({
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-muted/30 p-3 pt-12 nav:pt-3">
       <div className="flex items-center justify-between px-1">
-        <span className="text-sm font-medium text-muted-foreground">Chats</span>
+        <div className="flex items-center gap-2">
+          <img src="/logo-mark.svg" alt="Ari" className="h-5 w-5" />
+          <span className="text-sm font-medium text-muted-foreground">Chats</span>
+        </div>
         <Button
           variant="outline"
           size="icon"
