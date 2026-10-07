@@ -147,6 +147,8 @@ alex-chat-bot/
 ## Documentation
 
 - **[Architecture Decisions](adrs/)** — Why we made key technical choices
+- **[A new message in a Thread](docs/flows/NEW-MESSAGE.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
+- **[Background work](docs/flows/BACKGROUND-WORK.md)** — The queue, the event bus, push to the browser, and how failures surface
 - **[Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md)** — Private server + tunnel setup
 - **[SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md)** — Why we chose SSE for streaming
 

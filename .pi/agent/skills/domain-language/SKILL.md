@@ -28,3 +28,12 @@ Name functions and variables for exactly what they represent in the domain or th
 *   **Attach Context to Stats/Math**: When dealing with statistics, math concepts, or generic data structures, attach them directly to the domain entity they describe.
     *   *Generic Example*: Use `UserSessionStats` instead of just `RollingStats` or `Baseline` to clarify exactly *what* is being measured.
 
+## 4. Plain Language in Documentation
+*   **Simple Words Over Elaborate Ones**: Use everyday words in comments and documentation. Avoid academic or literary terms that sound clever but slow readers down.
+    *   *Use*: "work that must finish even after a request ends", "the bus is only for convenience", "replaced jobs"
+    *   *Avoid*: "work that must outlive a request", "the bus is a courtesy", "superseded jobs"
+*   **Direct Phrasing**: Say what something does in the simplest way possible. If a 5-year-old wouldn't understand the word, find a simpler one.
+    *   *Use*: "checks the current state before acting", "failed with recoverable errors"
+    *   *Avoid*: "idempotent by state", "died of recoverable failures"
+*   **Code is Documentation**: Comments and docs explain *why* at a high level. The code itself explains *how*. Don't repeat implementation details in prose.
+

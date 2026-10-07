@@ -1,177 +1,164 @@
 # A new message in a Thread
 
-What happens, end to end, when the user sends a message into an existing
-Thread: which actions run in the request, what is kicked off beside it,
-and which tables each step writes. The code is the source of truth; this
-page is the map for reading it.
+What happens, end to end, when the user sends a message into a Thread:
+what the request does itself, what it hands to the queue, and how each
+possible outcome reaches the user. The code is the source of truth.
+This page is the map for reading it.
 
-**Legend.** **W** = write, **R** = read, *async* = runs in the
-background, outside the request.
+How the queue, the event bus and push work, and the full list of
+failure answers, is covered in [BACKGROUND-WORK.md](BACKGROUND-WORK.md).
+How the Drift gate judges an arrival is covered in ADR 0006, ADR 0007
+and `docs/ideas/THREAD-DRIFT-MATH.md`. Terms are defined in `CONTEXT.md`.
 
-## 1. Submit → gate → Exchange
+## 1. Submit: store, judge, then answer
 
-The request does three things in order: it checks the Thread may take a
-message, stores the arrival and runs the Drift gate on it, and then
-either pauses or starts the Exchange. Fact capture is kicked off beside
-the request as soon as the gate has judged.
+The one rule behind this flow is that **no reply is generated for an
+arrival the Drift gate has not judged.** The request stores the arrival,
+hands its judgment to the queue, and waits a short while for the
+verdict. That verdict decides whether this same response becomes a
+streamed reply, a pause, or a polite "still checking".
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor U as User
-  participant FE as Frontend (chat view)
-  participant API as POST /api/threads/:id/chat
-  participant S as Chat service
-  participant G as Drift gate (message transformer)
-  participant X as Exchange
-  participant P as Providers<br/>chat, rewrite, judge, embed
+  participant FE as Browser
+  participant R as Chat request
   participant DB as Postgres
+  participant W as Worker (Drift gate)
+  participant B as Event bus
+  participant P as AI provider
 
   U->>FE: Send
-  FE->>FE: optimistic user bubble, draft kept for failed-submit recovery
-  FE->>API: submit-message
-  API->>S: submit
+  FE->>FE: show the message at once, keep the draft
+  FE->>R: submit
 
   rect rgba(128,128,128,0.08)
-  note over S,DB: Preconditions - nothing is written unless a stale Exchange is settled
-  S->>DB: R threads (ownership => 404)
-  S->>DB: R message_usage + message_embeddings + message_side_costs<br/>(daily budget, when configured => 429)
-  S->>DB: R messages (history)
-  opt newest assistant row is still pending
-    alt younger than the staleness window
-      S-->>API: 409 exchange_in_flight
-    else stale (dead process)
-      S->>DB: R thread_seeds + user_settings (prompt, for the estimate)
-      S->>DB: W messages.exchange_status = interrupted
-      S->>DB: W message_usage (estimated, finish = interrupted)
-    end
-  end
-  S->>DB: R segment_drift_logs (a Paused arrival is waiting => 409 arrival_paused)
+  note over R,DB: Preconditions. Nothing is stored when one fails.
+  R->>DB: Thread is the user's? (404)<br/>provider configured? (503)<br/>daily budget left? (429)
+  R->>DB: an Exchange still running? (409, or settle it when stale)<br/>last arrival unanswered or paused? (409)
   end
 
-  S->>DB: W messages INSERT (role = user)
+  R->>B: listen for this arrival's verdict
+  R->>DB: store the arrival and queue its judgment, one transaction
 
   rect rgba(80,140,255,0.08)
-  note over G,DB: Serialized per Thread. Fills forward over every live arrival up to this one.<br/>Stored rows replay and are never recomputed. Skipped entirely when analysis is off.
-  S->>G: gate the arrival
-  note over G: Step 1 - rewrite (fails open)
-  opt a prior Turn exists and the arrival looks context-dependent
-    G->>P: trigger judge (short messages the heuristic missed)
-    G->>P: rewrite (at most two attempts)
+  note over W,P: On the queue. Serialized per Thread. Stored results replay and are never recomputed.
+  DB->>W: judgment due
+  W->>P: rewrite into a self-contained reading (fails open)
+  W->>P: embed the arrival
+  W->>DB: store the reading and the verdict, and open a new segment on a fire
+  opt fire closed a segment, and Memory is on
+    W->>DB: queue that segment's Fact capture
   end
-  G->>DB: W message_embeddings (expansion outcome, rewritten text, no vector yet)
-  G->>DB: W message_side_costs (kind = rewrite / judge)
-  note over G: Step 2 - embed (hard fail => 502, the user row stays)
-  G->>P: embed (the rewrite when accepted, else the raw text)
-  G->>DB: W message_embeddings (arrival vector + its cost)
-  note over G: Step 3 - verdict and fold
-  G->>DB: R thread_segments, segment_drift_logs, message_embeddings
-  G->>P: embed the previous completed Turn (when not folded yet)
-  G->>DB: W message_embeddings (Turn vector, on the previous assistant row)
-  G->>DB: W thread_segments INSERT (first arrival, or a new segment on a fire)
-  G->>DB: W segment_drift_logs INSERT (muted / pass / fire + the reading)
-  G-->>S: verdict
+  W->>B: publish the verdict
   end
 
-  S-)S: async Fact capture (diagram 2)
+  B-->>R: verdict (if it lands within GATE_WAIT_MS)
 
-  alt verdict = fire => Paused arrival
-    S-->>API: pause
-    API-->>FE: stream carries only the verdict, then ends
-    FE->>U: choice: continue here / start a new chat (diagram 3)
-  else pass / muted
-    S->>DB: W messages INSERT (assistant, empty, exchange_status = pending)
-    S->>DB: R thread_seeds + user_settings (system prompt + Seed)
-    S->>X: stream over the live history + the arrival
-    API-->>FE: stream: verdict first, then text deltas
-    X->>P: chat inference
-    alt natural finish
-      X->>DB: W messages (content, status = completed)
-      X->>DB: W message_usage (provider-reported)
-    else stop / disconnect / idle timeout / provider error
-      X->>DB: W messages (partial content, status = interrupted / error)
-      X->>DB: W message_usage (Estimated spend)
-      X-)DB: async W threads.title = short preview (only when untitled)
-    end
-  end
-
-  note over FE: the Exchange settles
-  FE->>API: re-read messages and the thread summary (reads only)
-  opt Thread still untitled
-    FE->>API: POST generate-title => title model => W threads.title
+  alt clear (pass or muted)
+    R->>DB: store an empty reply, marked pending
+    R->>P: stream the reply over the live history, with the Thread's Seed
+    R-->>FE: stream: the verdict first, then the text
+  else fire
+    R-->>FE: stream: the verdict alone, then the end
+    FE->>U: choice: continue here, or start a new chat (section 3)
+  else gate failed for good
+    R-->>FE: 503 gate_failed
+  else no verdict in time
+    R-->>FE: 503 gate_pending, the judgment carries on
   end
 ```
 
-## 2. Fact capture (background)
+When the request answers `gate_pending` or `gate_failed`, the message
+stays where it is. It is stored, just not answered yet. The verdict
+arrives over push, and the user's Retry then picks up from wherever the
+arrival stands (section 2).
 
-Kicked off after every gate pass, serialized per Thread, and it never
-fails the request. A segment owes capture once it is settled — a live
-drift fire judged into it, or a cut onto it whose fire was handed over.
-Each pass reads only the Turns past the pointer Memory keeps for the
-segment (`memory_capture_progress.captured_through_at`), with older
-Turns sent to the model as context only. A failure leaves the pointer
-put, so the debt stays owed and the next pass picks it up;
-checkpointing keeps the repeat bounded.
+### How an Exchange ends
 
-```mermaid
-sequenceDiagram
-  participant M as Fact capture
-  participant P as Providers<br/>memory model, embed
-  participant DB as Postgres
-
-  M->>DB: R thread_segments join segment_drift_logs<br/>(settled anchors past the capture pointer)
-  alt nothing owed
-    M-->>M: done
-  else memory is off (R user_settings)
-    M->>DB: W memory_capture_progress<br/>(advance past the owe, nothing gathered)
-  else for each owed segment
-    M->>DB: R messages (the segment's new Turns; the old ones are context)
-    M->>P: extract Fact candidates
-    loop each candidate outside the blocked categories
-      M->>P: embed the candidate
-      M->>DB: R user_facts (nearest neighbours)
-      opt a near neighbour exists
-        M->>P: duplicate check
-      end
-      M->>DB: W user_facts INSERT (when new)
-    end
-    M->>DB: W message_side_costs, additive<br/>(fact_extraction / fact_duplicate_check / fact_embedding,<br/>recorded on the settle row)
-    M->>DB: W memory_capture_progress<br/>(advance to the settle row — on success only;
- a failure leaves the pointer where it was.
- The next path over the thread picks up the debt.)
-  end
-```
-
-## 3. After a pause
+Every Exchange settles, whether it finished cleanly or not, and its
+spend is always recorded.
 
 ```mermaid
 flowchart TD
-  P[Paused arrival] -->|Continue here| C[Retry: regenerate on the same Thread<br/>targets the last live prompt — never revives abandoned rows]
-  C --> C1[W messages.abandoned<br/>flag stale assistant rows under the re-exchanged prompt]
-  C1 --> C2[gate replays the stored fire - no writes, no pause]
-  C2 --> C3[Fact capture + Exchange, as in diagram 1]
-
-  P -->|Start a new chat| H[POST /api/threads/:id/handover]
-  H --> H1[R messages + segment_drift_logs - still the Paused arrival?]
-  H1 --> H2[wait for Fact capture, bounded wait; when it stalls,
- the move proceeds and the capture retries after the move<br/>W user_facts, message_side_costs, thread_segments]
-  H2 --> H3[R user_settings + user_facts - compose the Seed]
-  H3 --> H4[one transaction:<br/>W messages.abandoned on the old arrival<br/>W threads INSERT<br/>W thread_seeds INSERT, naming the handed-over arrival<br/>W messages INSERT, the copy as the first message]
-  H4 --> H5[frontend asks for the reply: regenerate on the fresh Thread]
-  H5 --> H6[gate on the first arrival: no rewrite, embed,<br/>W message_embeddings, thread_segments, segment_drift_logs muted<br/>then the Exchange]
+  X["Exchange streaming"] --> N{"How did it end?"}
+  N -- "naturally" --> C["Reply completed<br/>provider-reported spend"]
+  N -- "user stop, closed tab,<br/>idle timeout, provider error" --> I["Partial reply kept and visible<br/>estimated spend recorded"]
+  N -- "backend died" --> S["Reply stays pending until the next<br/>start in this Thread finds it stale,<br/>then settles it as interrupted"]
+  C --> T1{"Thread untitled?"}
+  I --> T2{"Thread untitled?"}
+  T1 -- "yes" --> Q["Queue the Thread's title<br/>(lands over push)"]
+  T2 -- "yes" --> PV["Title from a short preview<br/>of the message"]
 ```
 
-## Which tables each action writes
+Nothing that ends an Exchange early abandons anything. The message and
+the partial reply stay in the Thread, and the partial text is part of
+the context for whatever comes next.
 
-| Table | Submit, pass | Submit, fire | Fact capture | Handover | After settle |
-|---|---|---|---|---|---|
-| `messages` | user + assistant rows; content, status | user row | — | abandon the old arrival, insert the copy | — |
-| `message_usage` | one row, reported or estimated | — | — | — | — |
-| `message_embeddings` | arrival row + the previous Turn's row | same | — | via the fresh Thread's first reply | — |
-| `message_side_costs` | rewrite / judge | rewrite / judge | fact spend, additive | via capture | — |
-| `thread_segments` | first segment only | a new segment | — | via capture | — |
-| `memory_capture_progress` | — | — | pointer advance | via capture | — |
-| `segment_drift_logs` | one verdict | one verdict (fire) | — | — | — |
-| `user_facts` | — | — | new Facts | via capture | — |
-| `threads` | title, only when interrupted and untitled | — | — | the fresh Thread | title (generate-title) |
-| `thread_seeds` | — | — | — | one row | — |
+## 2. Retry: the last live arrival decides
+
+Retry, the regenerate trigger, is server-authoritative. It always
+targets the newest live user message, so an arrival that was handed
+over to another Thread is never revived. What happens next depends on
+where that arrival stands.
+
+```mermaid
+flowchart TD
+  A["Retry"] --> R{"Does the arrival<br/>already have a reply?"}
+  R -- "yes" --> RE["Flag the old replies abandoned (kept and counted)<br/>and stream a fresh reply beneath them.<br/>The stored verdict rides along, nothing re-judged."]
+  R -- "no" --> V{"Is a verdict stored?"}
+  V -- "clear" --> EX["Stream the reply"]
+  V -- "fire" --> CH{"Did the user choose<br/>'continue here'?"}
+  CH -- "yes" --> EX
+  CH -- "no" --> PA["Report the pause again"]
+  V -- "none yet" --> J{"Where is its judgment?"}
+  J -- "queued or running" --> WT["Wait for it, as a submit does"]
+  J -- "missing, or died after<br/>recoverable failures" --> RQ["Queue a fresh judgment, then wait"]
+  J -- "died fatally" --> GF["503 gate_failed<br/>until the operator re-queues it"]
+```
+
+**Edit** follows the same path. It abandons the old arrival and every
+reply grown from it (all kept and counted), stores the edited text as a
+fresh arrival with its own queued judgment, and the Retry that follows
+waits on that judgment like any submit. Because the fresh arrival is
+judged anew, it may pause again.
+
+## 3. After a pause: continue here, or start a new chat
+
+```mermaid
+flowchart TD
+  P["Paused arrival"] -- "Continue here" --> C["Retry with 'continue'<br/>the stored fire replays, no new judgment"]
+  C --> CX["Stream the reply in this Thread"]
+
+  P -- "Start a new chat" --> H["Handover request"]
+  H --> H1{"Still the paused<br/>last message?"}
+  H1 -- "no" --> H409["409, nothing moved"]
+  H1 -- "yes" --> M{"Memory on?"}
+  M -- "no" --> MV
+  M -- "yes" --> CAP["Wait up to HANDOVER_WAIT_MS for the closed<br/>segment's Fact capture (queue it if none is under way)"]
+  CAP -- "captured" --> MV
+  CAP -- "capture gave up<br/>(its Facts stay owed)" --> MV
+  CAP -- "still running" --> CP["503 capture_pending, nothing moved<br/>the browser asks again"]
+  CP --> H
+  MV["One transaction:<br/>abandon the arrival in the old Thread,<br/>open a fresh Thread with its Seed,<br/>store the arrival as its first message"]
+  MV --> FR["The browser asks for the reply in the fresh Thread<br/>(a Retry: judged as an opening arrival, then answered)"]
+```
+
+The move is all-or-nothing. The arrival lives in exactly one Thread at
+any moment, and only one Handover can win.
+
+## 4. Fact capture (background, Memory on)
+
+A segment owes capture once it has settled, either because a drift fire
+closed it or because a Handover took its arrival away. Memory keeps a
+pointer for each segment that marks how far capture has read. Each pass
+extracts Facts only from the Turns past that pointer, and older Turns
+go to the model as context only. Every candidate Fact outside the
+user's blocked categories is checked against near neighbours, so the
+same Fact is not stored twice.
+
+The pointer moves only when a pass succeeds. A failed pass leaves the
+debt owed, the queue retries it, and if the capture gives up the debt
+is still there for the next pass to pick up. ADR 0010 covers the full
+reasoning.
