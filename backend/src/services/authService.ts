@@ -7,7 +7,10 @@ import Session from 'supertokens-node/recipe/session';
 export function initAuth() {
   // CORS_ORIGINS is required for SuperTokens to know which origins to accept
   const websiteDomain = env.CORS_ORIGINS.split(',')[0]?.trim() ?? 'http://localhost:5173';
-  const apiDomain = `http://${env.HOST === '0.0.0.0' ? '127.0.0.1' : env.HOST}:${env.PORT}`;
+  // The browser reaches the API through the website's own origin (/api is
+  // proxied), so session cookies are first-party: SameSite=Lax, and Secure
+  // whenever the site is served over https.
+  const apiDomain = websiteDomain;
 
   const supertokensConfig: { connectionURI: string; apiKey?: string } = {
     connectionURI: env.SUPERTOKENS_CONNECTION_URI,
@@ -33,6 +36,12 @@ export function initAuth() {
     recipeList: [
       EmailPassword.init({
         override: {
+          // With sign-up closed the endpoint is unregistered, so new accounts
+          // are refused at the server whatever the login page shows.
+          apis: (originalImplementation) =>
+            env.AUTH_SIGNUP_ENABLED
+              ? originalImplementation
+              : { ...originalImplementation, signUpPOST: undefined },
           functions: (originalImplementation) => {
             return {
               ...originalImplementation,

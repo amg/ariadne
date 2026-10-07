@@ -70,6 +70,8 @@ export type EnvConfig = {
   // SuperTokens (required)
   SUPERTOKENS_CONNECTION_URI: string;
   SUPERTOKENS_API_KEY: string | undefined;
+  /** Whether new accounts can be created; sign-in is unaffected. */
+  AUTH_SIGNUP_ENABLED: boolean;
 };
 
 /**
@@ -280,6 +282,9 @@ export const env: EnvConfig = {
   },
   get SUPERTOKENS_API_KEY() {
     return process.env.SUPERTOKENS_API_KEY;
+  },
+  get AUTH_SIGNUP_ENABLED() {
+    return getBoolean('AUTH_SIGNUP_ENABLED', true);
   },
 };
 

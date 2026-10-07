@@ -7,6 +7,17 @@
 #   docker compose -f compose.prod.yml --env-file .env.prod up -d
 #   npm run migrate:prod
 
+# Own project name: dev, staging and prod share this directory, and a shared
+# project would treat the other tiers' containers as orphans of this one.
+name: alex-chat-bot-prod
+
+# Docker never rotates container logs on its own; cap each service at ~30 MB.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -20,7 +31,15 @@ services:
       - "${DB_PORT:-15432}:5432"
     volumes:
       - pgdata_prod:/var/lib/postgresql/data
+    # Dependents wait for this, so a host reboot never starts them against a
+    # database that is still starting up.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
+    logging: *logging
     networks:
       - chat-network-prod
 
@@ -29,7 +48,8 @@ services:
     image: supertokens/supertokens-postgresql:12.2
     container_name: chat_supertokens_prod
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     # No published ports - backend accesses it internally
     environment:
       POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}"
@@ -38,6 +58,7 @@ services:
     networks:
       - chat-network-prod
     restart: unless-stopped
+    logging: *logging
 
   backend:
     build:
@@ -68,10 +89,15 @@ services:
       - DAILY_SPEND_BUDGET_USD=${DAILY_SPEND_BUDGET_USD}
       - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
       - SUPERTOKENS_API_KEY=${SUPERTOKENS_API_KEY}
+      - AUTH_SIGNUP_ENABLED=${AUTH_SIGNUP_ENABLED:-true}
     # No published ports — backend is internal only
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      supertokens:
+        condition: service_started
     restart: unless-stopped
+    logging: *logging
     networks:
       - chat-network-prod
 
@@ -84,6 +110,7 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    logging: *logging
     networks:
       - chat-network-prod
       - cloudflare-network

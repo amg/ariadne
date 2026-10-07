@@ -4,6 +4,7 @@
   "description": "",
   "scripts": {
     "dev": "tsx watch app/server.ts",
+    "start": "tsx app/server.ts",
     "mock": "tsx mock/server.ts",
     "migrate": "tsx src/db/db.ts",
     "migrate:prod": "tsx scripts/migrate-prod.ts",

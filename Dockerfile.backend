@@ -24,5 +24,8 @@ EXPOSE 3001
 # Drop privileges
 USER node
 
-# Start the server
-CMD ["npm", "run", "dev"]
+ENV NODE_ENV=production
+
+# Start the server without the file watcher: if boot fails the process exits,
+# so the container's restart policy can bring it back.
+CMD ["npm", "start"]

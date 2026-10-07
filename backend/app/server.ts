@@ -11,6 +11,7 @@ import Fastify, { LogController } from 'fastify';
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { logger } from '../src/logger';
 import { memoryFeatureOf } from './memoryFeature';
+import { rateLimitKey } from './rateLimitKey';
 import { registerRoutes } from './registerRoutes';
 
 import { initAuth } from '@services/authService';
@@ -88,7 +89,12 @@ app.setErrorHandler(errorHandler());
 // window via route `config.rateLimit`. Local dev stayed comfortably under both.
 // NOTE: must be awaited — @fastify/rate-limit wires routes via onRoute hooks,
 // which are skipped for routes bound before the plugin finishes registering.
-await app.register(rateLimit, { global: true, max: 100, timeWindow: '1 minute' });
+await app.register(rateLimit, {
+  global: true,
+  max: 100,
+  timeWindow: '1 minute',
+  keyGenerator: rateLimitKey,
+});
 
 // Feature toggles are read once, here: changing one takes a restart.
 const features = featureFlags();

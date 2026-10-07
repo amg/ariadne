@@ -57,6 +57,7 @@ services:
       - DAILY_SPEND_BUDGET_USD=${DAILY_SPEND_BUDGET_USD}
       - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
       - SUPERTOKENS_API_KEY=${SUPERTOKENS_API_KEY}
+      - AUTH_SIGNUP_ENABLED=${AUTH_SIGNUP_ENABLED:-true}
     ports:
       - "${PORT:-3001}:3001"
     depends_on:
