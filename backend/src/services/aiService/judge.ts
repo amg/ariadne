@@ -58,8 +58,9 @@ Label: SELF_CONTAINED`;
  */
 const JUDGE_TIMEOUT_MS = 20000;
 
-/** A verdict is one label; bound output so nothing rambles. */
-const JUDGE_MAX_OUTPUT_TOKENS = 8;
+/** A verdict is one label; the bound leaves room for a label wrapped in
+ * stray decoration ("Label: …") while keeping anything longer out. */
+const JUDGE_MAX_OUTPUT_TOKENS = 32;
 
 export type ContextDependenceVerdict = 'context-dependent' | 'self-contained';
 
@@ -109,6 +110,9 @@ async function judgeOnce(
       maxRetries: 0,
       maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
       temperature: 0,
+      // A thinking phase would spend the whole output bound reasoning and
+      // leave the label empty.
+      providerOptions: { deepinfra: { chat_template_kwargs: { enable_thinking: false } } },
       abortSignal: controller.signal,
     });
     const verdict = parseJudgeLabel(result.text);

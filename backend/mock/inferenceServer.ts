@@ -113,6 +113,7 @@ type ChatCompletionsBody = {
   model?: string;
   stream?: boolean;
   messages?: ChatMessage[];
+  chat_template_kwargs?: { enable_thinking?: boolean };
 };
 
 type EmbeddingsBody = {
@@ -298,7 +299,14 @@ function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
   const rewrite = rewriteOverride ?? rewriteReply(body);
   const judge = judgeReply(body);
   const title = titlingReply(body);
-  const replyText = (rewrite ?? judge ?? title ?? buildReply(lastUser)).slice(0, 80);
+  // Rewrite and judge run on thinking models: unless the thinking phase is
+  // switched off, the bounded output budget is spent reasoning and the
+  // reply carries empty content cut at the length limit.
+  const thinking =
+    (rewrite !== null || judge !== null) && body.chat_template_kwargs?.enable_thinking !== false;
+  const replyText = thinking
+    ? ''
+    : (rewrite ?? judge ?? title ?? buildReply(lastUser)).slice(0, 80);
   const tokens = replyText.split(/(?<=\s)/);
 
   counter += 1;
@@ -311,7 +319,7 @@ function jsonReply(body: ChatCompletionsBody, rewriteOverride?: string) {
       {
         index: 0,
         message: { role: 'assistant', content: replyText },
-        finish_reason: 'stop',
+        finish_reason: thinking ? 'length' : 'stop',
       },
     ],
     usage: buildUsage({

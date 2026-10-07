@@ -120,6 +120,9 @@ async function rewriteOnce(
       maxRetries: 0,
       maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS,
       temperature,
+      // A thinking phase would spend the output bound and the time budget
+      // reasoning and leave the rewrite empty.
+      providerOptions: { deepinfra: { chat_template_kwargs: { enable_thinking: false } } },
       abortSignal: controller.signal,
     });
     return ok({
