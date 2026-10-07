@@ -41,7 +41,8 @@ engine owns its own `queues` schema.
 | `analysis` | `message_embeddings`, `thread_segments`, `segment_drift_logs` |
 | `memory` | `user_facts`, `thread_seeds`, `user_settings`, `memory_capture_progress` |
 | `billing` | `message_usage`, `message_side_costs`, `model_configs` |
-| `public` | `kysely_migration`, `kysely_migration_lock`, SuperTokens tables |
+| `auth` | SuperTokens tables (~55) |
+| `public` | `kysely_migration`, `kysely_migration_lock` |
 
 Foreign keys work across schemas. Extensions (`vector`, `uuid-ossp`)
 resolve via the default `search_path`. Code references tables with
