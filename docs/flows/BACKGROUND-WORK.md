@@ -19,12 +19,12 @@ carries news from the moment it happens to whoever is listening.
 
 ```mermaid
 flowchart LR
-  subgraph TAB["Browser tab"]
+  subgraph TAB["Frontend: browser tab"]
     UI["Screens<br/>chat view, thread list, handover"]
     PC["Push client<br/>one per tab"]
   end
 
-  subgraph API["Backend process"]
+  subgraph API["Backend: one process"]
     REQ["Requests<br/>chat, retry, edit, handover, regenerate title"]
     W["Worker<br/>tasks and their flows"]
     BUS(("Event bus"))
@@ -52,6 +52,68 @@ flowchart LR
 The worker runs inside the API process for now. Only the server's entry
 point starts it, so moving it into its own container is a deployment
 change. Section 6 covers what that move would still need.
+
+### Where each part runs
+
+| Part | Runs in | Its job |
+|---|---|---|
+| Screens | Frontend | Subscribe to the event kinds they show, keep only the ones for their Thread, then re-read from the API. An event says *something changed*; the API says *what*. |
+| Push client | Frontend | Owns the tab's single connection, hands each event to the screens subscribed to its kind, and hides reconnects from them. |
+| Requests | Backend | Store rows and enqueue work. The chat request and the Handover also wait on the bus for a result. |
+| Worker | Backend | Runs tasks. Each task's flow publishes the outcome to the bus. |
+| Event bus | Backend, in memory | Hands each event to every subscriber that wants it, at once, and keeps nothing. |
+| Push transport | Backend | One stream per tab. Forwards only its user's events, strips the user id, and re-emits the current state whenever a tab connects. |
+| Postgres | Database | The only record: the app's tables and the queue. |
+
+### One event, end to end
+
+This follows a single verdict across the frontend, the backend and
+Postgres. The same event reaches two listeners: the request that is
+waiting for it, and every open tab of the user.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  box Frontend: browser tab
+    participant S as Screen
+    participant PC as Push client
+  end
+  box Backend: one process
+    participant R as Request
+    participant W as Worker
+    participant B as Event bus
+    participant T as Push transport
+  end
+  box Database
+    participant DB as Postgres
+  end
+
+  PC->>T: open the push stream when the app loads (session cookie)
+  T->>B: subscribe to this user's events
+
+  S->>R: send a message (HTTP)
+  R->>B: listen for this arrival's verdict
+  R->>DB: store the message and enqueue its judgment
+  DB->>W: job due
+  W->>DB: store the verdict
+  W->>B: publish the verdict
+
+  par to the waiting request
+    B-->>R: verdict, if it lands within the wait
+    R-->>S: answer on the same HTTP response
+  and to every open tab
+    B-->>T: verdict
+    T-->>PC: server-sent event, user id stripped
+    PC-->>S: handed over by kind
+    S->>R: re-read the Thread (HTTP)
+  end
+```
+
+The browser therefore holds two streams that are easy to confuse. The
+reply streams back on the chat request that asked for it and ends with
+the reply. The push stream stays open for the life of the tab and
+carries news that lands later, such as a verdict that arrived after the
+chat request stopped waiting, or a Thread's new title.
 
 ## 2. The queue
 
