@@ -172,7 +172,8 @@ export default function ChatView({
     }
   }, [rows, needsPendingBubble]);
 
-  // Chase growth that happens without a rows change (code blocks, images).
+  // Chase growth that happens without a rows change (code blocks, images),
+  // and keep the tail visible when the pane shrinks (on-screen keyboard).
   useEffect(() => {
     const viewport = viewportRef.current;
     const content = viewport?.firstElementChild;
@@ -181,6 +182,7 @@ export default function ChatView({
       if (followBottom.current) viewport.scrollTop = viewport.scrollHeight;
     });
     observer.observe(content);
+    observer.observe(viewport);
     return () => observer.disconnect();
   }, []);
 
@@ -235,7 +237,10 @@ export default function ChatView({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={viewportRef} className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={viewportRef}
+        className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
         <div className="mx-auto flex w-full min-w-0 max-w-[900px] flex-col">
           <div className="flex flex-col gap-4 py-4 px-4">
             {rows.map((row, index) => {

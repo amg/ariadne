@@ -219,6 +219,7 @@ function AppLayoutComponent() {
 
   return (
     <AppShell
+      navigationKey={location.key}
       sidebar={
         <ThreadSidebar
           threads={visibleThreads}
