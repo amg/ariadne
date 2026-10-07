@@ -106,7 +106,9 @@ function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
     stats.totalPrompt += msg.promptTokens ?? 0;
     stats.totalCompletion += msg.completionTokens ?? 0;
     stats.totalCached += msg.cachedInputTokens ?? 0;
-    stats.totalReasoning += msg.reasoningTokens ?? 0;
+    // Providers may report zero reasoning for a model that did think, so the
+    // count estimated from the reasoning content takes precedence.
+    stats.totalReasoning += msg.estimatedReasoningTokens ?? msg.reasoningTokens ?? 0;
   }
 
   return stats;

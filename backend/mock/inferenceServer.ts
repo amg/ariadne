@@ -40,6 +40,13 @@ export type MockInferenceServer = {
   judges: MockJudgesControl;
   /** Test hooks for the memory pipeline's extraction, duplicate-check and classification calls. */
   memory: MockMemoryControl;
+  /** Test hooks for streamed chat replies. */
+  chats: MockChatsControl;
+};
+
+export type MockChatsControl = {
+  /** Raw body of the latest streamed chat-completion request; null before any. */
+  lastRequest: () => Record<string, unknown> | null;
 };
 
 export type MockEmbeddingsControl = {
@@ -477,6 +484,7 @@ export async function startMockInferenceServer(options?: {
     replySequence: string[];
   } = { failAll: false, requestCount: 0, forcedReply: null, replySequence: [] };
   const judgesState = { failAll: false };
+  const chatsState: { lastRequest: Record<string, unknown> | null } = { lastRequest: null };
   const memoryState: {
     extractionCount: number;
     lastExtractionPrompt: string | null;
@@ -586,6 +594,7 @@ export async function startMockInferenceServer(options?: {
     if (body.stream !== true) {
       return reply.code(200).send(jsonReply(body, rewriteOverride));
     }
+    chatsState.lastRequest = body as Record<string, unknown>;
 
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -692,6 +701,9 @@ export async function startMockInferenceServer(options?: {
         memoryState.failExtractions = false;
         memoryState.failClassifications = false;
       },
+    },
+    chats: {
+      lastRequest: () => chatsState.lastRequest,
     },
   };
 }

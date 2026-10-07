@@ -14,6 +14,7 @@ export interface MessageWithUsageRow {
   completionTokens: number | null;
   cachedInputTokens: number | null;
   reasoningTokens: number | null;
+  estimatedReasoningTokens: number | null;
 }
 
 /**
@@ -35,6 +36,7 @@ export async function listMessagesWithUsageByThread({
       'billing.messageUsage.completionTokens as completionTokens',
       'billing.messageUsage.cachedInputTokens as cachedInputTokens',
       'billing.messageUsage.reasoningTokens as reasoningTokens',
+      'billing.messageUsage.estimatedReasoningTokens as estimatedReasoningTokens',
     ])
     .where('chat.messages.threadId', '=', threadId)
     .orderBy('chat.messages.createdAt')

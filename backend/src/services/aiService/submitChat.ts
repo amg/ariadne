@@ -310,6 +310,11 @@ async function startExchange({
 
   const streamResult = streamText({
     model: createModel(config),
+    // With reasoning disabled the model skips its thinking phase entirely,
+    // rather than thinking unseen.
+    ...(config.enableReasoning
+      ? {}
+      : { providerOptions: { deepinfra: { chat_template_kwargs: { enable_thinking: false } } } }),
     system: systemPrompt,
     messages: modelMessages,
     abortSignal: controller.signal,

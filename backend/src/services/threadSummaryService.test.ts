@@ -20,7 +20,14 @@ async function createUserAndThread(): Promise<{ userId: string; threadId: string
   return { userId, threadId: thread.id };
 }
 
-async function addChatExchange(threadId: string, costUsd: string): Promise<void> {
+async function addChatExchange(
+  threadId: string,
+  costUsd: string,
+  reasoning: { reported: number | null; estimated: number | null } = {
+    reported: null,
+    estimated: null,
+  },
+): Promise<void> {
   await insertMessage({ threadId, role: 'user', content: 'hello' });
   const assistantMessage = await insertMessage({
     threadId,
@@ -35,6 +42,8 @@ async function addChatExchange(threadId: string, costUsd: string): Promise<void>
     completionTokens: 20,
     cachedInputTokens: 0,
     cacheWriteTokens: 0,
+    reasoningTokens: reasoning.reported,
+    estimatedReasoningTokens: reasoning.estimated,
     costUsd,
     finishReason: 'stop',
   });
@@ -130,6 +139,16 @@ describe('getThreadSummary', () => {
     expect(summary?.totalCostUsd).toBe('0.0000057500');
     expect(summary?.costBreakdown.memory).toBe('0.0000005000');
     expect(summary?.models.some((model) => model.roles.includes('memory'))).toBe(true);
+  });
+
+  it('counts estimated reasoning when the provider reports none', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addChatExchange(threadId, '0.0000052500', { reported: 0, estimated: 916 });
+    await addChatExchange(threadId, '0.0000052500', { reported: 7, estimated: null });
+    await addChatExchange(threadId, '0.0000052500');
+
+    const summary = await getThreadSummary({ userId, threadId });
+    expect(summary?.totalTokens.reasoning).toBe(923);
   });
 
   it('total equals chat cost alone when the analyzer recorded nothing', async () => {

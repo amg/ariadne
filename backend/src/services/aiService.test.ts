@@ -239,6 +239,29 @@ describe('submitChat', () => {
     );
   });
 
+  /** The chat request body sent for one exchange under the given ENABLE_REASONING value. */
+  async function chatRequestWithReasoning(enabled: 'true' | 'false') {
+    const { userId, threadId } = await createRandomThread();
+    const saved = process.env.ENABLE_REASONING;
+    process.env.ENABLE_REASONING = enabled;
+    try {
+      await drain(await assertSuccess(await submit({ userId, threadId, content: 'think?' })));
+    } finally {
+      process.env.ENABLE_REASONING = saved ?? '';
+    }
+    return mock.chats.lastRequest();
+  }
+
+  it('lets the model think when reasoning is enabled', async () => {
+    const request = await chatRequestWithReasoning('true');
+    expect(request?.chat_template_kwargs).toBeUndefined();
+  });
+
+  it('turns the thinking phase off when reasoning is disabled', async () => {
+    const request = await chatRequestWithReasoning('false');
+    expect(request?.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
   it('persists partial text with finish state "interrupted" when stopped early', async () => {
     const { userId, threadId } = await createRandomThread();
 
