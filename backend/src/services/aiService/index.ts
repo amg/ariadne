@@ -2,7 +2,7 @@
  * AI Connector service — public surface.
  * Folder layout: config.ts (provider/env), cost.ts (pure cost math —
  * pricing resolved via @services/modelConfigService),
- * usageMap.ts (usage → message_usage row), embedText.ts (embedding export
+ * usageMap.ts (usage → `billing.message_usage` row), embedText.ts (embedding export
  * for thread-health window embeddings), rewrite.ts (the expanded-signal
  * decontextualising rewrite call), judge.ts (the expansion trigger's
  * context-clarity verdict call), extractFacts.ts, judgeFactDuplicate.ts and

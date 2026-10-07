@@ -18,7 +18,7 @@ export async function updateThreadTitle({
   title,
 }: UpdateThreadTitleProps): Promise<Thread | undefined> {
   return db
-    .updateTable('threads')
+    .updateTable('chat.threads')
     .set({ title })
     .where('id', '=', threadId)
     .where('userId', '=', userId)

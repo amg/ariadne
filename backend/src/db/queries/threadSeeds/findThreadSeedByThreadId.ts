@@ -6,7 +6,7 @@ export async function findThreadSeedByThreadIdOrNull({
   threadId,
 }: { threadId: string }): Promise<ThreadSeed | null> {
   const row = await db
-    .selectFrom('threadSeeds')
+    .selectFrom('memory.threadSeeds')
     .selectAll()
     .where('threadId', '=', threadId)
     .executeTakeFirst();

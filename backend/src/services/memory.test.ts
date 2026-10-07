@@ -75,7 +75,7 @@ async function addTurn(
 
 async function factsOf(userId: string) {
   return db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select(['content', 'category', 'predicate', 'sourceMessageId', 'suppressed', 'validAt'])
     .where('userId', '=', userId)
     .orderBy('createdAt', 'asc')
@@ -84,7 +84,7 @@ async function factsOf(userId: string) {
 
 async function costsOf(messageId: string) {
   return db
-    .selectFrom('messageSideCosts')
+    .selectFrom('billing.messageSideCosts')
     .select(['kind', 'promptTokens'])
     .where('messageId', '=', messageId)
     .orderBy('kind', 'asc')
@@ -113,7 +113,7 @@ async function threadWithClosedSegment(turnTexts: string[]) {
   });
   await insertThreadSegment({ threadId, startMessageId: boundary.id, modelId: EMBEDDING_MODEL_ID });
   const second = await db
-    .selectFrom('threadSegments')
+    .selectFrom('analysis.threadSegments')
     .select('id')
     .where('startMessageId', '=', boundary.id)
     .executeTakeFirstOrThrow();
@@ -138,7 +138,7 @@ async function storeFact(userId: string, content: string, overrides: object = {}
     validAt: new Date('2026-09-01T00:00:00Z'),
   });
   if (Object.keys(overrides).length > 0) {
-    await db.updateTable('userFacts').set(overrides).where('id', '=', fact.id).execute();
+    await db.updateTable('memory.userFacts').set(overrides).where('id', '=', fact.id).execute();
   }
 }
 
@@ -194,7 +194,7 @@ describe('captureFacts', () => {
     };
     await captureFacts(input);
     await db
-      .updateTable('userFacts')
+      .updateTable('memory.userFacts')
       .set({ suppressed: true })
       .where('userId', '=', userId)
       .execute();
@@ -205,7 +205,7 @@ describe('captureFacts', () => {
     expect(again).toEqual({ type: 'success', data: { added: 0, replaced: 1 } });
     expect(mock.memory.duplicateCheckCount()).toBe(checksBefore);
     const rows = await db
-      .selectFrom('userFacts')
+      .selectFrom('memory.userFacts')
       .select(['content', 'suppressed', 'invalidAt'])
       .where('userId', '=', userId)
       .orderBy('createdAt', 'asc')
@@ -845,7 +845,7 @@ describe('Seed', () => {
     const unseeded = await createThread({ userId, memory: memoryOff });
     const seeded = await createThread({ userId, memory: memoryOn });
 
-    const seeds = await db.selectFrom('threadSeeds').select('threadId').execute();
+    const seeds = await db.selectFrom('memory.threadSeeds').select('threadId').execute();
     expect(seeds.map((seed) => seed.threadId)).toEqual([seeded.id]);
     expect(
       await assembledSystemPrompt({
@@ -883,7 +883,7 @@ describe('editFactContent', () => {
 
   async function rowOf(factId: string) {
     return db
-      .selectFrom('userFacts')
+      .selectFrom('memory.userFacts')
       .select(['content', 'invalidAt'])
       .where('id', '=', factId)
       .executeTakeFirstOrThrow();
@@ -923,7 +923,11 @@ describe('editFactContent', () => {
       subject: 'user',
       sourceMessageId: turn.user.id,
     });
-    await db.updateTable('userFacts').set({ suppressed: true }).where('id', '=', fact.id).execute();
+    await db
+      .updateTable('memory.userFacts')
+      .set({ suppressed: true })
+      .where('id', '=', fact.id)
+      .execute();
 
     const edited = await editFactContent({
       factId: fact.id,

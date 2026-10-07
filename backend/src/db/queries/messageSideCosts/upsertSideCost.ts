@@ -26,7 +26,7 @@ export async function upsertSideCost(row: UpsertSideCostRow): Promise<MessageSid
     completionTokens: row.completionTokens ?? null,
   };
   return db
-    .insertInto('messageSideCosts')
+    .insertInto('billing.messageSideCosts')
     .values(values)
     .onConflict((oc) =>
       oc.columns(['messageId', 'kind']).doUpdateSet({

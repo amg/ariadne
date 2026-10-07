@@ -22,9 +22,9 @@ export async function listSegmentDriftLogsByThread({
   modelId,
 }: ListSegmentDriftLogsByThreadProps): Promise<SegmentDriftLogWithStart[]> {
   const rows = await db
-    .selectFrom('segmentDriftLogs as log')
-    .innerJoin('threadSegments as seg', 'seg.id', 'log.segmentId')
-    .innerJoin('messages as msg', 'msg.id', 'log.messageId')
+    .selectFrom('analysis.segmentDriftLogs as log')
+    .innerJoin('analysis.threadSegments as seg', 'seg.id', 'log.segmentId')
+    .innerJoin('chat.messages as msg', 'msg.id', 'log.messageId')
     .where('msg.threadId', '=', threadId)
     .where('log.modelId', '=', modelId)
     .select([

@@ -15,7 +15,7 @@ export async function listMessageEmbeddingsByMessageIds({
 }: ListMessageEmbeddingsByMessageIdsProps): Promise<MessageEmbedding[]> {
   if (messageIds.length === 0) return [];
   const rows = await db
-    .selectFrom('messageEmbeddings')
+    .selectFrom('analysis.messageEmbeddings')
     .selectAll()
     .where('messageId', 'in', messageIds)
     .execute();

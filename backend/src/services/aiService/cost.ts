@@ -1,7 +1,7 @@
 /**
  * Cost math for a usage report. Pure functions — no pricing table of its
  * own: pricing is resolved by the caller through `getModelConfig`
- * (`@services/modelConfigService`, DB `model_configs` → FALLBACK_CONFIG).
+ * (`@services/modelConfigService`, DB `billing.model_configs` → FALLBACK_CONFIG).
  */
 
 /** Flat USD pricing per million tokens (null = unknown → no charge). */

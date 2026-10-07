@@ -18,7 +18,7 @@ export async function sumDailySpend(): Promise<string> {
   const [chatResult, embeddingResult, expansionResult] = await Promise.all([
     // Chat exchange spend
     db
-      .selectFrom('messageUsage')
+      .selectFrom('billing.messageUsage')
       .select(sql<string>`coalesce(sum(cost_usd), 0)::numeric(14,10)`.as('total'))
       .where(
         sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,
@@ -28,7 +28,7 @@ export async function sumDailySpend(): Promise<string> {
       .executeTakeFirst(),
     // Embedding spend
     db
-      .selectFrom('messageEmbeddings')
+      .selectFrom('analysis.messageEmbeddings')
       .select(sql<string>`coalesce(sum(embedding_cost_usd), 0)::numeric(14,10)`.as('total'))
       .where(
         sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,
@@ -38,7 +38,7 @@ export async function sumDailySpend(): Promise<string> {
       .executeTakeFirst(),
     // Side-call costs (rewrite, judge, and Fact capture)
     db
-      .selectFrom('messageSideCosts')
+      .selectFrom('billing.messageSideCosts')
       .select(sql<string>`coalesce(sum(cost_usd), 0)::numeric(14,10)`.as('total'))
       .where(
         sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,

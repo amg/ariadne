@@ -13,7 +13,7 @@ export async function listThreadSegmentsByThread({
   modelId,
 }: ListThreadSegmentsByThreadProps): Promise<ThreadSegment[]> {
   return db
-    .selectFrom('threadSegments')
+    .selectFrom('analysis.threadSegments')
     .selectAll()
     .where('threadId', '=', threadId)
     .where('modelId', '=', modelId)

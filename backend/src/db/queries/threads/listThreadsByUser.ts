@@ -11,7 +11,7 @@ type ListThreadsByUserProps = {
  */
 export async function listThreadsByUser({ userId }: ListThreadsByUserProps): Promise<Thread[]> {
   return db
-    .selectFrom('threads')
+    .selectFrom('chat.threads')
     .selectAll()
     .where('userId', '=', userId)
     .orderBy('createdAt', 'desc')

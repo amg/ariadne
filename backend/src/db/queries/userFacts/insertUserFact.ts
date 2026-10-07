@@ -6,7 +6,7 @@ import { sql } from 'kysely';
 /** Stores one Fact; the vector is written but never read back. */
 export async function insertUserFact(row: NewUserFact): Promise<UserFact> {
   return db
-    .insertInto('userFacts')
+    .insertInto('memory.userFacts')
     .values({ ...row, embedding: sql`${toVectorText(row.embedding)}::vector` })
     .returning([
       'id',

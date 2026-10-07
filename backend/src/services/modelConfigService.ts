@@ -59,7 +59,7 @@ const FALLBACK_CONFIG: ModelConfigRow = {
 };
 
 /**
- * Refresh cooldown state lives in the DB (`model_configs.last_updated`),
+ * Refresh cooldown state lives in the DB (`billing.model_configs.last_updated`),
  * not in server memory: services must stay stateless so any number of
  * servers enforces the same 1-minute floor (no per-process globals).
  *   - `last_updated` chosen over `created_at`: only updated on refresh

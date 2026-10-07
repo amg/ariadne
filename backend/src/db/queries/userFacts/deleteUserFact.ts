@@ -7,5 +7,9 @@ type DeleteUserFactProps = {
 
 /** Hard-deletes a Fact row. */
 export async function deleteUserFact({ factId, userId }: DeleteUserFactProps): Promise<void> {
-  await db.deleteFrom('userFacts').where('id', '=', factId).where('userId', '=', userId).execute();
+  await db
+    .deleteFrom('memory.userFacts')
+    .where('id', '=', factId)
+    .where('userId', '=', userId)
+    .execute();
 }

@@ -5,7 +5,7 @@ import { getModelConfig } from '../modelConfigService';
 import { computeCostUsd } from './cost';
 
 /**
- * Maps a provider usage report onto a `message_usage` insert row.
+ * Maps a provider usage report onto a `billing.message_usage` insert row.
  * Fields the provider didn't report are simply omitted (nullable columns).
  */
 

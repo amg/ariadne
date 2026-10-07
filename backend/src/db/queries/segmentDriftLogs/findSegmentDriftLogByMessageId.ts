@@ -16,7 +16,7 @@ export async function findSegmentDriftLogByMessageId({
   modelId,
 }: FindSegmentDriftLogByMessageIdProps): Promise<SegmentDriftLog | null> {
   const row = await db
-    .selectFrom('segmentDriftLogs')
+    .selectFrom('analysis.segmentDriftLogs')
     .selectAll()
     .where('messageId', '=', messageId)
     .where('modelId', '=', modelId)

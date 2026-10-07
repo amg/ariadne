@@ -4,22 +4,25 @@ import type { Generated, Insertable, Kysely, Selectable } from 'kysely';
  * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
  * maps them onto the snake_case schema at query time and maps result
  * rows back to camelCase. Table keys follow the same convention
- * (`messageUsage` → `message_usage`).
+ * (`billing.messageUsage` → `billing.message_usage`). Every key carries
+ * its domain schema: app tables live one domain per schema, the auth
+ * provider's tables stay in `public`, and the queue engine owns its own
+ * schema.
  */
 export interface Database {
-  users: UsersTable;
-  threads: ThreadsTable;
-  messages: MessagesTable;
-  messageUsage: MessageUsageTable;
-  messageSideCosts: MessageSideCostsTable;
-  messageEmbeddings: MessageEmbeddingsTable;
-  threadSegments: ThreadSegmentsTable;
-  memoryCaptureProgress: MemoryCaptureProgressTable;
-  segmentDriftLogs: SegmentDriftLogsTable;
-  modelConfigs: ModelConfigsTable;
-  userFacts: UserFactsTable;
-  threadSeeds: ThreadSeedsTable;
-  userSettings: UserSettingsTable;
+  'chat.users': UsersTable;
+  'chat.threads': ThreadsTable;
+  'chat.messages': MessagesTable;
+  'analysis.messageEmbeddings': MessageEmbeddingsTable;
+  'analysis.threadSegments': ThreadSegmentsTable;
+  'analysis.segmentDriftLogs': SegmentDriftLogsTable;
+  'memory.userFacts': UserFactsTable;
+  'memory.threadSeeds': ThreadSeedsTable;
+  'memory.userSettings': UserSettingsTable;
+  'memory.memoryCaptureProgress': MemoryCaptureProgressTable;
+  'billing.messageUsage': MessageUsageTable;
+  'billing.messageSideCosts': MessageSideCostsTable;
+  'billing.modelConfigs': ModelConfigsTable;
   'queues.jobs': QueueJobsView;
 }
 

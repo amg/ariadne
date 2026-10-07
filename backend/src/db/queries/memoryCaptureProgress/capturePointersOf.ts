@@ -8,7 +8,7 @@ import { db } from '@db/db';
 export async function capturePointersOf(segmentIds: string[]): Promise<Map<string, Date>> {
   if (segmentIds.length === 0) return new Map();
   const rows = await db
-    .selectFrom('memoryCaptureProgress')
+    .selectFrom('memory.memoryCaptureProgress')
     .select(['segmentId', 'capturedThroughAt'])
     .where('segmentId', 'in', segmentIds)
     .execute();

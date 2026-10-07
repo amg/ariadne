@@ -14,7 +14,7 @@ export async function insertUserIfNotExists({
   id,
 }: InsertUserIfNotExistsProps): Promise<User | undefined> {
   return db
-    .insertInto('users')
+    .insertInto('chat.users')
     .values({ id })
     .onConflict((oc) => oc.column('id').doNothing())
     .returningAll()

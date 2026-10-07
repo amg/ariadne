@@ -22,7 +22,7 @@ export async function updateMessageContent({
   const updates: Updateable<MessagesTable> = { content };
   if (exchangeStatus !== undefined) updates.exchangeStatus = exchangeStatus;
   return db
-    .updateTable('messages')
+    .updateTable('chat.messages')
     .set(updates)
     .where('id', '=', messageId)
     .returningAll()

@@ -12,7 +12,7 @@ export async function findCurrentUserFactOrNull({
   userId,
 }: FindCurrentUserFactProps): Promise<UserFact | null> {
   const fact = await db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select([
       'id',
       'userId',

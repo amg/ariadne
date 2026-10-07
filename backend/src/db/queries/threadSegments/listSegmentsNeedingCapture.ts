@@ -41,8 +41,8 @@ type ListProps = {
 /** The live fires judged into each segment of the chain. */
 async function firesBySegmentOf(segmentIds: string[]): Promise<Map<string, AnchoredRows[]>> {
   const rows = await db
-    .selectFrom('segmentDriftLogs as l')
-    .innerJoin('messages as m', 'm.id', 'l.messageId')
+    .selectFrom('analysis.segmentDriftLogs as l')
+    .innerJoin('chat.messages as m', 'm.id', 'l.messageId')
     .where('l.segmentId', 'in', segmentIds)
     .where('l.verdict', '=', 'fire')
     .where('m.abandoned', '=', false)

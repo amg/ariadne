@@ -13,7 +13,7 @@ export async function deleteMessage({
   messageId,
 }: DeleteMessageProps): Promise<string | undefined> {
   const row = await db
-    .deleteFrom('messages')
+    .deleteFrom('chat.messages')
     .where('id', '=', messageId)
     .returning('id')
     .executeTakeFirst();

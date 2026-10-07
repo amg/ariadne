@@ -12,7 +12,7 @@ export async function updateExchangeStatus({
   exchangeStatus,
 }: UpdateExchangeStatusProps): Promise<Message> {
   return db
-    .updateTable('messages')
+    .updateTable('chat.messages')
     .set({ exchangeStatus })
     .where('id', '=', messageId)
     .returningAll()

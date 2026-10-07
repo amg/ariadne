@@ -31,7 +31,7 @@ export async function listNearestUserFacts({
 }: ListNearestUserFactsProps): Promise<NearUserFact[]> {
   const probe = sql`${toVectorText(embedding)}::vector`;
   const rows = await db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select(['id', 'content', 'suppressed', sql<number>`embedding <=> ${probe}`.as('distance')])
     .where('userId', '=', userId)
     .where('modelId', '=', modelId)

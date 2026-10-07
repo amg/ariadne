@@ -10,7 +10,7 @@ export async function getSideCostByMessageId({
   kind: SideCostKind;
 }): Promise<MessageSideCost | undefined> {
   return db
-    .selectFrom('messageSideCosts')
+    .selectFrom('billing.messageSideCosts')
     .selectAll()
     .where('messageId', '=', messageId)
     .where('kind', '=', kind)

@@ -8,7 +8,7 @@ export async function getMessageUsageByMessageId({
   messageId: string;
 }): Promise<MessageUsage | undefined> {
   return db
-    .selectFrom('messageUsage')
+    .selectFrom('billing.messageUsage')
     .selectAll()
     .where('messageId', '=', messageId)
     .executeTakeFirst();

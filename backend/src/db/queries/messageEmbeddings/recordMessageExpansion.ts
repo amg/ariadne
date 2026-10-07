@@ -24,7 +24,7 @@ export async function recordMessageExpansion(
   row: RecordMessageExpansionProps,
 ): Promise<MessageEmbedding> {
   const result = await db
-    .insertInto('messageEmbeddings')
+    .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: row.messageId,
       embedding: null,

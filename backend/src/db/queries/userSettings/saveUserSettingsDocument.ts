@@ -11,7 +11,7 @@ export async function saveUserSettingsDocument({
 }): Promise<void> {
   const document = sql`${JSON.stringify(settings)}::jsonb`;
   await db
-    .insertInto('userSettings')
+    .insertInto('memory.userSettings')
     .values({ userId, settings: document })
     .onConflict((oc) =>
       oc.column('userId').doUpdateSet({ settings: document, updatedAt: sql`now()` }),

@@ -29,6 +29,25 @@ Seeds, per-user toggle). `CONTEXT.md` defines the terms (Fact, Memory,
 Seed, Handover). Memory is off by default (`FEATURE_MEMORY`); the
 backend reads toggles at boot, so a change needs a restart.
 
+## Database
+
+One Postgres schema per domain keeps app tables separate from the auth
+provider's ~55 SuperTokens tables (which stay in `public`). The queue
+engine owns its own `queues` schema.
+
+| Schema | Tables |
+|---|---|
+| `chat` | `users`, `threads`, `messages` |
+| `analysis` | `message_embeddings`, `thread_segments`, `segment_drift_logs` |
+| `memory` | `user_facts`, `thread_seeds`, `user_settings`, `memory_capture_progress` |
+| `billing` | `message_usage`, `message_side_costs`, `model_configs` |
+| `public` | `kysely_migration`, `kysely_migration_lock`, SuperTokens tables |
+
+Foreign keys work across schemas. Extensions (`vector`, `uuid-ossp`)
+resolve via the default `search_path`. Code references tables with
+schema-qualified keys (`billing.messageUsage`); `CamelCasePlugin` maps
+each dot-separated part to snake_case at query time.
+
 ## Knowledge Map
 
 - **`CONTEXT.md`** (repo root) — the domain vocabulary. Code uses these

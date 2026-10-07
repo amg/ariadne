@@ -221,7 +221,7 @@ describe('handOverArrival', () => {
     expect(oldRows.find((row) => row.id === pausedMessageId)?.abandoned).toBe(true);
 
     const seed = await db
-      .selectFrom('threadSeeds')
+      .selectFrom('memory.threadSeeds')
       .selectAll()
       .where('threadId', '=', result.data.thread.id)
       .executeTakeFirstOrThrow();
@@ -311,7 +311,7 @@ describe('handOverArrival', () => {
 
     expect(results.map((result) => result.type).sort()).toEqual(['error', 'success']);
     const seeds = await db
-      .selectFrom('threadSeeds')
+      .selectFrom('memory.threadSeeds')
       .select('threadId')
       .where('handoverMessageId', '=', pausedMessageId)
       .execute();
@@ -381,7 +381,7 @@ describe('handOverArrival', () => {
     await captureUnreadTurns({ userId, threadId });
 
     const facts = await db
-      .selectFrom('userFacts')
+      .selectFrom('memory.userFacts')
       .select('content')
       .where('userId', '=', userId)
       .execute();

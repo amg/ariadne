@@ -13,11 +13,11 @@ type UpsertProps = {
  */
 export async function upsertCaptureProgress({ segmentId, throughAt }: UpsertProps): Promise<void> {
   await db
-    .insertInto('memoryCaptureProgress')
+    .insertInto('memory.memoryCaptureProgress')
     .values({ segmentId, capturedThroughAt: throughAt })
     .onConflict((oc) =>
       oc.column('segmentId').doUpdateSet({
-        capturedThroughAt: sql`greatest(memory_capture_progress.captured_through_at, ${throughAt})`,
+        capturedThroughAt: sql`greatest(memory.memory_capture_progress.captured_through_at, ${throughAt})`,
         updatedAt: sql`now()`,
       }),
     )
@@ -27,7 +27,7 @@ export async function upsertCaptureProgress({ segmentId, throughAt }: UpsertProp
 /** Reads a segment's capture pointer, if capture has reached it once. */
 export async function captureProgressOf(segmentId: string): Promise<Date | null> {
   const row = await db
-    .selectFrom('memoryCaptureProgress')
+    .selectFrom('memory.memoryCaptureProgress')
     .select('capturedThroughAt')
     .where('segmentId', '=', segmentId)
     .executeTakeFirst();

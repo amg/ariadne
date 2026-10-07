@@ -170,12 +170,16 @@ export default async function globalSetup(): Promise<void> {
   console.log(`[test-db] ${mode}: ${redactUrl(databaseUrl)}`);
 
   // Fresh, deterministic schemas on every run, then run migrations: the
-  // app's own, and the queue's, which its engine installs itself.
+  // app's own, and the queue's, which its engine installs itself. The
+  // domain schemas are dropped alongside `public`.
   const pool = new Pool({ connectionString: databaseUrl });
   const db = createDbFromPool(pool);
   try {
+    const domainSchemas = ['chat', 'analysis', 'memory', 'billing'];
+    for (const schema of [...domainSchemas, QUEUE_SCHEMA]) {
+      await sql`drop schema if exists ${sql.id(schema)} cascade`.execute(db);
+    }
     await sql`drop schema if exists public cascade`.execute(db);
-    await sql`drop schema if exists ${sql.id(QUEUE_SCHEMA)} cascade`.execute(db);
     await sql`create schema public`.execute(db);
     const migrationsFolder = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
