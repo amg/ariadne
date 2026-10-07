@@ -8,6 +8,7 @@ A self-hosted chat application with real-time streaming, per-Turn cost tracking,
 - **Cost visibility** — See exactly what each Turn costs in tokens and USD; Running total per Thread
 - **User accounts** — SuperTokens authentication (email/password), isolated Threads per user
 - **Thread health** — Topic drift detection, segment boundaries, cost accumulation awareness
+- **Memory (opt-in)** — Facts captured at segment close, fresh Threads seeded with what mattered before, per-user toggle
 - **Self-hosted** — No cloud dependencies, runs on your hardware
 
 ## Quick Start
@@ -100,14 +101,16 @@ cp .env.prod.example .env.prod
 
 **Optional variables:**
 - `FEATURE_MEMORY` — User memory (Fact capture, Thread Seeds, the Memory and Settings screens). Off by default; the backend reads it at boot, so restart it after a change.
+- `THREAD_ANALYSIS_MODE` — Live drift gate: `off` (disabled), `heuristic` (cheap checks, the default), `always` (rewrite + judge runs on every arrival).
+- `DEFAULT_MODEL`, `TITLING_MODEL`, `REWRITE_MODEL`, `JUDGE_MODEL`, `MEMORY_MODEL` — Model per task, all defaulting to `Qwen/Qwen3.5-9B` on DeepInfra.
 - `GATE_WAIT_MS`, `HANDOVER_WAIT_MS` — How long a chat waits for its drift check, and a handover for the old chat's memory, before telling the browser to try again. Both default to 10 seconds.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18 + React Router v7 + TypeScript + Vite |
-| Backend | Node.js 22 + Fastify + TypeScript |
+| Frontend | React 19 + React Router v7 + TypeScript 6 + Vite 8 |
+| Backend | Node.js 22 + Fastify 5 + TypeScript 7 |
 | Database | PostgreSQL 16 with pgvector |
 | Auth | SuperTokens (self-hosted) |
 | AI | DeepInfra (OpenAI-compatible) |
@@ -120,15 +123,15 @@ alex-chat-bot/
 ├── frontend/           # React app (Vite build)
 │   ├── src/
 │   │   ├── components/ # UI components
-│   │   ├── pages/      # Route pages (ChatPage, AboutPage)
+│   │   ├── pages/      # Route pages (Chat, Memory, Settings, About)
 │   │   ├── services/   # API client
-│   │   └── config/     # SuperTokens config
+│   │   └── config/     # SuperTokens and feature-toggle config
 │   └── nginx.conf      # Production nginx config
 ├── backend/
 │   ├── app/            # Fastify server and routes
 │   ├── src/
 │   │   ├── db/         # Database layer (Kysely queries)
-│   │   ├── services/   # Business logic (auth, AI, threads)
+│   │   ├── services/   # Business logic (AI, threads, drift gate, memory)
 │   │   └── config/     # Environment variables
 │   └── mock/           # Mock AI server for testing
 ├── compose.*.yml       # Docker Compose files (dev/staging/prod)
@@ -146,6 +149,7 @@ alex-chat-bot/
 
 ## Documentation
 
+- **[Domain vocabulary](CONTEXT.md)** — The terms (Threads, Turns, Drift, Facts, Seeds, Handovers) the codebase assumes everywhere
 - **[Architecture Decisions](adrs/)** — Why we made key technical choices
 - **[A new message in a Thread](docs/flows/NEW-MESSAGE.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
 - **[Background work](docs/flows/BACKGROUND-WORK.md)** — The queue, the event bus, push to the browser, and how failures surface
@@ -154,4 +158,4 @@ alex-chat-bot/
 
 ## What's Not Done (Yet)
 
-- **Factual memory (RAG)** — Decided in ADR 0003, storage foundation exists, extraction pipeline pending
+- **Per-turn memory recall** — Facts are captured and each fresh Thread is seeded from the one before it; retrieving relevant Facts into a reply by query similarity (ADR 0003's RAG read side) is still pending
