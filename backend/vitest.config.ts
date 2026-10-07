@@ -20,9 +20,11 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts', 'queue/**/*.test.ts', 'app/**/*.test.ts'],
     globalSetup: ['./test/global-setup.ts'],
-    // All test files share one real database; keep them serial so
-    // per-test truncation cannot interfere across files.
-    fileParallelism: false,
+    setupFiles: ['./test/worker-db-setup.ts'],
+    // Each worker runs against its own database clone, so files run in
+    // parallel without sharing rows or truncates. Bounded by the Postgres
+    // connection budget, which the dev database shares.
+    maxWorkers: 4,
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

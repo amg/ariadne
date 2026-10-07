@@ -23,12 +23,14 @@ instance via `createDbFromPool`.
 - `src/db/db.ts` resolves its connection from the environment **at import
   time**: `VITEST_TEST_DATABASE_URL` → `DATABASE_URL` → `DB_*` parts.
   The pg Pool connects lazily, so importing never opens a connection.
-- Testing: `test/global-setup.ts` provisions the real test database and
-  publishes `VITEST_TEST_DATABASE_URL` to workers; the singleton therefore
-  binds to the test DB automatically. `useTestDb()` is a lifecycle hook
-  (truncate between tests, destroy the pool after the file) instead of a
-  connection factory. Test files stay serial (`fileParallelism: false`)
-  because all files share one database.
+- Testing: `test/global-setup.ts` provisions and migrates the real test
+  database, then clones it once per vitest worker; a setup file points each
+  worker's `VITEST_TEST_DATABASE_URL` at its own clone before any test file
+  imports the singleton, so it binds to that clone automatically.
+  `useTestDb()` is a lifecycle hook (truncate between tests, destroy the
+  pool after the file) instead of a connection factory. Test files run in
+  parallel; truncates never cross workers because no two workers share a
+  database.
 - `createDbFromPool` remains exported for global-setup's schema reset.
 
 ## Consequences
@@ -42,6 +44,5 @@ instance via `createDbFromPool`.
   real test DB — which is already the convention).
 - **Constraint**: Anything importing a query transitively imports the
   singleton; database env must be present/resolvable in every environment
-  that runs tests or the app. Guarded in practice: tests fail loudly if
-  `VITEST_TEST_DATABASE_URL` is missing (the pool would target localhost
-  defaults and fail to connect).
+  that runs tests or the app. Guarded in practice: a worker fails loudly
+  when it cannot resolve its own database clone.

@@ -9,7 +9,9 @@ import { QUEUE_SCHEMA } from '@queue/index';
 import { runMigrations } from 'graphile-worker';
 import { sql } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
-import { Pool } from 'pg';
+import { Pool, escapeIdentifier } from 'pg';
+import type { TestProject } from 'vitest/node';
+import { TEMPLATE_DB_URL_ENV, workerDatabaseName } from './worker-db';
 
 /**
  * Database resolution order (always the dedicated `chatbot_test`
@@ -22,9 +24,12 @@ import { Pool } from 'pg';
  *   3. Sandbox fallback: the same configured port and credentials, but
  *      reached via this container's default gateway — the route from the
  *      agent container to the host's docker-published database.
+ *
+ * The resolved database is migrated once and then serves as the template
+ * for one clone per worker (`<name>_w1`…`<name>_wN`, same server), so the
+ * credentials need CREATEDB in every mode.
  */
 const TEST_DATABASE_URL_ENV = 'TEST_DATABASE_URL';
-const DB_URL_ENV = 'VITEST_TEST_DATABASE_URL';
 
 const TEST_DB_NAME = 'chatbot_test';
 const FALLBACK_USER = 'postgres';
@@ -155,7 +160,27 @@ function redactUrl(url: string): string {
   return url.replace(/:[^:@/]+@/, ':***@');
 }
 
-export default async function globalSetup(): Promise<void> {
+/**
+ * Recreate `<template>_w1`…`<template>_wN` as copies of the migrated
+ * template. The template must have no open connections while copying.
+ */
+async function cloneWorkerDatabases(templateUrl: string, workers: number): Promise<void> {
+  const url = new URL(templateUrl);
+  const templateName = decodeURIComponent(url.pathname.slice(1));
+  url.pathname = '/postgres';
+  const admin = new Pool({ connectionString: url.toString(), max: 1 });
+  try {
+    for (let poolId = 1; poolId <= workers; poolId++) {
+      const clone = escapeIdentifier(workerDatabaseName(templateName, poolId));
+      await admin.query(`drop database if exists ${clone} with (force)`);
+      await admin.query(`create database ${clone} template ${escapeIdentifier(templateName)}`);
+    }
+  } finally {
+    await admin.end();
+  }
+}
+
+export default async function globalSetup(project: TestProject): Promise<void> {
   let databaseUrl = process.env[TEST_DATABASE_URL_ENV];
   let mode = `explicit ${TEST_DATABASE_URL_ENV}`;
 
@@ -165,8 +190,6 @@ export default async function globalSetup(): Promise<void> {
     mode = resolved.mode;
   }
 
-  // Make the URL available to all test workers (they are spawned after setup).
-  process.env[DB_URL_ENV] = databaseUrl;
   console.log(`[test-db] ${mode}: ${redactUrl(databaseUrl)}`);
 
   // Fresh, deterministic schemas on every run, then run migrations: the
@@ -197,4 +220,11 @@ export default async function globalSetup(): Promise<void> {
   } finally {
     await db.destroy();
   }
+
+  const workers = project.config.maxWorkers;
+  await cloneWorkerDatabases(databaseUrl, workers);
+  console.log(`[test-db] cloned ${workers} worker database(s)`);
+
+  // Workers are spawned after setup and inherit this env.
+  process.env[TEMPLATE_DB_URL_ENV] = databaseUrl;
 }

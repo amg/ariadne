@@ -24,7 +24,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Vars owned by libraries/test-harnesses, not our config surface. */
 const EXEMPT = new Set([
-  'VITEST_TEST_DATABASE_URL', // vitest global-setup publishes, db.ts consumes
+  'VITEST_TEST_DATABASE_URL', // per-worker test setup publishes, db.ts consumes
+  'VITEST_POOL_ID', // vitest sets it per worker (1..maxWorkers)
   'NODE_ENV', // runtime/provisioning-owned (Docker, npm scripts), not app config
   'FORCE_COLOR', // terminal convention (colorette, npm scripts), not app config
   'NO_COLOR', // terminal convention (https://no-color.org), not app config
