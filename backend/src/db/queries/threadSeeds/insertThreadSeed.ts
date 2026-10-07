@@ -15,7 +15,7 @@ export async function insertThreadSeed({
   ...row
 }: InsertThreadSeedProps): Promise<ThreadSeed> {
   return db
-    .insertInto('threadSeeds')
+    .insertInto('memory.threadSeeds')
     .values({ ...row, lines: seedLinesJson(lines) })
     .returningAll()
     .executeTakeFirstOrThrow();

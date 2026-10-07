@@ -26,14 +26,14 @@ export async function sumThreadSpend({
 }: { threadId: string }): Promise<ThreadSpendTotals> {
   const [chat, expansion, embedding] = await Promise.all([
     db
-      .selectFrom('messages as m')
-      .innerJoin('messageUsage as mu', 'mu.messageId', 'm.id')
+      .selectFrom('chat.messages as m')
+      .innerJoin('billing.messageUsage as mu', 'mu.messageId', 'm.id')
       .where('m.threadId', '=', threadId)
       .select(sql<string>`coalesce(sum(mu.cost_usd), 0)::numeric(14,10)`.as('chat'))
       .executeTakeFirst(),
     db
-      .selectFrom('messages as m')
-      .innerJoin('messageSideCosts as ec', 'ec.messageId', 'm.id')
+      .selectFrom('chat.messages as m')
+      .innerJoin('billing.messageSideCosts as ec', 'ec.messageId', 'm.id')
       .where('m.threadId', '=', threadId)
       .select([
         sql<string>`coalesce(sum(ec.cost_usd) filter (where ec.kind = 'rewrite'), 0)::numeric(14,10)`.as(
@@ -48,8 +48,8 @@ export async function sumThreadSpend({
       ])
       .executeTakeFirst(),
     db
-      .selectFrom('messages as m')
-      .innerJoin('messageEmbeddings as me', 'me.messageId', 'm.id')
+      .selectFrom('chat.messages as m')
+      .innerJoin('analysis.messageEmbeddings as me', 'me.messageId', 'm.id')
       .where('m.threadId', '=', threadId)
       .select(sql<string>`coalesce(sum(me.embedding_cost_usd), 0)::numeric(14,10)`.as('embedding'))
       .executeTakeFirst(),

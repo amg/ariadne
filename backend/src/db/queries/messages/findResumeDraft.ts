@@ -18,7 +18,7 @@ export async function findResumeDraft({
   threadId: string;
 }): Promise<ResumeDraft | undefined> {
   const newestUser = await db
-    .selectFrom('messages')
+    .selectFrom('chat.messages')
     .select(['id', 'content', 'abandoned', 'createdAt'])
     .where('threadId', '=', threadId)
     .where('role', '=', 'user')
@@ -29,14 +29,14 @@ export async function findResumeDraft({
   if (!newestUser || !newestUser.abandoned) return undefined;
 
   const handedOver = await db
-    .selectFrom('threadSeeds')
+    .selectFrom('memory.threadSeeds')
     .select('threadId')
     .where('handoverMessageId', '=', newestUser.id)
     .executeTakeFirst();
   if (handedOver) return undefined;
 
   const completedAfter = await db
-    .selectFrom('messages')
+    .selectFrom('chat.messages')
     .select('id')
     .where('threadId', '=', threadId)
     .where('role', '=', 'assistant')

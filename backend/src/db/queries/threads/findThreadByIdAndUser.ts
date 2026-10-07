@@ -16,7 +16,7 @@ export async function findThreadByIdAndUser({
   threadId,
 }: FindThreadByIdAndUserProps): Promise<Thread | undefined> {
   return db
-    .selectFrom('threads')
+    .selectFrom('chat.threads')
     .selectAll()
     .where('id', '=', threadId)
     .where('userId', '=', userId)

@@ -12,7 +12,7 @@ type SaveModelConfigProps = {
  */
 export async function saveModelConfig({ config }: SaveModelConfigProps): Promise<void> {
   await db
-    .insertInto('modelConfigs')
+    .insertInto('billing.modelConfigs')
     .values(config)
     .onConflict((oc) =>
       oc.column('modelId').doUpdateSet({

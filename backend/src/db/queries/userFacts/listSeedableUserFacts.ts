@@ -28,7 +28,7 @@ export async function listSeedableUserFacts({
   limit,
 }: ListSeedableUserFactsProps): Promise<SeedableUserFact[]> {
   let query = db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select(['content', 'category', 'validAt', 'createdAt'])
     .where('userId', '=', userId)
     .where('invalidAt', 'is', null)

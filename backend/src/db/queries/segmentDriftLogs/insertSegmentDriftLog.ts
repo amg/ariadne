@@ -12,7 +12,7 @@ import type { NewSegmentDriftLog, SegmentDriftLog } from '@db/types';
  */
 export async function insertSegmentDriftLog(row: NewSegmentDriftLog): Promise<SegmentDriftLog> {
   const inserted = await db
-    .insertInto('segmentDriftLogs')
+    .insertInto('analysis.segmentDriftLogs')
     .values({
       segmentId: row.segmentId,
       messageId: row.messageId,
@@ -30,7 +30,7 @@ export async function insertSegmentDriftLog(row: NewSegmentDriftLog): Promise<Se
     .executeTakeFirst();
   if (inserted) return inserted;
   const stored = await db
-    .selectFrom('segmentDriftLogs')
+    .selectFrom('analysis.segmentDriftLogs')
     .selectAll()
     .where('messageId', '=', row.messageId)
     .where('modelId', '=', row.modelId)

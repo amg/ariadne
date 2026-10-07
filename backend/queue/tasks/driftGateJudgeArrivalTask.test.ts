@@ -60,19 +60,19 @@ async function threadWithShift() {
 async function chainRowCounts(threadId: string) {
   const [logs, segments, embeddings] = await Promise.all([
     db
-      .selectFrom('segmentDriftLogs as l')
-      .innerJoin('messages as m', 'm.id', 'l.messageId')
+      .selectFrom('analysis.segmentDriftLogs as l')
+      .innerJoin('chat.messages as m', 'm.id', 'l.messageId')
       .where('m.threadId', '=', threadId)
       .select((eb) => eb.fn.countAll<string>().as('n'))
       .executeTakeFirstOrThrow(),
     db
-      .selectFrom('threadSegments')
+      .selectFrom('analysis.threadSegments')
       .where('threadId', '=', threadId)
       .select((eb) => eb.fn.countAll<string>().as('n'))
       .executeTakeFirstOrThrow(),
     db
-      .selectFrom('messageEmbeddings as e')
-      .innerJoin('messages as m', 'm.id', 'e.messageId')
+      .selectFrom('analysis.messageEmbeddings as e')
+      .innerJoin('chat.messages as m', 'm.id', 'e.messageId')
       .where('m.threadId', '=', threadId)
       .select((eb) => eb.fn.countAll<string>().as('n'))
       .executeTakeFirstOrThrow(),

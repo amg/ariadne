@@ -13,7 +13,7 @@ import { isValidUuid } from '@services/validation';
  *
  * Needs the standard backend DB env resolution (`DATABASE_URL`/`DB_*`)
  * and a configured provider (`MOCK_AI_BASE_URL` or `DEEPINFRA_API_KEY`).
- * Writes `message_embeddings` rows on first use; chat data is never
+ * Writes `analysis.message_embeddings` rows on first use; chat data is never
  * mutated.
  */
 

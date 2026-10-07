@@ -9,7 +9,7 @@ import type { NewThreadSegment, ThreadSegment } from '@db/types';
  */
 export async function insertThreadSegment(row: NewThreadSegment): Promise<ThreadSegment> {
   const inserted = await db
-    .insertInto('threadSegments')
+    .insertInto('analysis.threadSegments')
     .values({
       threadId: row.threadId,
       startMessageId: row.startMessageId,

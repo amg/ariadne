@@ -49,7 +49,7 @@ import type { ResultError } from '../src/types/result';
  * Artifacts land under the repo-root `build/analysis/` directory
  * (generated, gitignored). Needs the standard backend DB env resolution
  * (`DATABASE_URL`/`DB_*`) and a configured provider (`MOCK_AI_BASE_URL`
- * or `DEEPINFRA_API_KEY`). Writes `message_embeddings` rows on first use;
+ * or `DEEPINFRA_API_KEY`). Writes `analysis.message_embeddings` rows on first use;
  * chat data is never mutated; gate-replay Prospective blocks embed
  * transiently and are never persisted. A failed run leaves
  * persisted Turn rows intact, so a re-run resumes from the first

@@ -27,22 +27,24 @@ export async function addSideCost(row: AddSideCostRow): Promise<void> {
   }
 
   await db
-    .insertInto('messageSideCosts')
+    .insertInto('billing.messageSideCosts')
     .values(row)
     .onConflict((oc) =>
       oc.columns(['messageId', 'kind']).doUpdateSet((eb) => {
         // coalesce(a + b, a, b): the sum when both are known, else
         // whichever is known, else null.
         const summed = (
-          stored: 'messageSideCosts.promptTokens' | 'messageSideCosts.completionTokens',
+          stored:
+            | 'billing.messageSideCosts.promptTokens'
+            | 'billing.messageSideCosts.completionTokens',
           added: 'excluded.promptTokens' | 'excluded.completionTokens',
         ) => eb.fn.coalesce(eb(stored, '+', eb.ref(added)), eb.ref(stored), eb.ref(added));
         return {
           model: eb.ref('excluded.model'),
-          costUsd: eb('messageSideCosts.costUsd', '+', eb.ref('excluded.costUsd')),
-          promptTokens: summed('messageSideCosts.promptTokens', 'excluded.promptTokens'),
+          costUsd: eb('billing.messageSideCosts.costUsd', '+', eb.ref('excluded.costUsd')),
+          promptTokens: summed('billing.messageSideCosts.promptTokens', 'excluded.promptTokens'),
           completionTokens: summed(
-            'messageSideCosts.completionTokens',
+            'billing.messageSideCosts.completionTokens',
             'excluded.completionTokens',
           ),
         };

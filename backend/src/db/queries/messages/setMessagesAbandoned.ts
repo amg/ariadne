@@ -20,5 +20,9 @@ export async function setMessagesAbandoned(
   executor: DbExecutor = db,
 ): Promise<void> {
   if (messageIds.length === 0) return;
-  await executor.updateTable('messages').set({ abandoned }).where('id', 'in', messageIds).execute();
+  await executor
+    .updateTable('chat.messages')
+    .set({ abandoned })
+    .where('id', 'in', messageIds)
+    .execute();
 }

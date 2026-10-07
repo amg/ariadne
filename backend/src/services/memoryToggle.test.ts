@@ -74,7 +74,7 @@ async function pausedThread() {
 
 async function factCountOf(userId: string): Promise<number> {
   const facts = await db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select('id')
     .where('userId', '=', userId)
     .execute();
@@ -103,7 +103,7 @@ describe('a deployment without Memory', () => {
 
     if (result.type !== 'success') throw new Error(`handover failed: ${result.code}`);
     const seed = await db
-      .selectFrom('threadSeeds')
+      .selectFrom('memory.threadSeeds')
       .select(['lines', 'factCount', 'handoverMessageId'])
       .where('threadId', '=', result.data.thread.id)
       .executeTakeFirstOrThrow();
@@ -119,7 +119,7 @@ describe('a deployment without Memory', () => {
     const thread = await createThread({ userId, memory: memoryOff });
 
     const seeds = await db
-      .selectFrom('threadSeeds')
+      .selectFrom('memory.threadSeeds')
       .select('threadId')
       .where('threadId', '=', thread.id)
       .execute();

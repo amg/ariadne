@@ -121,7 +121,7 @@ describe('listAllUserFacts', () => {
 
     // Manually set suppressed since insertUserFact doesn't support it
     await db
-      .updateTable('userFacts')
+      .updateTable('memory.userFacts')
       .set({ suppressed: true })
       .where('id', '=', fact2.id)
       .execute();
@@ -138,7 +138,7 @@ describe('listAllUserFacts', () => {
     const fact = await createFact({ userId, content: 'Valid fact' });
     const invalidFact = await createFact({ userId, content: 'Invalidated fact' });
     await db
-      .updateTable('userFacts')
+      .updateTable('memory.userFacts')
       .set({ invalidAt: new Date() })
       .where('id', '=', invalidFact.id)
       .execute();
@@ -216,7 +216,7 @@ describe('updateUserFact - replacement', () => {
 
     // Old fact should be invalidated
     const oldFactRow = await db
-      .selectFrom('userFacts')
+      .selectFrom('memory.userFacts')
       .select(['invalidAt'])
       .where('id', '=', oldFact.id)
       .executeTakeFirst();
@@ -248,7 +248,7 @@ describe('findCurrentUserFactOrNull', () => {
     expect(await findCurrentUserFactOrNull({ factId: fact.id, userId: otherUserId })).toBeNull();
 
     await db
-      .updateTable('userFacts')
+      .updateTable('memory.userFacts')
       .set({ invalidAt: new Date() })
       .where('id', '=', fact.id)
       .execute();

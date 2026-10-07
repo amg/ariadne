@@ -10,7 +10,7 @@ export async function findModelConfigByModelId({
   modelId,
 }: FindModelConfigByModelIdProps): Promise<ModelConfig | undefined> {
   return db
-    .selectFrom('modelConfigs')
+    .selectFrom('billing.modelConfigs')
     .selectAll()
     .where('modelId', '=', modelId)
     .executeTakeFirst();

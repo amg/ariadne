@@ -43,7 +43,7 @@ export async function updateUserFact(props: UpdateUserFactProps): Promise<UserFa
     const { factId, userId, replacement } = props;
     return db.transaction().execute(async (trx) => {
       await trx
-        .updateTable('userFacts')
+        .updateTable('memory.userFacts')
         .set({ invalidAt: sql`now()` })
         .where('id', '=', factId)
         .where('userId', '=', userId)
@@ -52,7 +52,7 @@ export async function updateUserFact(props: UpdateUserFactProps): Promise<UserFa
         .executeTakeFirstOrThrow();
 
       return trx
-        .insertInto('userFacts')
+        .insertInto('memory.userFacts')
         .values({
           ...replacement,
           userId,
@@ -64,7 +64,7 @@ export async function updateUserFact(props: UpdateUserFactProps): Promise<UserFa
   }
   const { factId, userId, suppressed } = props;
   return db
-    .updateTable('userFacts')
+    .updateTable('memory.userFacts')
     .set({ suppressed })
     .where('id', '=', factId)
     .where('userId', '=', userId)

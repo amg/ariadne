@@ -12,7 +12,7 @@ type DeleteThreadProps = {
  */
 export async function deleteThread({ userId, threadId }: DeleteThreadProps): Promise<boolean> {
   const result = await db
-    .deleteFrom('threads')
+    .deleteFrom('chat.threads')
     .where('id', '=', threadId)
     .where('userId', '=', userId)
     .executeTakeFirst();

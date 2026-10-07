@@ -14,7 +14,7 @@ import { toDecimalLiteral, toMessageEmbedding, toVectorText } from './embeddingM
  */
 export async function upsertArrivalEmbedding(row: NewArrivalEmbedding): Promise<MessageEmbedding> {
   const result = await db
-    .insertInto('messageEmbeddings')
+    .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: row.messageId,
       embedding: sql`${toVectorText(row.embedding)}::vector`,

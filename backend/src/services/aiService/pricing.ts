@@ -14,7 +14,7 @@ function round10(value: number): number {
 
 /**
  * Embedding-model pricing fallback: $0.01 per 1M prompt tokens. Used
- * only when the DB has no `model_configs` row pricing
+ * only when the DB has no `billing.model_configs` row pricing
  * `EMBEDDING_MODEL_ID`: the central fallback is a chat-tier price and
  * does not extend to embeddings.
  */
@@ -28,7 +28,7 @@ const callPricingCache = new Map<string, UsagePricing>();
 let embeddingPricePerMillionUsd: number | null = null;
 
 /**
- * Per-call pricing from the shared seam: the DB `model_configs` row for
+ * Per-call pricing from the shared seam: the DB `billing.model_configs` row for
  * the actual model being called, falling through to the central fallback
  * pricing for models the billing table doesn't know.
  */

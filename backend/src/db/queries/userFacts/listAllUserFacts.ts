@@ -11,7 +11,7 @@ type ListAllUserFactsProps = {
  */
 export async function listAllUserFacts({ userId }: ListAllUserFactsProps): Promise<UserFact[]> {
   return db
-    .selectFrom('userFacts')
+    .selectFrom('memory.userFacts')
     .select([
       'id',
       'userId',

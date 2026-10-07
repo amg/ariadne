@@ -33,7 +33,7 @@ export async function moveArrivalToFreshThreadOrNull({
     // The conditional update is the claim: the row lock makes a concurrent
     // second claim re-check `abandoned` and miss.
     const claimed = await trx
-      .updateTable('messages')
+      .updateTable('chat.messages')
       .set({ abandoned: true })
       .where('id', '=', messageId)
       .where('threadId', '=', fromThreadId)
@@ -43,10 +43,10 @@ export async function moveArrivalToFreshThreadOrNull({
         eb.not(
           eb.exists(
             eb
-              .selectFrom('messages as later')
+              .selectFrom('chat.messages as later')
               .select('later.id')
-              .whereRef('later.threadId', '=', 'messages.threadId')
-              .whereRef('later.createdAt', '>', 'messages.createdAt')
+              .whereRef('later.threadId', '=', 'chat.messages.threadId')
+              .whereRef('later.createdAt', '>', 'chat.messages.createdAt')
               .where('later.abandoned', '=', false),
           ),
         ),
@@ -56,12 +56,12 @@ export async function moveArrivalToFreshThreadOrNull({
     if (!claimed) return null;
 
     const thread = await trx
-      .insertInto('threads')
+      .insertInto('chat.threads')
       .values({ userId })
       .returningAll()
       .executeTakeFirstOrThrow();
     await trx
-      .insertInto('threadSeeds')
+      .insertInto('memory.threadSeeds')
       .values({
         threadId: thread.id,
         lines: seedLinesJson(seed.lines),
@@ -70,7 +70,7 @@ export async function moveArrivalToFreshThreadOrNull({
       })
       .execute();
     const message = await trx
-      .insertInto('messages')
+      .insertInto('chat.messages')
       .values({ threadId: thread.id, role: 'user', content: claimed.content })
       .returningAll()
       .executeTakeFirstOrThrow();

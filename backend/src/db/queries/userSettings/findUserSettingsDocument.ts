@@ -5,7 +5,7 @@ export async function findUserSettingsDocumentOrNull({
   userId,
 }: { userId: string }): Promise<unknown | null> {
   const row = await db
-    .selectFrom('userSettings')
+    .selectFrom('memory.userSettings')
     .select('settings')
     .where('userId', '=', userId)
     .executeTakeFirst();

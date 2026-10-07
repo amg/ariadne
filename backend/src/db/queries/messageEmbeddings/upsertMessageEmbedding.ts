@@ -12,7 +12,7 @@ import { toMessageEmbedding, toVectorText } from './embeddingMapping';
  */
 export async function upsertMessageEmbedding(row: NewMessageEmbedding): Promise<MessageEmbedding> {
   const result = await db
-    .insertInto('messageEmbeddings')
+    .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: row.messageId,
       embedding: sql`${toVectorText(row.embedding)}::vector`,

@@ -26,7 +26,7 @@ async function seedConfig(lastUpdated: Date): Promise<void> {
     supportsCaching: true,
     lastUpdated,
   };
-  await db.insertInto('modelConfigs').values(row).execute();
+  await db.insertInto('billing.modelConfigs').values(row).execute();
 }
 
 describe('modelConfigService', () => {

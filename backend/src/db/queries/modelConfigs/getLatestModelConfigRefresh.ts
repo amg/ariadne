@@ -7,7 +7,7 @@ import { db } from '@db/db';
  */
 export async function getLatestModelConfigRefresh(): Promise<Date | undefined> {
   const row = await db
-    .selectFrom('modelConfigs')
+    .selectFrom('billing.modelConfigs')
     .select((eb) => eb.fn.max<Date>('lastUpdated').as('latest'))
     .executeTakeFirst();
   return row?.latest ?? undefined;
