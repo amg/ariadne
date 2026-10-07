@@ -1,6 +1,7 @@
 import type { Message, MessageDriftVerdict } from '@/services/api';
 import type { UIMessage } from 'ai';
-import type { DisplayRow } from '../ChatView';
+import type { DisplayRow, UnansweredArrival } from '../ChatView';
+import type { GateWaitOutcome } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 
 /** Join the text parts of a useChat message into one content string. */
@@ -286,6 +287,43 @@ export function pausedArrivalIdOrNull(
   const last = display[display.length - 1];
   if (!last || last.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
   return settledRows.some((row) => row.id === last.id) ? last.id : null;
+}
+
+type UnansweredArrivalFacts = {
+  display: DisplayRow[];
+  settledRows: Message[];
+  status: 'submitted' | 'streaming' | 'ready' | 'error';
+  /** How the thread's last chat request ended, when it ended in a gate wait. */
+  gateWait: GateWaitOutcome | null;
+  /** Whether the Drift gate judges arrivals; with it off every arrival is clear. */
+  arrivalsJudged: boolean;
+};
+
+/**
+ * Where the thread's unanswered arrival stands: the last visible row is a
+ * user message with no reply, no exchange is running, and the gate did not
+ * pause it. Derived from the rows, so it survives a reload, a thread
+ * switch, or a judgment landing by push. An optimistic row counts only
+ * once its request ended in a gate wait; any other outcome either settles
+ * it or rolls it back. Null when no arrival waits on a retry.
+ */
+export function unansweredArrivalOrNull({
+  display,
+  settledRows,
+  status,
+  gateWait,
+  arrivalsJudged,
+}: UnansweredArrivalFacts): UnansweredArrival | null {
+  if (status === 'submitted' || status === 'streaming') return null;
+  const last = display[display.length - 1];
+  if (!last || last.message.role !== 'user') return null;
+  if (!gateWait && !settledRows.some((row) => row.id === last.id)) return null;
+
+  const verdict = last.verdict?.verdict;
+  if (verdict === 'fire') return null;
+  if (verdict === 'pass' || verdict === 'muted' || !arrivalsJudged) return 'cleared';
+  if (gateWait === 'gate_failed' || last.message.gateFailed) return 'failed';
+  return 'pending';
 }
 
 /**

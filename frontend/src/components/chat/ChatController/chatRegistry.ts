@@ -21,11 +21,6 @@ export type ThreadChatListener = {
   onSettle?: () => void;
   /** A submit failed before or during its exchange; the draft text never landed. */
   onFailedSubmit?: (draft: string) => void;
-  /**
-   * A submit landed as a gate wait: the arrival is stored, its judgment
-   * still owed. The message stays on screen; a retry waits on it again.
-   */
-  onGateWait?: (outcome: GateWaitOutcome) => void;
 };
 
 /**
@@ -65,10 +60,11 @@ export function gateWaitOutcomeOf(error: unknown): GateWaitOutcome | null {
 /**
  * Friendly text for a failed chat request: the server's curated message
  * when the body carries one, else whatever the failure said. Null when
- * there was no failure.
+ * there was no failure, or when it was a gate wait, which is not an
+ * error and has its own notice.
  */
 export function describeChatError(error: unknown): string | null {
-  if (!error) return null;
+  if (!error || gateWaitOutcomeOf(error)) return null;
   const body = chatErrorBody(error);
   if (body && typeof body.error === 'string' && body.error.length > 0) return body.error;
   if (error instanceof Error && error.message) return error.message;
@@ -115,13 +111,12 @@ function rollBackFailedSubmit(threadId: string): void {
 /**
  * A failure's handling, keyed by the kind of failure. A gate wait leaves
  * the optimistic message and its draft alone — the arrival is stored and
- * owed an answer, not rejected. Any other failure rolls the submit back.
+ * owed an answer, not rejected; the outcome stays readable on the chat's
+ * error until the next request. Any other failure rolls the submit back.
  */
 function handleFailedRequest(threadId: string, error: unknown): void {
-  const gateWait = gateWaitOutcomeOf(error);
-  if (gateWait) {
+  if (gateWaitOutcomeOf(error)) {
     pendingSubmits.delete(threadId);
-    notify(threadId, (listener) => listener.onGateWait?.(gateWait));
     return;
   }
   rollBackFailedSubmit(threadId);

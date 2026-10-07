@@ -7,8 +7,9 @@ import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { inTransaction } from '@queries/transaction/inTransaction';
+import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { type Result, err, ok } from '../types/result';
-import type { ArrivalJudging } from './aiService/arrivalGate';
+import { type ArrivalJudging, judgmentFailed } from './aiService/arrivalGate';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
 import { validateMessageContent } from './validation';
 
@@ -30,12 +31,18 @@ export type MessageWithUsage = Message & {
   /** Inference telemetry for assistant messages; null until available. */
   usage: UsagePayload | null;
   driftVerdict: DriftVerdictPayload;
+  /**
+   * True on the Thread's Unanswered arrival when the Drift gate could not
+   * judge it and gave up for good; false everywhere else.
+   */
+  gateFailed: boolean;
 };
 
 /** Flattens the join aliases from `listMessagesByThread` into a nested row. */
 export function messageRowToMessageWithUsage(
   row: MessageWithUsageRow,
   driftVerdict: DriftVerdictPayload = null,
+  gateFailed = false,
 ): MessageWithUsage {
   const {
     usageModel: model,
@@ -54,7 +61,7 @@ export function messageRowToMessageWithUsage(
   } = row;
 
   if (model === null || costUsd === null || finishReason === null) {
-    return { ...message, usage: null, driftVerdict };
+    return { ...message, usage: null, driftVerdict, gateFailed };
   }
   return {
     ...message,
@@ -75,6 +82,7 @@ export function messageRowToMessageWithUsage(
       estimated: estimated === true,
     },
     driftVerdict,
+    gateFailed,
   };
 }
 
@@ -172,6 +180,21 @@ export async function editMessage({
   );
 }
 
+/**
+ * The Thread's Unanswered arrival whose judgment gave up for good, or null.
+ * Only the newest live row can be one, and a stored verdict means it was
+ * judged after all.
+ */
+async function gateFailedArrivalIdOrNull(
+  rows: MessageWithUsageRow[],
+  verdictByMessageId: ReadonlyMap<string, unknown>,
+): Promise<string | null> {
+  const newestLive = rows.filter((row) => !row.abandoned).at(-1);
+  if (newestLive?.role !== 'user' || verdictByMessageId.has(newestLive.id)) return null;
+  const job = await findDriftGateJudgeArrivalJobOrNull(newestLive.id);
+  return judgmentFailed(job) ? newestLive.id : null;
+}
+
 type GetMessagesProps = {
   userId: string;
   threadId: string;
@@ -201,10 +224,17 @@ export async function getMessages({
     ]),
   );
 
+  // With the gate switched off nothing is judged, so nothing can fail.
+  const gateFailedId =
+    env.THREAD_ANALYSIS_MODE === 'off'
+      ? null
+      : await gateFailedArrivalIdOrNull(rows, verdictByMessageId);
+
   const messages = rows.map((row) =>
     messageRowToMessageWithUsage(
       row,
       row.role === 'user' ? (verdictByMessageId.get(row.id) ?? null) : null,
+      row.id === gateFailedId,
     ),
   );
 
@@ -218,6 +248,7 @@ export async function getMessages({
     createdAt: thread.createdAt,
     usage: null,
     driftVerdict: null,
+    gateFailed: false,
   };
 
   if (messages.length === 0 || messages[0]?.role !== 'system') {

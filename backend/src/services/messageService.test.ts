@@ -6,9 +6,13 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
-import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
+import {
+  DRIFT_GATE_JUDGE_ARRIVAL,
+  enqueueDriftGateJudgeArrival,
+} from '@queue/tasks/driftGateJudgeArrivalTask';
 import { SYSTEM_PROMPT } from '@services/aiService/config';
 import { editMessage, getMessages } from '@services/messageService';
+import { addDeadJob } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 
 const judging = { enqueueDriftGateJudgeArrival };
@@ -79,6 +83,38 @@ describe('messageService', () => {
         latencyMs: 42,
         estimated: false,
       });
+    });
+
+    it('flags the unanswered arrival whose judgment gave up for good, and no other row', async () => {
+      const { userId, threadId } = await createRandomThread();
+      await insertMessage({ threadId, role: 'user', content: 'answered' });
+      await insertMessage({ threadId, role: 'assistant', content: 'reply' });
+      const arrival = await insertMessage({ threadId, role: 'user', content: 'died on the gate' });
+      await addDeadJob({
+        task: DRIFT_GATE_JUDGE_ARRIVAL,
+        key: arrival.id,
+        payload: { userId, threadId, messageId: arrival.id },
+        errorClass: 'fatal',
+      });
+
+      const messages = await getMessages({ userId, threadId });
+
+      expect(messages?.map((m) => m.gateFailed)).toEqual([false, false, false, true]);
+    });
+
+    it('leaves an arrival unflagged while its judgment can still be retried', async () => {
+      const { userId, threadId } = await createRandomThread();
+      const arrival = await insertMessage({ threadId, role: 'user', content: 'gave up for now' });
+      await addDeadJob({
+        task: DRIFT_GATE_JUDGE_ARRIVAL,
+        key: arrival.id,
+        payload: { userId, threadId, messageId: arrival.id },
+        errorClass: 'recoverable',
+      });
+
+      const messages = await getMessages({ userId, threadId });
+
+      expect(messages?.some((m) => m.gateFailed)).toBe(false);
     });
   });
 

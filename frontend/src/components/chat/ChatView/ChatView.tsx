@@ -7,7 +7,13 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
 import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
-import type { ChatViewStatus, DisplayRow, HandoverProgress, RestoredDraft } from './types';
+import type {
+  ChatViewStatus,
+  DisplayRow,
+  HandoverProgress,
+  RestoredDraft,
+  UnansweredArrival,
+} from './types';
 
 const FOLLOW_BOTTOM_PX = 80;
 
@@ -37,11 +43,10 @@ type ChatViewProps = {
   status: ChatViewStatus;
   errorMessage?: string | null;
   /**
-   * A submit that settled as a gate wait: the arrival is stored, and the
-   * notice offers the retry. `pending` while the judgment runs, `cleared`
-   * once it passes and the reply is owed, `failed` once it gave up.
+   * The thread's last message is an arrival with no reply; the notice
+   * offers its retry. Null when no arrival waits on one.
    */
-  gateWait?: 'pending' | 'cleared' | 'failed' | null;
+  unansweredArrival?: UnansweredArrival | null;
   /** A failed submit's draft; restoring puts it back in the input. */
   restoredDraft?: RestoredDraft | null;
   onSend: (content: string) => void;
@@ -61,24 +66,24 @@ type ChatViewProps = {
   onStartNewChat: () => void;
 };
 
-const GATE_WAIT_COPY: Record<'pending' | 'cleared' | 'failed', string> = {
+const UNANSWERED_ARRIVAL_COPY: Record<UnansweredArrival, string> = {
   pending: 'This message is still being checked.',
   cleared: 'This message is checked and ready for a reply.',
   failed: 'This message could not be checked.',
 };
 
 /**
- * The calm line over the composer while a gate wait owes its retry: the
+ * The calm line over the composer while an arrival owes its reply: the
  * message stays, and a retry waits on the same judgment again. It sits
  * where an error line sits, but never shouts.
  */
-function GateWaitNotice({
+function UnansweredArrivalNotice({
   kind,
   onRetry,
-}: { kind: 'pending' | 'cleared' | 'failed'; onRetry: () => void }) {
+}: { kind: UnansweredArrival; onRetry: () => void }) {
   return (
     <p className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-      {GATE_WAIT_COPY[kind]}
+      {UNANSWERED_ARRIVAL_COPY[kind]}
       <button
         type="button"
         onClick={onRetry}
@@ -94,7 +99,7 @@ export default function ChatView({
   rows,
   status,
   errorMessage,
-  gateWait,
+  unansweredArrival,
   restoredDraft,
   onSend,
   onStop,
@@ -284,8 +289,8 @@ export default function ChatView({
         </button>
       ) : null}
       <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
-        {gateWait ? (
-          <GateWaitNotice kind={gateWait} onRetry={onRetryLast} />
+        {unansweredArrival ? (
+          <UnansweredArrivalNotice kind={unansweredArrival} onRetry={onRetryLast} />
         ) : errorMessage ? (
           <p className="mb-2 text-sm text-red-400">{errorMessage}</p>
         ) : null}

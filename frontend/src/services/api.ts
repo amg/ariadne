@@ -145,6 +145,11 @@ export interface Message {
   /** Live-gate verdict on user arrivals; null elsewhere and when off. */
   driftVerdict?: MessageDriftVerdict | null;
   /**
+   * True on the Thread's Unanswered arrival when the Drift gate could not
+   * judge it and gave up for good.
+   */
+  gateFailed?: boolean;
+  /**
    * Rows of a forked-away or failed exchange: kept for usage tracking but
    * hidden from the chat stream and live analysis.
    */

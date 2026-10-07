@@ -143,6 +143,7 @@ export default function ChatPage() {
           threadId={threadId}
           rows={rows}
           memory={memory}
+          arrivalsJudged={analysisMode !== 'off'}
           onSettle={handleSettle}
           onHandedOver={openThread}
         />

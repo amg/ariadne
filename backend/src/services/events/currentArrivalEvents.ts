@@ -1,7 +1,7 @@
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
 import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
-import { storedGateOutcomeOrNull } from '@services/aiService/arrivalGate';
+import { judgmentFailed, storedGateOutcomeOrNull } from '@services/aiService/arrivalGate';
 import type { ServerEvent } from './serverEvent';
 
 /**
@@ -49,8 +49,7 @@ export async function currentArrivalEvents(userId: string): Promise<ServerEvent[
       continue;
     }
 
-    const job = await findDriftGateJudgeArrivalJobOrNull(messageId);
-    if (job?.state === 'dead' && job.errorClass === 'fatal') {
+    if (judgmentFailed(await findDriftGateJudgeArrivalJobOrNull(messageId))) {
       events.push({ kind: 'gate-failed', userId, threadId: thread.id, messageId });
     }
   }

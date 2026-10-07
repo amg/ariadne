@@ -40,6 +40,14 @@ export type ArrivalGateOutcome =
   | { kind: 'failed' }
   | { kind: 'pending' };
 
+/**
+ * Whether an arrival's queued judgment gave up for good: it failed fatally
+ * and waits for the operator to re-queue it.
+ */
+export function judgmentFailed(job: QueuedJob | null): boolean {
+  return job?.state === 'dead' && job.errorClass === 'fatal';
+}
+
 type GateEvent = Extract<ServerEvent, { kind: 'verdict-ok' | 'verdict-paused' | 'gate-failed' }>;
 
 function isGateEventFor(event: ServerEvent, messageId: string): event is GateEvent {
@@ -161,7 +169,7 @@ export async function awaitArrivalGate({
     if (stored) return stored;
 
     const job = await judging.findDriftGateJudgeArrivalJobOrNull(arrival.messageId);
-    if (job?.state === 'dead' && job.errorClass === 'fatal') return { kind: 'failed' };
+    if (judgmentFailed(job)) return { kind: 'failed' };
     if (job === null || job.state === 'dead') await judging.enqueueDriftGateJudgeArrival(arrival);
 
     return (await listener.next(env.GATE_WAIT_MS, signal)) ?? { kind: 'pending' };
