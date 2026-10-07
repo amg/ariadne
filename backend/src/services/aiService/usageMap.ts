@@ -1,6 +1,6 @@
 import type { MessageFinishReason, NewMessageUsage } from '@db/types';
 import type { LanguageModelUsage, ModelMessage } from 'ai';
-import { encodingForModel } from 'js-tiktoken';
+import { type Tiktoken, encodingForModel } from 'js-tiktoken';
 import { getModelConfig } from '../modelConfigService';
 import { computeCostUsd } from './cost';
 
@@ -15,6 +15,9 @@ export function hasUsageReport(usage: LanguageModelUsage | undefined): usage is 
   );
 }
 
+/** Built on first use: building an encoder loads the whole vocabulary (~130 ms). */
+let encoder: Tiktoken | null = null;
+
 /**
  * Counts tokens in a text with tiktoken (cl100k_base — a reasonable
  * stand-in for Qwen, Llama, and other modern models). No tokenizer
@@ -23,7 +26,7 @@ export function hasUsageReport(usage: LanguageModelUsage | undefined): usage is 
 export function countTextTokens(text: string): number {
   if (text === '') return 0;
   try {
-    const encoder = encodingForModel('gpt-4'); // cl100k_base encoding
+    encoder ??= encodingForModel('gpt-4'); // cl100k_base encoding
     return encoder.encode(text).length;
   } catch (error) {
     console.warn('[usageMap] Failed to count text tokens:', error);
