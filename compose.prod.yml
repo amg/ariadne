@@ -33,6 +33,7 @@ services:
     # No published ports - backend accesses it internally
     environment:
       POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}"
+      POSTGRESQL_TABLE_SCHEMA: auth
       API_KEYS: ${SUPERTOKENS_API_KEY}
     networks:
       - chat-network-prod
