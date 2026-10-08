@@ -1,6 +1,6 @@
 import type { UserFact } from '@db/types';
 import { findCurrentUserFactOrNull } from '@queries/userFacts/findCurrentUserFact';
-import { updateUserFact } from '@queries/userFacts/updateUserFact';
+import { replaceCurrentUserFactOrNull } from '@queries/userFacts/replaceCurrentUserFactOrNull';
 import { EMBEDDING_MODEL_ID, classifyFact, embedText } from '@services/aiService';
 import { type Result, err, ok } from '../../types/result';
 
@@ -15,7 +15,8 @@ type EditFactContentProps = {
  * that sentence alone: category, entity columns, and the date it states
  * (none stated means no date). Suppression and the source Turn carry
  * over. The old row is invalidated, never overwritten. Fails with
- * `fact_not_found` for a missing or superseded Fact, and leaves the Fact
+ * `fact_not_found` for a missing or superseded Fact, including one
+ * superseded while the edit was being filed, and leaves the Fact
  * untouched when classification or embedding fails.
  */
 export async function editFactContent({
@@ -37,7 +38,7 @@ export async function editFactContent({
   const embedded = await embedText(content);
   if (embedded.type === 'error') return embedded;
 
-  const replacement = await updateUserFact({
+  const replacement = await replaceCurrentUserFactOrNull({
     factId,
     userId,
     replacement: {
@@ -49,5 +50,6 @@ export async function editFactContent({
       suppressed: current.suppressed,
     },
   });
+  if (replacement === null) return err('fact_not_found', 'Fact not found');
   return ok(replacement);
 }

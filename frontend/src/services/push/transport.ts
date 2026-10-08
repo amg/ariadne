@@ -9,7 +9,9 @@ export interface PushTransport {
   /**
    * Opens the connection and hands every received event to `onEvent`.
    * Returns a disposer that closes the connection; the transport
-   * reconnects on its own until then.
+   * reconnects on its own until then, or until the session has ended.
+   * `onReconnected` fires each time the connection comes back after a
+   * drop: events sent during the gap are lost, not replayed.
    */
-  open(onEvent: (event: ServerEvent) => void): () => void;
+  open(onEvent: (event: ServerEvent) => void, onReconnected: () => void): () => void;
 }

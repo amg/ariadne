@@ -6,9 +6,17 @@ import { db } from '@db/db';
  */
 export type ThreadLockKind = 'live-chain' | 'memory-capture';
 
+/** How long a waiter sleeps between attempts, holding no connection. */
+const RETRY_INTERVAL_MS = 25;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type Attempt<T> = { acquired: false } | { acquired: true; value: T };
+
 /**
  * Runs the work while holding the Thread's lock of the given kind, across
- * every process sharing the database. Later callers wait their turn. The
+ * every process sharing the database. Later callers wait their turn, in no
+ * guaranteed order, and hold no database connection while they wait. The
  * lock is released when the work settles, failed or not, and with the
  * connection if the process dies. Not re-entrant: work holding a lock must
  * not ask for the same one again.
@@ -18,24 +26,31 @@ export async function withThreadLock<T>(
   work: () => Promise<T>,
 ): Promise<T> {
   const name = `${lock.kind}:${lock.threadId}`;
-  return db.connection().execute(async (connection) => {
-    await connection
-      .selectNoFrom((eb) =>
-        eb
-          .fn('pg_advisory_lock', [eb.fn('hashtextextended', [eb.val(name), eb.lit(0)])])
-          .as('locked'),
-      )
-      .execute();
-    try {
-      return await work();
-    } finally {
-      await connection
+  for (;;) {
+    const attempt = await db.connection().execute(async (connection): Promise<Attempt<T>> => {
+      const { locked } = await connection
         .selectNoFrom((eb) =>
           eb
-            .fn('pg_advisory_unlock', [eb.fn('hashtextextended', [eb.val(name), eb.lit(0)])])
-            .as('unlocked'),
+            .fn<boolean>('pg_try_advisory_lock', [
+              eb.fn('hashtextextended', [eb.val(name), eb.lit(0)]),
+            ])
+            .as('locked'),
         )
-        .execute();
-    }
-  });
+        .executeTakeFirstOrThrow();
+      if (!locked) return { acquired: false };
+      try {
+        return { acquired: true, value: await work() };
+      } finally {
+        await connection
+          .selectNoFrom((eb) =>
+            eb
+              .fn('pg_advisory_unlock', [eb.fn('hashtextextended', [eb.val(name), eb.lit(0)])])
+              .as('unlocked'),
+          )
+          .execute();
+      }
+    });
+    if (attempt.acquired) return attempt.value;
+    await sleep(RETRY_INTERVAL_MS);
+  }
 }

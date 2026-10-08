@@ -32,12 +32,6 @@ type RunLiveGateProps = {
    * process every arrival in the thread (backfill / analysis-view fill).
    */
   upToMessageId?: string;
-  /**
-   * Maximum number of arrivals to process in one backfill pass.
-   * Absent = no limit (process all). Used by the analysis route to
-   * bound backfill to 20 arrivals per request.
-   */
-  limit?: number;
 };
 
 /** The outcome the lane reports before any arrival transformed. */
@@ -79,14 +73,10 @@ export async function runLiveGate({
  * step failure (`provider_not_configured`, `embed_failed`,
  * `arrival_signal_missing`, `thread_analysis_failed`) which the chat
  * route surfaces as a failed exchange.
- *
- * Bounded backfill: when `limit` is set, processes at most that many
- * arrivals per pass — leftovers catch up on the next read.
  */
 async function transformArrivals({
   threadId,
   upToMessageId,
-  limit,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
   // Fresh read at pass start: the lane may run after the store has
   // advanced between the caller's request and its turn under the lock.
@@ -101,14 +91,6 @@ async function transformArrivals({
     const index = arrivals.findIndex((turn) => turn.userMessage.id === upToMessageId);
     if (index < 0) return err('thread_not_found');
     endIndex = index + 1;
-  }
-
-  // Apply backfill limit when set (analysis route).
-  if (limit !== undefined && limit > 0) {
-    // Count how many arrivals still need processing (not yet transformed).
-    const processedCount = 0;
-    const limitedEndIndex = Math.min(endIndex, limit);
-    endIndex = limitedEndIndex;
   }
 
   let outcome: LiveArrivalOutcome = EMPTY_OUTCOME;

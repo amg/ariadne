@@ -57,6 +57,7 @@ sequenceDiagram
   B-->>R: verdict (if it lands within GATE_WAIT_MS)
 
   alt clear (pass or muted)
+    R->>DB: look at the Thread again, one start at a time<br/>edited away or already answered meanwhile? (409)
     R->>DB: store an empty reply, marked pending
     R->>P: stream the reply over the live history, with the Thread's Seed
     R-->>FE: stream: the verdict first, then the text
@@ -74,6 +75,13 @@ When the request answers `gate_pending` or `gate_failed`, the message
 stays where it is. It is stored, just not answered yet. The verdict
 arrives over push, and the user's Retry then picks up from wherever the
 arrival stands (section 2).
+
+A wait can last long enough for the Thread to move on. Another tab may
+retry the same message, or edit it. So once the verdict is in, the
+request looks at the Thread again before it starts the reply, and only
+one request at a time may do so. The first starts the reply; a second
+one finds it and answers 409, and so does a request whose message was
+edited away while it waited.
 
 ### How an Exchange ends
 
@@ -100,8 +108,10 @@ the context for whatever comes next.
 
 Retry, the regenerate trigger, is server-authoritative. It always
 targets the newest live user message, so an arrival that was handed
-over to another Thread is never revived. What happens next depends on
-where that arrival stands.
+over to another Thread is never revived. It passes the same
+preconditions as a submit first, the daily budget included, so an
+exhausted budget stops it before any judgment or reply. What happens
+next depends on where that arrival stands.
 
 ```mermaid
 flowchart TD

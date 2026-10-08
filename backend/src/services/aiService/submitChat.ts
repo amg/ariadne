@@ -5,6 +5,7 @@ import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { secondsUntilUtcMidnight, sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
@@ -34,6 +35,7 @@ import {
   resolveInferenceConfig,
 } from './config';
 import { ChatExchange, type ChatOutcome } from './exchange';
+import { newestLiveUserIndex } from './newestLiveUser';
 import { pausedArrivalOrNull } from './pausedArrival';
 import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
 
@@ -48,10 +50,13 @@ import { buildEstimatedUsageRow, estimateChatPromptTokens } from './usageMap';
  *      clear verdict starts the Exchange on this same response, a fire
  *      pauses it, and an arrival still being judged when the wait runs
  *      out, or one the gate could not judge, gets no reply yet,
- *   4. `streamText` over the full thread history, with the Thread's Seed
+ *   4. claim the Exchange from the Thread as it stands after the wait,
+ *      one start per arrival at a time: an arrival edited away or already
+ *      answered meanwhile gets no second reply,
+ *   5. `streamText` over the full thread history, with the Thread's Seed
  *      prepended to the system prompt and inter-token idle timeout
  *      watched by the exchange,
- *   5. `ChatExchange` persists text + usage as the stream settles.
+ *   6. `ChatExchange` persists text + usage as the stream settles.
  */
 
 export type ChatStreamHandle = {
@@ -154,31 +159,23 @@ function buildModelMessages(
   ];
 }
 
+/**
+ * What a starting Exchange does with the replies already beneath its
+ * arrival: `answer` starts the first one and finds none, `regenerate`
+ * abandons them and starts a fresh one beneath.
+ */
+type ExchangeStartMode = 'answer' | 'regenerate';
+
 type StartExchangeProps = {
   userId: string;
   threadId: string;
-  /** Turns preceding the user turn (already persisted). */
-  precedingRows: Awaited<ReturnType<typeof listMessagesByThread>>;
   /** The user turn the exchange responds to. */
-  userMessage: Message;
+  userMessageId: string;
+  mode: ExchangeStartMode;
   titling: ThreadTitling;
   memory: MemoryFeature;
 };
 
-/**
- * One exchange per thread at a time, and the lazy half of staleness
- * recovery. A newest assistant row still `pending` means an exchange is
- * live and a second start would bill another inference over the same
- * history — bounce it. A pending row older than the staleness window
- * belongs to a dead process: settle it as interrupted here so the thread
- * moves on; callers rely on this running on every start.
- *
- * Check-before-insert, not serialization: two starts racing the whole way
- * (two submits meeting across the live gate's latency, today a same-tab
- * race only) both pass it. Atomic enforcement belongs on the pending
- * insert itself — the tracked index hardening lands before multi-replica
- * deployment.
- */
 /**
  * Settles a crashed exchange: status + estimated spend (no abandonment
  * flags — interruption/failure never abandons). Best effort: a racing
@@ -223,6 +220,31 @@ async function settleCrashedExchange(
   }
 }
 
+/**
+ * The daily spend budget gate, shared by every way an Exchange starts and
+ * checked before any billable work, the Drift gate included. Null when the
+ * budget is unset or not yet reached.
+ */
+async function budgetExceededErrorOrNull(): Promise<ResultError | null> {
+  const budget = env.DAILY_SPEND_BUDGET_USD;
+  if (budget === undefined) return null;
+  const dailyTotal = await sumDailySpend();
+  if (Number(dailyTotal) < budget) return null;
+  return errBudgetExceeded(
+    secondsUntilUtcMidnight(),
+    'Daily spend budget exceeded. Try again after UTC midnight.',
+  );
+}
+
+/**
+ * One exchange per thread at a time, and the lazy half of staleness
+ * recovery. A newest assistant row still `pending` means an exchange is
+ * live and a second start would bill another inference over the same
+ * history: bounce it. A pending row older than the staleness window
+ * belongs to a dead process: settle it as interrupted here so the thread
+ * moves on. Run on rows read before the gate wait, it only refuses early;
+ * the claim re-runs it on fresh rows, one start at a time.
+ */
 async function guardOrSettleStaleExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
   scope: { userId: string; threadId: string; memory: MemoryFeature },
@@ -247,24 +269,80 @@ async function guardOrSettleStaleExchange(
   return null;
 }
 
-/** Shared tail of both entry points: assistant row + provider stream. */
-async function startExchange({
+/** The live replies grown beneath the user Message at `userIndex`. */
+function liveReplyIdsBeneath(rows: Message[], userIndex: number): string[] {
+  return rows
+    .slice(userIndex + 1)
+    .filter((row) => row.role === 'assistant' && !row.abandoned)
+    .map((row) => row.id);
+}
+
+type ClaimedExchange = {
+  /** Turns preceding the user turn, as the Thread stands at the claim. */
+  precedingRows: Awaited<ReturnType<typeof listMessagesByThread>>;
+  userMessage: Message;
+  /** The `pending` reply row the Exchange settles. */
+  assistantMessage: Message;
+};
+
+/**
+ * Claims the Thread's one running Exchange for an arrival, deciding from
+ * the Thread as it stands now rather than as the caller last read it.
+ * Claims and edits of one arrival take their turns on its row: of several
+ * requests waiting on the same arrival only the first wins, and an edit
+ * either abandons the claimed reply with its arrival or leaves nothing to
+ * claim.
+ *
+ * Failure codes: `arrival_abandoned` when the arrival is no longer the
+ * newest live user Message, `arrival_answered` when an `answer` finds a
+ * reply already beneath it, `exchange_in_flight` when another Exchange is
+ * still running.
+ */
+async function claimExchange({
   userId,
   threadId,
-  precedingRows,
-  userMessage,
-  titling,
+  userMessageId,
+  mode,
   memory,
-}: StartExchangeProps): Promise<ChatStreamHandle> {
-  const config = resolveInferenceConfig();
-  const assistantMessage = await insertMessage({
-    threadId,
-    role: 'assistant',
-    content: '',
-    // Marks the exchange running until settlement flips it; the guard in
-    // submitChat/retryLastExchange bounces concurrent starts on this row.
-    exchangeStatus: 'pending',
+}: StartExchangeProps): Promise<Result<ClaimedExchange>> {
+  return inTransaction(async (trx): Promise<Result<ClaimedExchange>> => {
+    // Locked before the read, so the read sees what the one ahead left.
+    const live = await lockLiveMessage({ threadId, messageId: userMessageId }, trx);
+    const rows = await listMessagesByThread({ threadId }, trx);
+    const userIndex = newestLiveUserIndex(rows);
+    const userMessage = rows[userIndex];
+    if (!live || userMessage?.id !== userMessageId) {
+      return err('arrival_abandoned', 'The message was edited or moved before its reply started.');
+    }
+    const replyIds = liveReplyIdsBeneath(rows, userIndex);
+    if (mode === 'answer' && replyIds.length > 0) {
+      return err('arrival_answered', 'The message is already being answered.');
+    }
+    const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId, memory });
+    if (inFlight) return inFlight;
+
+    await setMessagesAbandoned({ messageIds: replyIds, abandoned: true }, trx);
+    const assistantMessage = await insertMessage(
+      {
+        threadId,
+        role: 'assistant',
+        content: '',
+        // Marks the exchange running until settlement flips it.
+        exchangeStatus: 'pending',
+      },
+      trx,
+    );
+    return ok({ precedingRows: rows.slice(0, userIndex), userMessage, assistantMessage });
   });
+}
+
+/** Shared tail of both entry points: the claimed reply row + provider stream. */
+async function startExchange(props: StartExchangeProps): Promise<Result<ChatStreamHandle>> {
+  const claimed = await claimExchange(props);
+  if (claimed.type === 'error') return claimed;
+  const { userId, threadId, titling, memory } = props;
+  const { precedingRows, userMessage, assistantMessage } = claimed.data;
+  const config = resolveInferenceConfig();
 
   const controller = new AbortController();
   const modelMessages = buildModelMessages(precedingRows, userMessage);
@@ -354,12 +432,12 @@ async function startExchange({
     sendReasoning: config.enableReasoning,
   });
 
-  return {
+  return ok({
     assistantMessageId: assistantMessage.id,
     stream,
     outcome: exchange.outcome,
     abort: () => controller.abort(),
-  };
+  });
 }
 
 /**
@@ -407,12 +485,14 @@ async function storeArrival(
 /**
  * What a chat request answers once the gate has spoken: the Exchange on a
  * clear verdict, the pause on a fire (unless the user chose to continue
- * past it), and no reply while the verdict is missing.
+ * past it), and no reply while the verdict is missing or once the client
+ * has left: nobody would read it.
  */
 async function submissionForGate(
   gate: ArrivalGateOutcome,
   pauseOnFire: boolean,
   exchange: StartExchangeProps,
+  signal: AbortSignal | undefined,
 ): Promise<Result<ChatSubmission>> {
   if (gate.kind === 'pending') {
     return err('gate_pending', 'The message is still being checked. Try again shortly.');
@@ -421,9 +501,10 @@ async function submissionForGate(
   if (gate.kind === 'paused' && pauseOnFire) {
     return ok({ paused: true, threadVerdict: gate.verdict });
   }
-  const handle = await startExchange(exchange);
-  if (gate.verdict) handle.threadVerdict = gate.verdict;
-  return ok(handle);
+  if (signal?.aborted) return err('client_gone', 'The client left before the reply started.');
+  const started = await startExchange(exchange);
+  if (started.type === 'success' && gate.verdict) started.data.threadVerdict = gate.verdict;
+  return started;
 }
 
 export async function submitChat({
@@ -447,18 +528,8 @@ export async function submitChat({
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
-  // Global daily spend budget gate — checked before any Exchange starts.
-  // Unset DAILY_SPEND_BUDGET_USD = fail open, no gate.
-  const budget = env.DAILY_SPEND_BUDGET_USD;
-  if (budget !== undefined) {
-    const dailyTotal = await sumDailySpend();
-    if (Number(dailyTotal) >= budget) {
-      return errBudgetExceeded(
-        secondsUntilUtcMidnight(),
-        'Daily spend budget exceeded. Try again after UTC midnight.',
-      );
-    }
-  }
+  const overBudget = await budgetExceededErrorOrNull();
+  if (overBudget) return overBudget;
 
   const precedingRows = await listMessagesByThread({ threadId });
   const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId, memory });
@@ -476,14 +547,12 @@ export async function submitChat({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, true, {
-    userId,
-    threadId,
-    precedingRows,
-    userMessage,
-    titling,
-    memory,
-  });
+  return submissionForGate(
+    gate,
+    true,
+    { userId, threadId, userMessageId: userMessage.id, mode: 'answer', titling, memory },
+    signal,
+  );
 }
 
 /**
@@ -517,6 +586,9 @@ export async function retryLastExchange({
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
+  const overBudget = await budgetExceededErrorOrNull();
+  if (overBudget) return overBudget;
+
   const rows = await listMessagesByThread({ threadId });
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
@@ -524,34 +596,17 @@ export async function retryLastExchange({
   const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId, memory });
   if (inFlight) return inFlight;
 
-  let userIndex = -1;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
-      userIndex = i;
-      break;
-    }
-  }
-  const userMessage = userIndex >= 0 ? rows[userIndex] : undefined;
+  const userIndex = newestLiveUserIndex(rows);
+  const userMessage = rows[userIndex];
   if (!userMessage) return err('nothing_to_regenerate');
 
-  const exchange: StartExchangeProps = {
-    userId,
-    threadId,
-    precedingRows: rows.slice(0, userIndex),
-    userMessage,
-    titling,
-    memory,
-  };
-  const staleReplyIds = rows
-    .slice(userIndex + 1)
-    .filter((row) => row.role === 'assistant' && !row.abandoned)
-    .map((row) => row.id);
-  if (staleReplyIds.length > 0) {
-    await setMessagesAbandoned({ messageIds: staleReplyIds, abandoned: true });
-    const handle = await startExchange(exchange);
+  const exchange = { userId, threadId, userMessageId: userMessage.id, titling, memory };
+  if (liveReplyIdsBeneath(rows, userIndex).length > 0) {
+    const started = await startExchange({ ...exchange, mode: 'regenerate' });
+    if (started.type === 'error') return started;
     const stored = await storedGateOutcomeOrNull(userMessage.id);
-    if (stored?.verdict) handle.threadVerdict = stored.verdict;
-    return ok(handle);
+    if (stored?.verdict) started.data.threadVerdict = stored.verdict;
+    return started;
   }
 
   const arrival: Arrival = { userId, threadId, messageId: userMessage.id };
@@ -561,5 +616,5 @@ export async function retryLastExchange({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, choice !== 'continue', exchange);
+  return submissionForGate(gate, choice !== 'continue', { ...exchange, mode: 'answer' }, signal);
 }

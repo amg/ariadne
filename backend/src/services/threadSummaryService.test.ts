@@ -6,6 +6,7 @@ import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
@@ -47,6 +48,32 @@ async function addChatExchange(
     costUsd,
     finishReason: 'stop',
   });
+}
+
+/** One assistant reply with its usage row; returns the reply's id. */
+async function addReply(
+  threadId: string,
+  tokens: { prompt: number; completion: number },
+): Promise<string> {
+  const reply = await insertMessage({ threadId, role: 'assistant', content: 'a reply' });
+  await insertMessageUsage({
+    messageId: reply.id,
+    model: 'provider/model-a',
+    providerId: randomUUID(),
+    promptTokens: tokens.prompt,
+    completionTokens: tokens.completion,
+    cachedInputTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: null,
+    estimatedReasoningTokens: null,
+    costUsd: '0.0000010000',
+    finishReason: 'stop',
+  });
+  return reply.id;
+}
+
+async function addArrival(threadId: string): Promise<string> {
+  return (await insertMessage({ threadId, role: 'user', content: 'a question' })).id;
 }
 
 describe('getThreadSummary', () => {
@@ -185,5 +212,53 @@ describe('getThreadSummary', () => {
     await deleteMessage({ messageId: assistant?.id as string });
     const after = await getThreadSummary({ userId, threadId });
     expect(after?.totalCostUsd).toBe('0.0000000000');
+  });
+
+  it('counts only the messages the chat shows, while spend keeps every row', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addArrival(threadId);
+    await addReply(threadId, { prompt: 100, completion: 20 });
+    // Retry: the first reply to the second arrival is abandoned in place.
+    await addArrival(threadId);
+    const retried = await addReply(threadId, { prompt: 200, completion: 20 });
+    await setMessagesAbandoned({ messageIds: [retried], abandoned: true });
+    await addReply(threadId, { prompt: 200, completion: 30 });
+    // Edit: the old arrival and its reply are abandoned for a new arrival.
+    const editedArrival = await addArrival(threadId);
+    const editedReply = await addReply(threadId, { prompt: 300, completion: 20 });
+    await setMessagesAbandoned({ messageIds: [editedArrival, editedReply], abandoned: true });
+    await addArrival(threadId);
+    await addReply(threadId, { prompt: 300, completion: 40 });
+
+    const summary = await getThreadSummary({ userId, threadId });
+    expect(summary).toMatchObject({ totalMessages: 6, userMessages: 3, assistantMessages: 3 });
+    // Five replies spent, abandoned ones included.
+    expect(summary?.totalCostUsd).toBe('0.0000050000');
+    expect(summary?.totalTokens.prompt).toBe(1_100);
+  });
+
+  it('reads context usage off the latest live reply instead of summing every Exchange', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addArrival(threadId);
+    await addReply(threadId, { prompt: 100, completion: 20 });
+    await addArrival(threadId);
+    await addReply(threadId, { prompt: 200, completion: 25 });
+    await addArrival(threadId);
+    await addReply(threadId, { prompt: 300, completion: 30 });
+    // An abandoned reply, even the newest row, never reaches the model again.
+    const retried = await addReply(threadId, { prompt: 300, completion: 900 });
+    await setMessagesAbandoned({ messageIds: [retried], abandoned: true });
+
+    const summary = await getThreadSummary({ userId, threadId });
+    expect(summary?.contextUsage.used).toBe(330);
+    expect(summary?.totalTokens.total).toBe(1_875);
+  });
+
+  it('reports no context used before the first reply', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    await addArrival(threadId);
+
+    const summary = await getThreadSummary({ userId, threadId });
+    expect(summary?.contextUsage).toEqual({ used: 0, limit: null, percentage: null });
   });
 });

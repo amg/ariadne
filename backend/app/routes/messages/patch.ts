@@ -28,9 +28,10 @@ function sendUpdateError(reply: FastifyReply, error: Extract<Result<never>, { ty
 /**
  * Edits the thread's last user message — a fork: the old arrival is
  * abandoned (text and arrival spend stay) and the edited text lands as a
- * new user row, judged by the Drift gate in the background. Empty strings are rejected up front so an edit can never
- * blank a bubble out — retry (chat regenerate) is the recovery path for
- * replies, not deletion.
+ * new user row, judged by the Drift gate in the background. Empty
+ * strings are rejected up front so an edit can never blank a bubble
+ * out — retry (chat regenerate) is the recovery path for replies, not
+ * deletion.
  */
 export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
   fastify.patch(

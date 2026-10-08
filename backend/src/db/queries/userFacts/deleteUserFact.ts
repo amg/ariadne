@@ -5,11 +5,12 @@ type DeleteUserFactProps = {
   userId: string;
 };
 
-/** Hard-deletes a Fact row. */
-export async function deleteUserFact({ factId, userId }: DeleteUserFactProps): Promise<void> {
-  await db
+/** Hard-deletes a Fact row. False when the user has no Fact with that id. */
+export async function deleteUserFact({ factId, userId }: DeleteUserFactProps): Promise<boolean> {
+  const deleted = await db
     .deleteFrom('memory.userFacts')
     .where('id', '=', factId)
     .where('userId', '=', userId)
-    .execute();
+    .executeTakeFirst();
+  return deleted.numDeletedRows > 0n;
 }

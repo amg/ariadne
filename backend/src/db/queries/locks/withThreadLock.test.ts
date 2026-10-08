@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { db } from '@db/db';
 import { withThreadLock } from '@queries/locks/withThreadLock';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -46,6 +47,25 @@ describe('withThreadLock', () => {
     ]);
 
     expect(log.slice(0, 3).every((entry) => entry.endsWith(':start'))).toBe(true);
+  });
+
+  it('completes every waiter in turn when they outnumber the pool connections', async () => {
+    const threadId = randomUUID();
+    const waiters = 15;
+
+    const results = await Promise.all(
+      Array.from({ length: waiters }, (_, index) =>
+        withThreadLock({ threadId, kind: 'memory-capture' }, async () => {
+          await sleep(5);
+          const row = await db
+            .selectNoFrom((eb) => eb.val(index).as('index'))
+            .executeTakeFirstOrThrow();
+          return Number(row.index);
+        }),
+      ),
+    );
+
+    expect(results).toEqual(Array.from({ length: waiters }, (_, index) => index));
   });
 
   it('releases the lock when the work fails', async () => {

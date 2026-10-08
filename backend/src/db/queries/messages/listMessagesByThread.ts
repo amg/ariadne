@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { Message } from '@db/types';
+import type { DbExecutor, Message } from '@db/types';
 
 type ListMessagesByThreadProps = {
   threadId: string;
@@ -27,10 +27,11 @@ export type MessageWithUsageRow = Message & {
   usageEstimated: boolean | null;
 };
 
-export async function listMessagesByThread({
-  threadId,
-}: ListMessagesByThreadProps): Promise<MessageWithUsageRow[]> {
-  return db
+export async function listMessagesByThread(
+  { threadId }: ListMessagesByThreadProps,
+  executor: DbExecutor = db,
+): Promise<MessageWithUsageRow[]> {
+  return executor
     .selectFrom('chat.messages')
     .leftJoin('billing.messageUsage', 'billing.messageUsage.messageId', 'chat.messages.id')
     .selectAll('chat.messages')

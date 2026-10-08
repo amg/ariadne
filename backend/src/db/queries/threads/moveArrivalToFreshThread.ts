@@ -1,5 +1,6 @@
 import { db } from '@db/db';
 import type { Message, SeedLine, Thread } from '@db/types';
+import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { seedLinesJson } from '@queries/threadSeeds/insertThreadSeed';
 
 type MoveArrivalToFreshThreadProps = {
@@ -30,8 +31,10 @@ export async function moveArrivalToFreshThreadOrNull({
   seed,
 }: MoveArrivalToFreshThreadProps): Promise<MovedArrival | null> {
   return db.transaction().execute(async (trx) => {
-    // The conditional update is the claim: the row lock makes a concurrent
-    // second claim re-check `abandoned` and miss.
+    // Locked first, so the claim below starts after whatever held the
+    // arrival has committed, and its check for later rows sees what that
+    // left: a reply started meanwhile, or another handover.
+    if (!(await lockLiveMessage({ threadId: fromThreadId, messageId }, trx))) return null;
     const claimed = await trx
       .updateTable('chat.messages')
       .set({ abandoned: true })

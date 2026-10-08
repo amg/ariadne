@@ -263,18 +263,29 @@ describe('deleteUserFact', () => {
 
     const fact = await createFact({ userId, content: 'To be deleted' });
 
-    await deleteUserFact({ factId: fact.id, userId });
+    expect(await deleteUserFact({ factId: fact.id, userId })).toBe(true);
 
     const facts = await listAllUserFacts({ userId });
     expect(facts).toHaveLength(0);
   });
 
-  it('does nothing when fact not found', async () => {
+  it('reports nothing deleted when the fact is not found', async () => {
     const userId = randomUUID();
     await createUser(userId);
 
     await expect(
       deleteUserFact({ factId: '00000000-0000-0000-0000-000000000000', userId }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
+  });
+
+  it('leaves another user\u2019s fact alone', async () => {
+    const owner = randomUUID();
+    const stranger = randomUUID();
+    await createUser(owner);
+    await createUser(stranger);
+    const fact = await createFact({ userId: owner, content: 'Not yours' });
+
+    expect(await deleteUserFact({ factId: fact.id, userId: stranger })).toBe(false);
+    expect(await listAllUserFacts({ userId: owner })).toHaveLength(1);
   });
 });

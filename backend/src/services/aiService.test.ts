@@ -30,7 +30,7 @@ import { useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import type { UIMessage } from 'ai';
 import { readUIMessageStream } from 'ai';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   MOCK_CACHE,
   MOCK_EMBEDDINGS,
@@ -685,6 +685,65 @@ describe('retryLastExchange', () => {
     expect(rows.map((row) => row.id)).toEqual([userMessage.id, handle.assistantMessageId]);
     expect(rows[1]?.content).toBe('Mock reply to: stuck prompt');
   });
+});
+
+describe('daily spend budget', () => {
+  const savedBudget = process.env.DAILY_SPEND_BUDGET_USD;
+
+  // A zero budget is reached by any day's spend, the empty one included.
+  function exhaustBudget() {
+    process.env.DAILY_SPEND_BUDGET_USD = '0';
+  }
+
+  afterEach(() => {
+    process.env.DAILY_SPEND_BUDGET_USD = savedBudget ?? '';
+  });
+
+  function expectBudgetExceeded(result: Awaited<ReturnType<typeof submitChat>>) {
+    expect(result).toMatchObject({ type: 'error', code: 'budget_exceeded' });
+    expect(result.type === 'error' && 'retryAfter' in result && result.retryAfter).toBeGreaterThan(
+      0,
+    );
+  }
+
+  it('refuses a submit without storing the arrival', async () => {
+    const { userId, threadId } = await createRandomThread();
+    exhaustBudget();
+
+    expectBudgetExceeded(await submit({ userId, threadId, content: 'over budget' }));
+
+    expect(await listMessagesByThread({ threadId })).toEqual([]);
+  });
+
+  it('refuses a retry of an answered arrival and keeps its reply live', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const first = await assertSuccess(await submit({ userId, threadId, content: 'answered' }));
+    await drain(first);
+    await expect(first.outcome).resolves.toMatchObject({ type: 'success' });
+    const before = await listMessagesByThread({ threadId });
+    exhaustBudget();
+
+    expectBudgetExceeded(await retryExchange({ userId, threadId }));
+
+    expect(await listMessagesByThread({ threadId })).toEqual(before);
+  });
+
+  // An unanswered arrival is what an Edit, a Handover's first reply and a
+  // Paused arrival's continue all ask a reply for.
+  it.each<RetryChoice>(['retry', 'continue'])(
+    'refuses a %s on an unanswered arrival before the Drift gate',
+    async (choice) => {
+      const { userId, threadId } = await createRandomThread();
+      const arrival = await insertMessage({ threadId, role: 'user', content: 'unanswered' });
+      exhaustBudget();
+
+      expectBudgetExceeded(await retryExchange({ userId, threadId }, choice));
+
+      const rows = await listMessagesByThread({ threadId });
+      expect(rows.map((row) => row.id)).toEqual([arrival.id]);
+      expect(await findDriftGateJudgeArrivalJobOrNull(arrival.id)).toBeNull();
+    },
+  );
 });
 
 describe('embedText', () => {

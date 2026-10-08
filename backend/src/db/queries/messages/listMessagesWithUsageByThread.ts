@@ -8,6 +8,7 @@ type ListMessagesWithUsageByThreadProps = {
 export interface MessageWithUsageRow {
   id: string;
   role: 'user' | 'assistant' | 'system';
+  abandoned: boolean;
   model: string | null;
   costUsd: string | null;
   promptTokens: number | null;
@@ -18,8 +19,9 @@ export interface MessageWithUsageRow {
 }
 
 /**
- * All messages of a thread with their chat-spend rows left-joined,
- * oldest first. Threads without messages yield an empty list.
+ * All messages of a thread, abandoned ones included, with their
+ * chat-spend rows left-joined, oldest first. Threads without messages
+ * yield an empty list.
  */
 export async function listMessagesWithUsageByThread({
   threadId,
@@ -30,6 +32,7 @@ export async function listMessagesWithUsageByThread({
     .select([
       'chat.messages.id as id',
       'chat.messages.role as role',
+      'chat.messages.abandoned as abandoned',
       'billing.messageUsage.model as model',
       'billing.messageUsage.costUsd as costUsd',
       'billing.messageUsage.promptTokens as promptTokens',

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import type { FactCategory, Message } from '@db/types';
+import { withThreadLock } from '@queries/locks/withThreadLock';
 import { captureProgressOf } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
@@ -704,6 +705,47 @@ describe('captureUnreadTurns', () => {
     expect(report).toMatchObject({ memoryEnabled: false, owed: 0 });
     expect(await capturedThrough(segmentId)).toBeNull();
     expect(await factsOf(userId)).toEqual([]);
+  });
+});
+
+describe('capture passes on one Thread', () => {
+  it('read the Turns once when the on-demand pass meets a segment capture', async () => {
+    const { userId, threadId, boundary, segmentId } = await threadWithClosedSegment([
+      'I love jazz',
+    ]);
+    const extractions = mock.memory.extractionCount();
+
+    const [onDemand, segment] = await Promise.all([
+      captureUnreadTurns({ userId, threadId }),
+      captureSegment({ userId, threadId, segmentId }),
+    ]);
+
+    expect(onDemand.owed + segment.owed).toBe(1);
+    expect(mock.memory.extractionCount()).toBe(extractions + 1);
+    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual(['The user loves jazz.']);
+    const kinds = (await costsOf(boundary.id)).map((cost) => cost.kind);
+    expect(kinds).toEqual([...new Set(kinds)]);
+  });
+
+  it('wait for the capture already running on the Thread', async () => {
+    const { userId, threadId, segmentId } = await threadWithClosedSegment(['I love jazz']);
+    const extractions = mock.memory.extractionCount();
+    let release: () => void = () => {};
+    const running = withThreadLock(
+      { threadId, kind: 'memory-capture' },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const waiting = captureSegment({ userId, threadId, segmentId });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mock.memory.extractionCount()).toBe(extractions);
+
+    release();
+    await running;
+    expect(await waiting).toMatchObject({ owed: 1, added: 1 });
   });
 });
 

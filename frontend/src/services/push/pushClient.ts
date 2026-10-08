@@ -11,6 +11,7 @@ type AnyHandler = (event: never) => void;
  */
 
 const subscriptions = new Map<ServerEventKind, Set<AnyHandler>>();
+const reconnectedHandlers = new Set<() => void>();
 let close: (() => void) | null = null;
 
 /** Receives every event of one kind until the returned function is called. */
@@ -30,16 +31,33 @@ export function subscribe<Kind extends ServerEventKind>(
 }
 
 /**
+ * Called each time the connection comes back after a drop, until the
+ * returned function is called. Events sent during the gap are lost, so a
+ * screen re-reads whatever it shows from push.
+ */
+export function onReconnected(handler: () => void): () => void {
+  reconnectedHandlers.add(handler);
+  return () => {
+    reconnectedHandlers.delete(handler);
+  };
+}
+
+/**
  * Opens the connection once per tab; later calls are no-ops. Events
  * emitted while no screen is subscribed are simply dropped.
  */
 export function connect(): void {
   if (close) return;
-  close = sseTransport.open((event) => {
-    const handlers = subscriptions.get(event.kind);
-    if (!handlers) return;
-    for (const handler of [...handlers]) handler(event as never);
-  });
+  close = sseTransport.open(
+    (event) => {
+      const handlers = subscriptions.get(event.kind);
+      if (!handlers) return;
+      for (const handler of [...handlers]) handler(event as never);
+    },
+    () => {
+      for (const handler of [...reconnectedHandlers]) handler();
+    },
+  );
 }
 
 /** Closes the tab's connection; safe to call when none is open. */
