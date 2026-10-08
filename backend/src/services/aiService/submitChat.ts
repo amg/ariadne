@@ -223,6 +223,22 @@ async function settleCrashedExchange(
   }
 }
 
+/**
+ * The daily spend budget gate, shared by every way an Exchange starts and
+ * checked before any billable work, the Drift gate included. Null when the
+ * budget is unset or not yet reached.
+ */
+async function budgetExceededErrorOrNull(): Promise<ResultError | null> {
+  const budget = env.DAILY_SPEND_BUDGET_USD;
+  if (budget === undefined) return null;
+  const dailyTotal = await sumDailySpend();
+  if (Number(dailyTotal) < budget) return null;
+  return errBudgetExceeded(
+    secondsUntilUtcMidnight(),
+    'Daily spend budget exceeded. Try again after UTC midnight.',
+  );
+}
+
 async function guardOrSettleStaleExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
   scope: { userId: string; threadId: string; memory: MemoryFeature },
@@ -450,18 +466,8 @@ export async function submitChat({
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
-  // Global daily spend budget gate — checked before any Exchange starts.
-  // Unset DAILY_SPEND_BUDGET_USD = fail open, no gate.
-  const budget = env.DAILY_SPEND_BUDGET_USD;
-  if (budget !== undefined) {
-    const dailyTotal = await sumDailySpend();
-    if (Number(dailyTotal) >= budget) {
-      return errBudgetExceeded(
-        secondsUntilUtcMidnight(),
-        'Daily spend budget exceeded. Try again after UTC midnight.',
-      );
-    }
-  }
+  const overBudget = await budgetExceededErrorOrNull();
+  if (overBudget) return overBudget;
 
   const precedingRows = await listMessagesByThread({ threadId });
   const inFlight = await guardOrSettleStaleExchange(precedingRows, { userId, threadId, memory });
@@ -517,6 +523,9 @@ export async function retryLastExchange({
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);
   }
+
+  const overBudget = await budgetExceededErrorOrNull();
+  if (overBudget) return overBudget;
 
   const rows = await listMessagesByThread({ threadId });
   const last = rows[rows.length - 1];

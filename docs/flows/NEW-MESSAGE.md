@@ -100,8 +100,10 @@ the context for whatever comes next.
 
 Retry, the regenerate trigger, is server-authoritative. It always
 targets the newest live user message, so an arrival that was handed
-over to another Thread is never revived. What happens next depends on
-where that arrival stands.
+over to another Thread is never revived. It passes the same
+preconditions as a submit first, the daily budget included, so an
+exhausted budget stops it before any judgment or reply. What happens
+next depends on where that arrival stands.
 
 ```mermaid
 flowchart TD
