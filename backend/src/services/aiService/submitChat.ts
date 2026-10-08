@@ -407,12 +407,14 @@ async function storeArrival(
 /**
  * What a chat request answers once the gate has spoken: the Exchange on a
  * clear verdict, the pause on a fire (unless the user chose to continue
- * past it), and no reply while the verdict is missing.
+ * past it), and no reply while the verdict is missing or once the client
+ * has left: nobody would read it.
  */
 async function submissionForGate(
   gate: ArrivalGateOutcome,
   pauseOnFire: boolean,
   exchange: StartExchangeProps,
+  signal: AbortSignal | undefined,
 ): Promise<Result<ChatSubmission>> {
   if (gate.kind === 'pending') {
     return err('gate_pending', 'The message is still being checked. Try again shortly.');
@@ -421,6 +423,7 @@ async function submissionForGate(
   if (gate.kind === 'paused' && pauseOnFire) {
     return ok({ paused: true, threadVerdict: gate.verdict });
   }
+  if (signal?.aborted) return err('client_gone', 'The client left before the reply started.');
   const handle = await startExchange(exchange);
   if (gate.verdict) handle.threadVerdict = gate.verdict;
   return ok(handle);
@@ -476,14 +479,12 @@ export async function submitChat({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, true, {
-    userId,
-    threadId,
-    precedingRows,
-    userMessage,
-    titling,
-    memory,
-  });
+  return submissionForGate(
+    gate,
+    true,
+    { userId, threadId, precedingRows, userMessage, titling, memory },
+    signal,
+  );
 }
 
 /**
@@ -561,5 +562,5 @@ export async function retryLastExchange({
     judging,
     ...(signal === undefined ? {} : { signal }),
   });
-  return submissionForGate(gate, choice !== 'continue', exchange);
+  return submissionForGate(gate, choice !== 'continue', exchange, signal);
 }

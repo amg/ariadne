@@ -66,8 +66,19 @@ function submit(
   });
 }
 
-function retry(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
+function retry(
+  props: { userId: string; threadId: string },
+  choice: RetryChoice = 'retry',
+  signal?: AbortSignal,
+) {
+  return retryLastExchange({
+    ...props,
+    choice,
+    judging,
+    titling,
+    memory: memoryOn,
+    ...(signal ? { signal } : {}),
+  });
 }
 
 async function freshThread() {
@@ -147,6 +158,22 @@ describe('the chat request waiting on the gate', () => {
     const arrival = await newestUserRow(threadId);
     await judgmentSettled(arrival.id);
     expect(await verdictCount(arrival.id)).toBe(1);
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => row.role)).toEqual(['user']);
+  });
+
+  it('starts no reply when the client is gone by the time the verdict answers', async () => {
+    const { userId, threadId } = await freshThread();
+    process.env.GATE_WAIT_MS = '0';
+    await submit({ userId, threadId, content: 'Judged while nobody waited' });
+    const arrival = await newestUserRow(threadId);
+    await judgmentSettled(arrival.id);
+    const gone = new AbortController();
+    gone.abort();
+
+    const result = await retry({ userId, threadId }, 'retry', gone.signal);
+
+    expect(result).toMatchObject({ type: 'error', code: 'client_gone' });
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.role)).toEqual(['user']);
   });

@@ -97,6 +97,11 @@ function sendExchangeError(
     reply.code(404).send({ error: 'Thread not found', errorCode });
     return;
   }
+  // Nobody is left to read the answer; the status only reaches the logs.
+  if (errorCode === 'client_gone') {
+    reply.code(499).send({ error: 'Client closed the request', errorCode });
+    return;
+  }
   // Budget exceeded — 429 with Retry-After header (seconds until UTC midnight).
   if (result.code === 'budget_exceeded') {
     // Type guard: BudgetExceededError has retryAfter, StandardError doesn't
@@ -118,20 +123,22 @@ function sendExchangeError(
   reply.code(500).send({ error: 'Failed to start the AI exchange.', errorCode: 'internal_error' });
 }
 
-/** Streams an exchange handle to the client; a disconnect aborts the provider. */
-function createStreamResponse(reply: FastifyReply, threadId: string, handle: ChatStreamHandle) {
-  // Client disconnect (user stop / closed tab) aborts the provider stream, which
-  // persists the partial text as 'interrupted'. Use the *response* raw socket:
-  // under Fastify v5 + current Node the IncomingMessage 'close'/'aborted' events
-  // don't fire for streaming responses, but the ServerResponse 'close' does.
+/**
+ * Streams an exchange handle to the client. A client gone at any point,
+ * already gone while the exchange was starting included, aborts the
+ * provider, which persists the partial text as 'interrupted'.
+ */
+function createStreamResponse(threadId: string, handle: ChatStreamHandle, clientGone: AbortSignal) {
   let finished = false;
   void handle.outcome.finally(() => {
     finished = true;
     clearActiveExchange(threadId, handle);
   });
-  reply.raw.on('close', () => {
+  const abortUnfinished = () => {
     if (!finished) handle.abort();
-  });
+  };
+  if (clientGone.aborted) abortUnfinished();
+  else clientGone.addEventListener('abort', abortUnfinished, { once: true });
 
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
@@ -176,7 +183,12 @@ function createPauseResponse(pause: DriftPause) {
   return createUIMessageStreamResponse({ stream });
 }
 
-/** Aborts once the client is gone, so a wait on the gate stops holding for it. */
+/**
+ * Aborts once the client is gone, for the whole request: the gate wait
+ * and the exchange's stream both stop on it. Listens on the response
+ * socket: under Fastify v5 and current Node, the request's 'close' and
+ * 'aborted' events don't fire for streaming responses.
+ */
 function clientGoneSignal(reply: FastifyReply): AbortSignal {
   const gone = new AbortController();
   reply.raw.once('close', () => gone.abort());
@@ -215,7 +227,7 @@ async function respondToChat(
   if (result.type === 'error') return sendExchangeError(reply, result);
   if (isDriftPause(result.data)) return createPauseResponse(result.data);
   registerActiveExchange(input.threadId, result.data);
-  return createStreamResponse(reply, input.threadId, result.data);
+  return createStreamResponse(input.threadId, result.data, signal);
 }
 
 export async function setupChatPostRoute(
