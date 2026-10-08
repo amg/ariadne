@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
+import type { DbExecutor } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
@@ -17,6 +18,9 @@ import {
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
+import { publish } from '@services/events';
+import { editMessage } from '@services/messageService';
+import { someoneWaitsOnALock } from '@test/locks';
 import { memoryOn } from '@test/memory';
 import { addDeadJob, useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
@@ -278,5 +282,211 @@ describe('a Paused arrival', () => {
 
     expect(reply.threadVerdict).toMatchObject({ messageId: pausedId, verdict: 'fire' });
     expect(await verdictCount(pausedId)).toBe(1);
+  });
+});
+
+describe('requests meeting on one arrival', () => {
+  /**
+   * Judging that queues nothing, so a request waits on a judgment that
+   * runs only once the test queues it for real. `asked` resolves once the
+   * request has asked for one, its verdict listener open by then.
+   */
+  function heldJudging() {
+    let calls = 0;
+    return {
+      judging: {
+        enqueueDriftGateJudgeArrival: async () => {
+          calls += 1;
+        },
+        findDriftGateJudgeArrivalJobOrNull,
+      },
+      asked: async () => {
+        const deadline = Date.now() + 5000;
+        while (calls === 0) {
+          if (Date.now() > deadline) throw new Error('no judgment was asked for');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      },
+    };
+  }
+
+  /** The submitted arrival, once its transaction has committed. */
+  async function storedArrival(threadId: string) {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const rows = await listMessagesByThread({ threadId });
+      const row = rows.find((r) => r.role === 'user' && !r.abandoned);
+      if (row) return row;
+      if (Date.now() > deadline) throw new Error('the arrival was never stored');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  /** Held transactions a failed test left open, released before the next. */
+  const openCommits = new Set<() => Promise<void>>();
+  afterEach(async () => {
+    await Promise.all([...openCommits].map((commit) => commit()));
+  });
+
+  /**
+   * A transaction held open by the test, standing in for a claim or an
+   * edit caught mid-way. `commit` lets it finish.
+   */
+  async function openTransaction(): Promise<{ trx: DbExecutor; commit: () => Promise<void> }> {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let opened: (trx: DbExecutor) => void = () => {};
+    const handle = new Promise<DbExecutor>((resolve) => {
+      opened = resolve;
+    });
+    const done = db.transaction().execute(async (trx) => {
+      opened(trx);
+      await released;
+    });
+    const commit = async () => {
+      openCommits.delete(commit);
+      release();
+      await done;
+    };
+    openCommits.add(commit);
+    return { trx: await handle, commit };
+  }
+
+  function heldSubmit(props: { userId: string; threadId: string; content: string }) {
+    const held = heldJudging();
+    return submitChat({ ...props, judging: held.judging, titling, memory: memoryOn });
+  }
+
+  it('starts one reply when a submit and a retry wake on the same verdict', async () => {
+    const { userId, threadId } = await freshThread();
+    process.env.GATE_WAIT_MS = '10000';
+    const submitted = heldSubmit({ userId, threadId, content: 'Two tabs, one question' });
+    const arrival = await storedArrival(threadId);
+    const retryHeld = heldJudging();
+    const retried = retryLastExchange({
+      userId,
+      threadId,
+      choice: 'retry',
+      judging: retryHeld.judging,
+      titling,
+      memory: memoryOn,
+    });
+    await retryHeld.asked();
+
+    await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: arrival.id });
+    const results = await Promise.all([submitted, retried]);
+
+    const started = results.filter((result) => result.type === 'success');
+    expect(started).toHaveLength(1);
+    expect(results.find((result) => result.type === 'error')).toMatchObject({
+      code: 'arrival_answered',
+    });
+    await drained(started[0] ?? results[0]);
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => row.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('starts no reply for an arrival edited away during the wait', async () => {
+    const { userId, threadId } = await freshThread();
+    process.env.GATE_WAIT_MS = '10000';
+    const submitted = heldSubmit({ userId, threadId, content: 'Before the edit' });
+    const arrival = await storedArrival(threadId);
+    const edit = await editMessage({
+      userId,
+      threadId,
+      messageId: arrival.id,
+      content: 'After the edit',
+      judging: heldJudging().judging,
+    });
+    expect(edit.type).toBe('success');
+
+    // A judgment already past its liveness check when the edit landed
+    // still announces its verdict.
+    publish({ kind: 'verdict-ok', userId, threadId, messageId: arrival.id, verdict: 'pass' });
+
+    expect(await submitted).toMatchObject({ type: 'error', code: 'arrival_abandoned' });
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => [row.role, row.content, row.abandoned])).toEqual([
+      ['user', 'Before the edit', true],
+      ['user', 'After the edit', false],
+    ]);
+  });
+
+  it('starts one fresh reply when two retries regenerate an answered arrival', async () => {
+    const { userId, threadId } = await freshThread();
+    const first = await drained(await submit({ userId, threadId, content: 'Answer me twice' }));
+
+    const results = await Promise.all([retry({ userId, threadId }), retry({ userId, threadId })]);
+
+    const started = results.filter((result) => result.type === 'success');
+    expect(started).toHaveLength(1);
+    expect(results.find((result) => result.type === 'error')).toMatchObject({
+      code: 'exchange_in_flight',
+    });
+    const fresh = await drained(started[0] ?? results[0]);
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => [row.id, row.abandoned])).toEqual([
+      [rows[0]?.id, false],
+      [first.assistantMessageId, true],
+      [fresh.assistantMessageId, false],
+    ]);
+  });
+
+  it('starts no reply when an edit commits while the reply waits on the arrival', async () => {
+    const { userId, threadId } = await freshThread();
+    process.env.GATE_WAIT_MS = '10000';
+    const submitted = heldSubmit({ userId, threadId, content: 'Before the edit' });
+    const arrival = await storedArrival(threadId);
+    const edit = await openTransaction();
+    await edit.trx
+      .updateTable('chat.messages')
+      .set({ abandoned: true })
+      .where('id', '=', arrival.id)
+      .execute();
+
+    publish({ kind: 'verdict-ok', userId, threadId, messageId: arrival.id, verdict: 'pass' });
+    await someoneWaitsOnALock();
+    await insertMessage({ threadId, role: 'user', content: 'After the edit' }, edit.trx);
+    await edit.commit();
+
+    expect(await submitted).toMatchObject({ type: 'error', code: 'arrival_abandoned' });
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => row.role)).toEqual(['user', 'user']);
+  });
+
+  it('abandons a reply that started while the edit waited on the arrival', async () => {
+    const { userId, threadId } = await freshThread();
+    const arrival = await insertMessage({ threadId, role: 'user', content: 'Before the edit' });
+    const claim = await openTransaction();
+    await claim.trx
+      .selectFrom('chat.messages')
+      .select('id')
+      .where('id', '=', arrival.id)
+      .forUpdate()
+      .execute();
+    const reply = await insertMessage(
+      { threadId, role: 'assistant', content: '', exchangeStatus: 'pending' },
+      claim.trx,
+    );
+
+    const edited = editMessage({
+      userId,
+      threadId,
+      messageId: arrival.id,
+      content: 'After the edit',
+      judging: heldJudging().judging,
+    });
+    await someoneWaitsOnALock();
+    await claim.commit();
+
+    expect((await edited).type).toBe('success');
+    const rows = await listMessagesByThread({ threadId });
+    expect(rows.map((row) => [row.id === reply.id, row.abandoned])).toEqual([
+      [false, true],
+      [true, true],
+      [false, false],
+    ]);
   });
 });

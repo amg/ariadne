@@ -61,6 +61,8 @@ function extractLastUserText(messages: ChatRequestBody['messages']): string {
 const CONFLICT_MESSAGES: Record<string, string> = {
   arrival_paused: 'The last message is waiting for a choice.',
   arrival_unanswered: 'The last message has no reply yet.',
+  arrival_answered: 'The message is already being answered.',
+  arrival_abandoned: 'The message was edited or moved before its reply started.',
   nothing_to_regenerate: 'The thread has no exchange to retry.',
   exchange_in_flight: 'An exchange is already running in this thread.',
 };

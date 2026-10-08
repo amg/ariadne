@@ -89,34 +89,55 @@ function textOf(message: UIMessage): string {
 }
 
 /**
- * On a failed submit the optimistic user message is still in chat state.
- * Removing it keeps the restored draft the only visible copy of the text.
- * Regenerates never add a message, so they leave chat state untouched here.
+ * Drops a failed submit's optimistic user message from chat state and
+ * returns its draft text; null when no submit was in flight. Regenerates
+ * never add a message, so they leave chat state untouched here.
  */
-function rollBackFailedSubmit(threadId: string): void {
+function dropOptimisticSubmit(threadId: string): string | null {
   const draft = pendingSubmits.get(threadId);
-  if (draft === undefined) return;
+  if (draft === undefined) return null;
   pendingSubmits.delete(threadId);
 
   const chat = chats.get(threadId);
-  if (!chat) return;
+  if (!chat) return draft;
   const last = chat.messages[chat.messages.length - 1];
   if (last?.role === 'user' && textOf(last) === draft) {
     chat.messages = chat.messages.slice(0, -1);
   }
+  return draft;
+}
 
+/** A failed submit hands its text back: the restored draft becomes its only copy. */
+function rollBackFailedSubmit(threadId: string): void {
+  const draft = dropOptimisticSubmit(threadId);
+  if (draft === null) return;
   notify(threadId, (listener) => listener.onFailedSubmit?.(draft));
+}
+
+/**
+ * Whether the request failed after its arrival was stored, because another
+ * request answers it or it was edited away during the wait. The Thread's
+ * stored rows then show what became of it, so no draft comes back.
+ */
+function arrivalSettledElsewhere(error: unknown): boolean {
+  const { errorCode } = chatErrorBody(error) ?? {};
+  return errorCode === 'arrival_answered' || errorCode === 'arrival_abandoned';
 }
 
 /**
  * A failure's handling, keyed by the kind of failure. A gate wait leaves
  * the optimistic message and its draft alone — the arrival is stored and
  * owed an answer, not rejected; the outcome stays readable on the chat's
- * error until the next request. Any other failure rolls the submit back.
+ * error until the next request. An arrival settled elsewhere drops the
+ * optimistic copy only. Any other failure rolls the submit back.
  */
 function handleFailedRequest(threadId: string, error: unknown): void {
   if (gateWaitOutcomeOf(error)) {
     pendingSubmits.delete(threadId);
+    return;
+  }
+  if (arrivalSettledElsewhere(error)) {
+    dropOptimisticSubmit(threadId);
     return;
   }
   rollBackFailedSubmit(threadId);

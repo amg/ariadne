@@ -3,6 +3,7 @@ import type { Message, MessageFinishReason, MessageUsage } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread';
+import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
@@ -11,6 +12,7 @@ import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeA
 import { type Result, err, ok } from '../types/result';
 import { type ArrivalJudging, judgmentFailed } from './aiService/arrivalGate';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
+import { newestLiveUserIndex } from './aiService/newestLiveUser';
 import { validateMessageContent } from './validation';
 
 /** Usage as served on the GET payload (identity columns implied by the row). */
@@ -124,30 +126,26 @@ export async function editMessage({
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
 
-  const rows = await listMessagesByThread({ threadId });
-  if (!rows.some((row) => row.id === messageId)) return err('thread_not_found');
-
-  let lastUserIndex = -1;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user' && !rows[i]?.abandoned) {
-      lastUserIndex = i;
-      break;
+  const forked = await inTransaction(async (trx): Promise<Result<Message>> => {
+    // Locked before the read, so the read sees what the one ahead left: a
+    // reply that started on this arrival is abandoned with it, and a second
+    // edit of it finds it already gone.
+    const live = await lockLiveMessage({ threadId, messageId }, trx);
+    const rows = await listMessagesByThread({ threadId }, trx);
+    if (!rows.some((row) => row.id === messageId)) return err('thread_not_found');
+    const lastUserIndex = newestLiveUserIndex(rows);
+    if (!live || rows[lastUserIndex]?.id !== messageId) {
+      return err('not_last', 'Only the last user message in a thread can be edited.');
     }
-  }
-  const lastUser = lastUserIndex >= 0 ? rows[lastUserIndex] : undefined;
-  if (!lastUser || lastUser.id !== messageId) {
-    return err('not_last', 'Only the last user message in a thread can be edited.');
-  }
 
-  // The old arrival and every reply grown from its text are abandoned in
-  // place: rows stay — text, arrival analysis and usage keep tracking what
-  // the thread burned — while retry, inference memory and listing skip
-  // them. The fork lands after them, in the same step as its judgment.
-  const forked = await inTransaction(async (trx) => {
+    // The old arrival and every reply grown from its text are abandoned in
+    // place: rows stay, and text, arrival analysis and usage keep tracking
+    // what the thread burned, while retry, inference memory and listing
+    // skip them. The fork lands after them, in the same step as its judgment.
     await setMessagesAbandoned(
       {
         messageIds: [
-          lastUser.id,
+          messageId,
           ...rows
             .slice(lastUserIndex + 1)
             .filter((row) => !row.abandoned)
@@ -159,11 +157,12 @@ export async function editMessage({
     );
     const fork = await insertMessage({ threadId, role: 'user', content: normalized }, trx);
     await judging.enqueueDriftGateJudgeArrival({ userId, threadId, messageId: fork.id }, trx);
-    return fork;
+    return ok(fork);
   });
+  if (forked.type === 'error') return forked;
   return ok(
     messageRowToMessageWithUsage({
-      ...forked,
+      ...forked.data,
       usageModel: null,
       usageProviderId: null,
       usagePromptTokens: null,

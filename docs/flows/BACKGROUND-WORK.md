@@ -345,6 +345,7 @@ from the code, not the HTTP status.
 | Gate fired | the stream carries only the verdict, then ends | a choice: continue here, or start a new chat | the user decides (see NEW-MESSAGE.md) |
 | Handover while the old segment's capture runs | 503 `capture_pending`, nothing moved | "Remembering this chat…", and asks again automatically | the capture lands (the Seed includes it) or gives up (the move goes ahead, Facts stay owed) |
 | New message while the last arrival is unanswered or paused | 409 `arrival_unanswered` / `arrival_paused` | composer locked, pointing at Retry or the choice | answer the waiting arrival first |
+| The arrival was answered by another request, or edited away, during the wait | 409 `arrival_answered` / `arrival_abandoned` | error notice; the message stays as stored, no draft comes back | none: the Thread already shows what became of it |
 | An Exchange is already running | 409 `exchange_in_flight` | error notice | a pending reply older than `EXCHANGE_STALENESS_MS` belongs to a dead process and is settled as interrupted on the next start |
 | Daily spend budget reached | 429 `budget_exceeded`, `Retry-After` until UTC midnight | error notice | wait for the next UTC day |
 | No AI provider configured | 503 `provider_not_configured` | error notice | fix the deployment's configuration |
