@@ -7,7 +7,9 @@ import {
   updateUserSettings,
   validatedSettingsPatch,
 } from '@services/settingsService';
+import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { NoResultError } from 'kysely';
 import type { SessionRequest } from 'supertokens-node/framework/fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
 
@@ -62,8 +64,11 @@ async function handleSuppressionToggle(
   try {
     const updated = await updateUserFact({ factId, userId, suppressed });
     return { statusCode: 200, body: updated };
-  } catch {
-    return { statusCode: 404, body: { error: 'Fact not found' } };
+  } catch (error) {
+    if (error instanceof NoResultError) {
+      return { statusCode: 404, body: { error: 'Fact not found' } };
+    }
+    throw error;
   }
 }
 
@@ -89,7 +94,8 @@ async function handleContentEdit(
 
 /**
  * Updates a Fact: either edits content (invalidates old, inserts new) or
- * toggles suppression. 404 when not found; 400 on invalid payload; 502
+ * toggles suppression. 404 when not found, or when an edit's Fact was
+ * superseded meanwhile; 400 on a malformed id or invalid payload; 502
  * when an edit cannot be re-evaluated (the Fact stays unchanged).
  */
 export async function setupMemoryFactsPatchRoute(fastify: FastifyInstance) {
@@ -104,6 +110,9 @@ export async function setupMemoryFactsPatchRoute(fastify: FastifyInstance) {
       const factId = request.params.id;
       const body = request.body as Record<string, unknown> | undefined;
 
+      if (!isValidUuid(factId)) {
+        return reply.code(400).send({ error: 'Invalid fact id' });
+      }
       if (!body || typeof body !== 'object') {
         return reply.code(400).send({ error: 'Invalid request body' });
       }
@@ -123,7 +132,7 @@ export async function setupMemoryFactsPatchRoute(fastify: FastifyInstance) {
   );
 }
 
-/** Hard-deletes a Fact. 404 when not found. */
+/** Hard-deletes a Fact. 404 when not found; 400 on a malformed id. */
 export async function setupMemoryFactsDeleteRoute(fastify: FastifyInstance) {
   fastify.delete(
     '/api/memory/facts/:id',
@@ -131,12 +140,13 @@ export async function setupMemoryFactsDeleteRoute(fastify: FastifyInstance) {
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const userId = (request as SessionRequest).session?.getUserId() as string;
       const factId = request.params.id;
-      try {
-        await deleteUserFact({ factId, userId });
-        return reply.code(204).send();
-      } catch {
+      if (!isValidUuid(factId)) {
+        return reply.code(400).send({ error: 'Invalid fact id' });
+      }
+      if (!(await deleteUserFact({ factId, userId }))) {
         return reply.code(404).send({ error: 'Fact not found' });
       }
+      return reply.code(204).send();
     },
   );
 }
