@@ -1,4 +1,5 @@
 import type { Message } from '@db/types';
+import { withThreadLock } from '@queries/locks/withThreadLock';
 import { capturePointersOf } from '@queries/memoryCaptureProgress/capturePointersOf';
 import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
@@ -138,9 +139,15 @@ async function readSegment(
  * gone — is a pass with nothing read, so capturing it twice stores nothing
  * extra. A user who switched memory off has the pointer jump to the settle
  * row instead: nothing is gathered, and nothing is deferred until memory
- * returns.
+ * returns. Capture passes on one Thread run one at a time.
  */
-export async function captureSegment({
+export function captureSegment(segment: SegmentToCapture): Promise<CapturePassReport> {
+  return withThreadLock({ threadId: segment.threadId, kind: 'memory-capture' }, () =>
+    captureSegmentLocked(segment),
+  );
+}
+
+async function captureSegmentLocked({
   userId,
   threadId,
   segmentId,
@@ -220,9 +227,19 @@ async function captureNewestSegment(
 /**
  * The on-demand pass: everything in the thread not yet read, the newest
  * segment included even though it has not settled. Settled segments are
- * read first, oldest first, and a failure stops the pass there.
+ * read first, oldest first, and a failure stops the pass there. Capture
+ * passes on one Thread run one at a time.
  */
-export async function captureUnreadTurns({
+export function captureUnreadTurns(thread: {
+  userId: string;
+  threadId: string;
+}): Promise<CapturePassReport> {
+  return withThreadLock({ threadId: thread.threadId, kind: 'memory-capture' }, () =>
+    captureUnreadTurnsLocked(thread),
+  );
+}
+
+async function captureUnreadTurnsLocked({
   userId,
   threadId,
 }: {
