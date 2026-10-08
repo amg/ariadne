@@ -100,7 +100,7 @@ export default function SettingsPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               Control whether the assistant remembers facts about you from conversations
             </p>
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-4 flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-foreground">Enable memory</p>
                 <p className="text-xs text-muted-foreground">
@@ -111,7 +111,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => handleMemoryToggle(!settings.memoryEnabled)}
                 disabled={isSaving}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
                   settings.memoryEnabled ? 'bg-primary' : 'bg-secondary'
                 } disabled:opacity-50`}
               >
@@ -136,7 +136,7 @@ export default function SettingsPage() {
                 return (
                   <div
                     key={category}
-                    className="flex items-center justify-between rounded border border-border bg-muted/20 p-3"
+                    className="flex items-center justify-between gap-4 rounded border border-border bg-muted/20 p-3"
                   >
                     <div>
                       <p className="text-sm font-medium text-foreground">
@@ -152,7 +152,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => handleCategoryToggle(category, !isBlocked)}
                       disabled={isSaving}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
                         isBlocked ? 'bg-destructive' : 'bg-secondary'
                       } disabled:opacity-50`}
                     >
