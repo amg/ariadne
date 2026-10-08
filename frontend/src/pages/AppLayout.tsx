@@ -95,6 +95,10 @@ function AppLayoutComponent() {
     [revalidator.revalidate],
   );
 
+  // Whatever push announced while the connection was down (titles, verdicts
+  // on the open Thread) is re-read through the loaders once it is back.
+  useEffect(() => pushClient.onReconnected(revalidator.revalidate), [revalidator.revalidate]);
+
   // The refetch fallback: the loader's refresh shows the title, so the
   // pulse ends even if the announcement never arrived.
   useEffect(() => {
