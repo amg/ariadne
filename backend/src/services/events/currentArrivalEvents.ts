@@ -1,5 +1,4 @@
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import { listThreadsByUser } from '@queries/threads/listThreadsByUser';
+import { listUnansweredArrivalsByUser } from '@queries/messages/listUnansweredArrivalsByUser';
 import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { judgmentFailed, storedGateOutcomeOrNull } from '@services/aiService/arrivalGate';
 import type { ServerEvent } from './serverEvent';
@@ -13,23 +12,18 @@ import type { ServerEvent } from './serverEvent';
  * handles what it missed with the same code as live news.
  */
 export async function currentArrivalEvents(userId: string): Promise<ServerEvent[]> {
-  const threads = await listThreadsByUser({ userId });
+  // A thread owes at most one arrival: its newest live row, when that is a
+  // user Message.
+  const arrivals = await listUnansweredArrivalsByUser({ userId });
   const events: ServerEvent[] = [];
 
-  for (const thread of threads) {
-    const rows = await listMessagesByThread({ threadId: thread.id });
-    // A thread owes at most one arrival: its newest live row, when that is
-    // a user Message.
-    const arrival = rows.filter((row) => !row.abandoned).at(-1);
-    if (!arrival || arrival.role !== 'user') continue;
-    const { id: messageId } = arrival;
-
+  for (const { threadId, messageId } of arrivals) {
     const stored = await storedGateOutcomeOrNull(messageId);
     if (stored?.kind === 'paused') {
       events.push({
         kind: 'verdict-paused',
         userId,
-        threadId: thread.id,
+        threadId,
         messageId,
         fireChannel: stored.verdict.fireChannel,
       });
@@ -42,7 +36,7 @@ export async function currentArrivalEvents(userId: string): Promise<ServerEvent[
       events.push({
         kind: 'verdict-ok',
         userId,
-        threadId: thread.id,
+        threadId,
         messageId,
         verdict: clear === 'pass' || clear === 'muted' ? clear : null,
       });
@@ -50,7 +44,7 @@ export async function currentArrivalEvents(userId: string): Promise<ServerEvent[
     }
 
     if (judgmentFailed(await findDriftGateJudgeArrivalJobOrNull(messageId))) {
-      events.push({ kind: 'gate-failed', userId, threadId: thread.id, messageId });
+      events.push({ kind: 'gate-failed', userId, threadId, messageId });
     }
   }
 
