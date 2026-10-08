@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
-import type { DbExecutor } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
@@ -20,7 +19,7 @@ import {
 } from '@services/aiService';
 import { publish } from '@services/events';
 import { editMessage } from '@services/messageService';
-import { someoneWaitsOnALock } from '@test/locks';
+import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { memoryOn } from '@test/memory';
 import { addDeadJob, useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
@@ -322,37 +321,7 @@ describe('requests meeting on one arrival', () => {
     }
   }
 
-  /** Held transactions a failed test left open, released before the next. */
-  const openCommits = new Set<() => Promise<void>>();
-  afterEach(async () => {
-    await Promise.all([...openCommits].map((commit) => commit()));
-  });
-
-  /**
-   * A transaction held open by the test, standing in for a claim or an
-   * edit caught mid-way. `commit` lets it finish.
-   */
-  async function openTransaction(): Promise<{ trx: DbExecutor; commit: () => Promise<void> }> {
-    let release = () => {};
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let opened: (trx: DbExecutor) => void = () => {};
-    const handle = new Promise<DbExecutor>((resolve) => {
-      opened = resolve;
-    });
-    const done = db.transaction().execute(async (trx) => {
-      opened(trx);
-      await released;
-    });
-    const commit = async () => {
-      openCommits.delete(commit);
-      release();
-      await done;
-    };
-    openCommits.add(commit);
-    return { trx: await handle, commit };
-  }
+  const openTransaction = useHeldTransactions();
 
   function heldSubmit(props: { userId: string; threadId: string; content: string }) {
     const held = heldJudging();
