@@ -1,3 +1,4 @@
+import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import { isValidUuid } from '@services/validation';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -17,7 +18,8 @@ type GenerateTitleBody = {
  * Queues the thread's titling and answers at once; the title lands with
  * the queue and reaches open tabs through the push channel. Regeneration
  * (`forced`) names the thread from its first segment and replaces any
- * title it already has.
+ * title it already has. 404, with nothing queued, for a Thread the user
+ * does not own.
  */
 export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
   fastify.post(
@@ -32,6 +34,9 @@ export async function setupThreadsGenerateTitleRoute(fastify: FastifyInstance) {
       const params = request.params as GenerateTitleParams;
       if (!isValidUuid(params.id)) {
         return reply.code(400).send({ error: 'Invalid thread id' });
+      }
+      if (!(await findThreadByIdAndUser({ userId, threadId: params.id }))) {
+        return reply.code(404).send({ error: 'Thread not found' });
       }
 
       const body = (request.body ?? {}) as GenerateTitleBody;
