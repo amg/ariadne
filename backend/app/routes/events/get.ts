@@ -52,16 +52,18 @@ export async function setupEventsGetRoute(fastify: FastifyInstance) {
       const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), HEARTBEAT_INTERVAL_MS);
       heartbeat.unref();
 
+      // Listening before the snapshot's await: a tab that leaves during it
+      // must still release its subscription and heartbeat.
+      raw.on('close', () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+
       try {
         for (const event of await currentArrivalEvents(userId)) writeEvent(raw, event);
       } catch (error) {
         request.log.error({ err: error }, 'could not re-emit arrival state on connect');
       }
-
-      raw.on('close', () => {
-        clearInterval(heartbeat);
-        unsubscribe();
-      });
     },
   );
 }

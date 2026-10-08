@@ -3,7 +3,7 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { DRIFT_GATE_JUDGE_ARRIVAL } from '@queue/tasks/driftGateJudgeArrivalTask';
-import { publish } from '@services/events';
+import { currentArrivalEvents, publish, subscribe } from '@services/events';
 import { addDeadJob } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -19,6 +19,18 @@ vi.mock('supertokens-node/recipe/session/framework/fastify', () => ({
       request.session = { getUserId: () => userId };
     },
 }));
+
+/** The real bus and snapshot, wrapped so a test can slow the snapshot or watch unsubscribes. */
+vi.mock('@services/events', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@services/events')>();
+  return {
+    ...actual,
+    subscribe: vi.fn(actual.subscribe),
+    currentArrivalEvents: vi.fn(actual.currentArrivalEvents),
+  };
+});
+
+const actualEvents = await vi.importActual<typeof import('@services/events')>('@services/events');
 
 useTestDb();
 
@@ -157,5 +169,36 @@ describe('GET /api/events', () => {
 
     const after = await openTab(userId);
     expect(await after.nextFrame()).toEqual(expected);
+  });
+
+  it('releases the subscription of a tab that leaves during the connect snapshot', async () => {
+    const { userId } = await freshThread();
+    let releaseSnapshot = () => {};
+    const snapshotStarted = new Promise<void>((started) => {
+      vi.mocked(currentArrivalEvents).mockImplementationOnce(() => {
+        started();
+        return new Promise((resolve) => {
+          releaseSnapshot = () => resolve([]);
+        });
+      });
+    });
+    const unsubscribed = vi.fn();
+    vi.mocked(subscribe).mockImplementationOnce((wants, handle) => {
+      const unsubscribe = actualEvents.subscribe(wants, handle);
+      return () => {
+        unsubscribe();
+        unsubscribed();
+      };
+    });
+
+    const tab = await openTab(userId);
+    await snapshotStarted;
+    tab.close();
+
+    try {
+      await vi.waitFor(() => expect(unsubscribed).toHaveBeenCalledOnce());
+    } finally {
+      releaseSnapshot();
+    }
   });
 });
