@@ -30,6 +30,7 @@ export interface ThreadModelInfo {
 /** Aggregated thread statistics computed on-the-fly from message_usage. */
 export interface ThreadSummary {
   threadId: string;
+  /** Live messages only: rows abandoned by Retry, Edit or Handover are left out. */
   totalMessages: number;
   userMessages: number;
   assistantMessages: number;
@@ -61,6 +62,10 @@ export interface ThreadSummary {
    * models and appear only when that category spent something.
    */
   models: ThreadModelInfo[];
+  /**
+   * The context the latest live Exchange filled, measured against that
+   * Exchange's model window; zero with no limit before any reply.
+   */
   contextUsage: {
     used: number;
     limit: number | null;
@@ -81,7 +86,9 @@ interface AggregatedStats {
 }
 
 /**
- * Aggregates statistics from message usage rows.
+ * Aggregates statistics from message usage rows. Message counts cover
+ * only the live rows the chat shows; spend and token totals cover every
+ * row, abandoned ones included, since they report what the thread burned.
  */
 function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
   const stats: AggregatedStats = {
@@ -96,8 +103,8 @@ function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
   };
 
   for (const msg of messages) {
-    if (msg.role === 'user') stats.userCount++;
-    else if (msg.role === 'assistant') stats.assistantCount++;
+    if (!msg.abandoned && msg.role === 'user') stats.userCount++;
+    else if (!msg.abandoned && msg.role === 'assistant') stats.assistantCount++;
 
     if (!msg.model || !msg.costUsd) continue;
 
@@ -112,6 +119,28 @@ function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
   }
 
   return stats;
+}
+
+interface LatestReply {
+  model: string;
+  contextTokens: number;
+}
+
+/**
+ * The newest live reply that carries usage, with the context it filled:
+ * its prompt already holds the whole thread before it, so prompt plus
+ * completion approximates what the next Exchange sends. Null when no
+ * live reply has usage.
+ */
+function latestLiveReplyOrNull(messages: MessageWithUsageRow[]): LatestReply | null {
+  const reply = messages.findLast(
+    (msg) => msg.role === 'assistant' && !msg.abandoned && msg.model !== null,
+  );
+  if (!reply?.model) return null;
+  return {
+    model: reply.model,
+    contextTokens: (reply.promptTokens ?? 0) + (reply.completionTokens ?? 0),
+  };
 }
 
 /**
@@ -223,6 +252,7 @@ export async function getThreadSummary(args: {
   // Aggregate statistics
   const stats = aggregateStats(messages);
   const primaryModel = findPrimaryModel(stats.modelCounts);
+  const latestReply = latestLiveReplyOrNull(messages);
 
   // The thread's full spend: the chat exchanges' usage rows plus the
   // arrival pipeline's embedding, rewrite, and judge spend, plus Fact capture.
@@ -238,20 +268,21 @@ export async function getThreadSummary(args: {
   // Get context window, pricing, and cached rate from DB cache (or fallback)
   const loadConfig = createConfigLoader();
 
-  let contextLimit: number | null = null;
   let cachedCost = 0;
-
   if (primaryModel) {
     const config = await loadConfig(primaryModel);
-    if (config) {
-      contextLimit = config.contextWindow;
-
-      // Calculate cached cost: cachedTokens × cachedPricePerMillion / 1M
-      if (stats.totalCached > 0 && config.cachedPricePerMillion) {
-        cachedCost = (stats.totalCached * config.cachedPricePerMillion) / 1_000_000;
-      }
+    // Calculate cached cost: cachedTokens × cachedPricePerMillion / 1M
+    if (config && stats.totalCached > 0 && config.cachedPricePerMillion) {
+      cachedCost = (stats.totalCached * config.cachedPricePerMillion) / 1_000_000;
     }
   }
+
+  // Context is a snapshot of the next request, so both its size and its
+  // window come from the latest live reply, not from the thread's totals.
+  const contextUsed = latestReply?.contextTokens ?? 0;
+  const contextLimit = latestReply
+    ? ((await loadConfig(latestReply.model))?.contextWindow ?? null)
+    : null;
 
   // Analyzer slots list the current pipeline models and only appear when
   // their category spent something.
@@ -268,11 +299,11 @@ export async function getThreadSummary(args: {
 
   const totalTokensUsed = stats.totalPrompt + stats.totalCompletion;
   const contextPercentage =
-    contextLimit !== null && contextLimit > 0 ? (totalTokensUsed / contextLimit) * 100 : null;
+    contextLimit !== null && contextLimit > 0 ? (contextUsed / contextLimit) * 100 : null;
 
   return {
     threadId,
-    totalMessages: messages.length,
+    totalMessages: messages.filter((msg) => !msg.abandoned).length,
     userMessages: stats.userCount,
     assistantMessages: stats.assistantCount,
     totalCostUsd: grandTotalCost.toFixed(10),
@@ -294,7 +325,7 @@ export async function getThreadSummary(args: {
     primaryModel,
     models,
     contextUsage: {
-      used: totalTokensUsed,
+      used: contextUsed,
       limit: contextLimit,
       percentage: contextPercentage,
     },
