@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aws-prod architecture: Cloudflare, AWS and the services</title>
+<style>
+  :root {
+    --ink: #1d2733; --soft: #5b6b7c; --line: #d8dee6; --bg: #f4f6f9; --card: #ffffff;
+    --op: #6b7280;  --op-soft: #eef0f3;
+    --cf: #d9772b;  --cf-soft: #fdf0e4;
+    --core: #2563a8; --core-soft: #e3edf8;
+    --app: #2e7d5b; --app-soft: #e2f2ea;
+    --load: #6e56cf; --load-soft: #ece7fb;
+    --bad: #c2542e; --bad-soft: #fbe9e1;
+    --warn: #a07800; --warn-soft: #fbf3d6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.55; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  .sub { color: var(--soft); margin: 0 0 28px; }
+  h2 { font-size: 1.2rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 1rem; margin: 26px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--soft); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; }
+  code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: .84em; }
+  .tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .ok { background: var(--app-soft); color: var(--app); }
+  .no { background: var(--bad-soft); color: var(--bad); }
+  .part { background: var(--warn-soft); color: var(--warn); }
+  .t-cf { background: var(--cf-soft); color: var(--cf); }
+  .t-core { background: var(--core-soft); color: var(--core); }
+  .t-app { background: var(--app-soft); color: var(--app); }
+  .t-load { background: var(--load-soft); color: var(--load); }
+  svg { display: block; width: 100%; height: auto; margin: 6px 0; font-family: system-ui, sans-serif; }
+  figure { margin: 0; }
+  figcaption { color: var(--soft); font-size: .85rem; margin-top: 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .8rem; color: var(--soft); margin: 4px 0 10px; }
+  .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .l-op::before { background: var(--op-soft); border: 1.5px solid var(--op); }
+  .l-cf::before { background: var(--cf-soft); border: 1.5px solid var(--cf); }
+  .l-core::before { background: var(--core-soft); border: 1.5px solid var(--core); }
+  .l-app::before { background: var(--app-soft); border: 1.5px solid var(--app); }
+  .l-load::before { background: var(--load-soft); border: 1.5px solid var(--load); }
+  .pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; margin: 10px 0 4px; }
+  .pipe .s { flex: 1 1 120px; border-radius: 8px; padding: 8px 10px; font-size: .8rem; border: 1.5px solid; min-width: 110px; }
+  .pipe .s b { display: block; font-size: .84rem; }
+  .pipe .a { flex: 0 0 18px; display: flex; align-items: center; justify-content: center; color: var(--soft); }
+  .s.op { background: var(--op-soft); border-color: var(--op); }
+  .s.cf { background: var(--cf-soft); border-color: var(--cf); }
+  .s.core { background: var(--core-soft); border-color: var(--core); }
+  .s.app { background: var(--app-soft); border-color: var(--app); }
+  .s.load { background: var(--load-soft); border-color: var(--load); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .gate { border-left: 4px solid var(--app); padding: 8px 14px; margin: 12px 0; background: #fbfcfd; }
+  .gate.bad { border-left-color: var(--bad); }
+  .track { border-top: 3px solid var(--core); }
+  .track.b { border-top-color: var(--cf); }
+  .track.c { border-top-color: var(--app); }
+  ol li, ul li { margin: 4px 0; }
+  .note { color: var(--soft); font-size: .86rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>aws-prod architecture: Cloudflare, AWS and the services</h1>
+<p class="sub">What aws-prod is made of and how its parts connect. How it is raised, tested and recovered is in
+<a href="AWS-PROD-DEPLOYMENT.html">AWS-PROD-DEPLOYMENT.html</a>; the decision behind it is
+<a href="../../adrs/0014-aws-prod-hosting.md">ADR 0014</a>. How work and news move inside the app, on any deployment,
+is in <a href="../flows/BACKGROUND-WORK.md">BACKGROUND-WORK.md</a>. <code>&lt;project&gt;</code> below stands for the
+operator's <code>AWS_PROD_PROJECT</code>.</p>
+
+<h2>1. The short version</h2>
+<div class="card">
+  <p>The hostname (<code>AWS_PROD_HOSTNAME</code>) is a <b>proxied</b> record at Cloudflare pointing at a public
+  AWS load balancer. Nobody reaches the load balancer except Cloudflare, and Cloudflare forwards only the
+  operator and the current run's load generators. Cloudflare and the load balancer prove themselves to
+  each other with two certificates, one in each direction, both made when core is set up.</p>
+  <p>There is no tunnel and no second CDN: Cloudflare handles public HTTPS and the allow-list, the load
+  balancer sends <code>/api/*</code> to the backend and everything else to nginx. Behind it, the API and a separate
+  worker share Postgres and Valkey; the auth core and inference (mocked during load tests) are their own services,
+  resolved directly through AWS Cloud Map private DNS without an internal load balancer.</p>
+  <p>Cloudflare is defined by Terraform, AWS by CDK. Everything lives in aws-prod's own AWS account in <code>ap-southeast-2</code>, in
+  three lifetimes: <b>core</b> stays, <b>app</b> exists while aws-prod is up, <b>load</b> runs generator tasks in a separate stack and VPC during a run.</p>
+</div>
+
+<h2>2. The services</h2>
+<div class="legend">
+  <span class="l-op">operator</span><span class="l-cf">Cloudflare</span><span class="l-core">core (always)</span>
+  <span class="l-app">app (while up)</span><span class="l-load">load (during a run)</span>
+</div>
+<figure>
+<svg viewBox="0 0 960 790" role="img" aria-label="aws-prod services and how they connect">
+  <defs>
+    <marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5b6b7c"/></marker>
+  </defs>
+  <style>
+    .t { font-size: 12px; fill: #1d2733; } .ts { font-size: 10.5px; fill: #5b6b7c; } .th { font-size: 13px; font-weight: 700; fill: #1d2733; }
+    .ln { stroke: #5b6b7c; stroke-width: 1.4; fill: none; marker-end: url(#sa); }
+    .trunk { stroke: #5b6b7c; stroke-width: 1.4; fill: none; }
+    .dl { stroke: #5b6b7c; stroke-width: 1.2; fill: none; stroke-dasharray: 5 4; marker-end: url(#sa); }
+  </style>
+
+  <!-- who comes in -->
+  <rect x="30" y="10" width="220" height="56" rx="8" fill="#fff" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="44" y="30" class="th">Operator's browser</text>
+  <text x="44" y="46" class="ts">operator's machine</text>
+  <text x="44" y="58" class="ts">allowed by address at edge</text>
+  <rect x="270" y="10" width="404" height="56" rx="8" fill="#ece7fb" stroke="#6e56cf" stroke-width="1.5"/>
+  <text x="284" y="28" class="th" fill="#4d32a8">LoadStack (load lifetime) · in AWS ap-southeast-2</text>
+  <text x="284" y="44" class="ts">Own Load VPC (public subnets) · separate ECS cluster · 1–10 tasks</text>
+  <text x="284" y="58" class="ts">Outbound over internet to Cloudflare with x-&lt;project&gt;-load-key</text>
+
+  <!-- Cloudflare -->
+  <rect x="20" y="82" width="654" height="58" rx="10" fill="#fdf0e4" stroke="#d9772b" stroke-width="1.5"/>
+  <text x="36" y="104" class="th">Cloudflare edge · proxied hostname</text>
+  <text x="36" y="124" class="ts">allow-list · strict TLS to the origin certificate · presents aws-prod's client certificate</text>
+  <line x1="140" y1="66" x2="140" y2="82" class="ln"/>
+  <line x1="472" y1="66" x2="472" y2="82" class="ln"/>
+
+  <!-- AWS region and app VPC -->
+  <rect x="12" y="156" width="936" height="620" rx="12" fill="none" stroke="#9aa6b2" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="330" y="172" class="ts">AWS ap-southeast-2 · aws-prod's own account (core, app and load lifetimes)</text>
+  <rect x="26" y="182" width="648" height="584" rx="10" fill="#f5fbf8" stroke="#2e7d5b" stroke-width="1.5"/>
+  <text x="40" y="201" class="th">App VPC · two availability zones · no NAT gateway</text>
+
+  <!-- edge subnets -->
+  <rect x="40" y="210" width="620" height="68" rx="8" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/>
+  <text x="50" y="225" class="ts">edge subnets (public)</text>
+  <rect x="190" y="220" width="380" height="50" rx="7" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
+  <text x="202" y="240" class="th">Load balancer · HTTPS 443</text>
+  <text x="202" y="258" class="ts">Cloudflare ranges only · mutual TLS, verified · host must match</text>
+  <line x1="360" y1="140" x2="360" y2="218" class="ln"/>
+  <text x="368" y="152" class="ts">HTTPS · mutual TLS</text>
+
+  <!-- app subnets -->
+  <rect x="40" y="292" width="620" height="300" rx="8" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/>
+  <text x="50" y="307" class="ts">app subnets (isolated)</text>
+
+  <rect x="56" y="322" width="150" height="58" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
+  <text x="68" y="342" class="th">Web · nginx</text><text x="68" y="358" class="ts">:8080 · static files</text><text x="68" y="373" class="ts">1–3 tasks</text>
+
+  <rect x="242" y="322" width="124" height="58" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
+  <text x="254" y="342" class="th">API service</text><text x="254" y="358" class="ts">:3001 · /api/*</text><text x="254" y="373" class="ts">1–40 tasks</text>
+  <rect x="374" y="322" width="122" height="58" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
+  <text x="386" y="342" class="th">Worker service</text><text x="386" y="358" class="ts">queue · no port</text><text x="386" y="373" class="ts">1–20 tasks</text>
+
+  <rect x="528" y="314" width="120" height="82" rx="7" fill="#fff" stroke="#9aa6b2"/>
+  <text x="538" y="334" class="th">VPC endpoints</text><text x="538" y="352" class="ts">ECR · S3 · Logs</text>
+  <text x="538" y="368" class="ts">Secrets · SSM</text><text x="538" y="384" class="ts">no internet needed</text>
+
+  <rect x="56" y="440" width="150" height="60" rx="7" fill="#eef0f3" stroke="#6b7280"/>
+  <text x="68" y="462" class="th">Warm-up task</text><text x="68" y="480" class="ts">one-off, each raise</text>
+
+  <!-- Cloud Map namespace for internal services -->
+  <rect x="222" y="416" width="292" height="92" rx="8" fill="#f4faf7" stroke="#2e7d5b" stroke-dasharray="4 3"/>
+  <text x="232" y="432" class="ts" font-weight="700" fill="#206a4a">AWS Cloud Map · &lt;project&gt;.internal (Route 53 Private DNS)</text>
+
+  <rect x="230" y="440" width="134" height="60" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
+  <text x="240" y="458" class="th">Auth core</text><text x="240" y="474" class="ts">:3567 · auth.internal</text><text x="240" y="490" class="ts">1–8 tasks · no ALB</text>
+  <rect x="372" y="440" width="134" height="60" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
+  <text x="382" y="458" class="th">Mock inference</text><text x="382" y="474" class="ts">:4141 · mock.internal</text><text x="382" y="490" class="ts">1–12 tasks · no ALB</text>
+  <rect x="528" y="440" width="120" height="60" rx="7" fill="#eef0f3" stroke="#6b7280"/>
+  <text x="540" y="462" class="th">Bastion</text><text x="540" y="480" class="ts">SSM only, no ports</text>
+
+  <!-- requests in -->
+  <line x1="222" y1="270" x2="150" y2="320" class="ln"/>
+  <text x="58" y="298" class="ts">everything else</text>
+  <line x1="304" y1="270" x2="304" y2="320" class="ln"/>
+  <text x="310" y="300" class="ts">/api/*</text>
+
+  <!-- backend to its services via Cloud Map -->
+  <line x1="297" y1="380" x2="297" y2="414" class="ln"/>
+  <line x1="439" y1="380" x2="439" y2="414" class="ln"/>
+  <text x="368" y="401" class="ts" text-anchor="middle" fill="#206a4a">private DNS resolution (no ALB)</text>
+
+  <!-- data subnets -->
+  <rect x="40" y="606" width="620" height="150" rx="8" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/>
+  <text x="50" y="621" class="ts">data subnets (isolated)</text>
+  <rect x="90" y="636" width="250" height="104" rx="7" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
+  <text x="102" y="658" class="th">Postgres 16 · RDS</text>
+  <text x="102" y="676" class="ts">:5432 · TLS, verified</text>
+  <text x="102" y="692" class="ts">app tables · auth schema · queue</text>
+  <text x="102" y="708" class="ts">restored from the seed snapshot</text>
+  <text x="102" y="724" class="ts">one instance, fixed size</text>
+  <rect x="396" y="636" width="250" height="104" rx="7" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
+  <text x="408" y="658" class="th">Valkey · ElastiCache</text>
+  <text x="408" y="676" class="ts">:6379 · TLS only · serverless</text>
+  <text x="408" y="692" class="ts">event bus · users' stops</text>
+  <text x="408" y="708" class="ts">between backend copies</text>
+  <text x="408" y="724" class="ts">hard caps: storage, requests/s</text>
+
+  <!-- API and worker to the data -->
+  <path d="M340 380 V400 H368" class="trunk"/>
+  <path d="M400 380 V400 H368" class="trunk"/>
+  <path d="M368 400 V616" class="trunk"/>
+  <line x1="368" y1="616" x2="300" y2="634" class="ln"/>
+  <line x1="368" y1="616" x2="440" y2="634" class="ln"/>
+  <text x="380" y="540" class="ts">API and worker</text>
+  <text x="380" y="555" class="ts">to Postgres and Valkey</text>
+  <line x1="262" y1="500" x2="230" y2="634" class="ln"/>
+  <line x1="131" y1="500" x2="150" y2="634" class="ln"/>
+
+  <!-- operator access -->
+  <path d="M560 500 V592 H330 L322 634" class="dl"/>
+  <line x1="610" y1="500" x2="610" y2="634" class="dl"/>
+  <text x="530" y="524" class="ts">SSM port forward</text>
+
+  <!-- core -->
+  <rect x="690" y="182" width="246" height="584" rx="10" fill="#e3edf8" stroke="#2563a8" stroke-width="1.5"/>
+  <text x="704" y="203" class="th">Core (always)</text>
+  <text x="704" y="219" class="ts">kept while aws-prod is down</text>
+  <rect x="704" y="232" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="252" class="th">Image repositories</text><text x="714" y="269" class="ts">backend · web · auth · tools · load</text>
+  <rect x="704" y="288" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="308" class="th">Secrets Manager</text><text x="714" y="325" class="ts">auth API key · population password</text>
+  <rect x="704" y="344" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="364" class="th">SSM parameters</text><text x="714" y="381" class="ts">origin certificate ARN</text><text x="714" y="397" class="ts">seed snapshot id · run key</text>
+  <rect x="704" y="416" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="436" class="th">Vault bucket (S3)</text><text x="714" y="453" class="ts">Terraform state · trust CA</text><text x="714" y="469" class="ts">spend ledger · access logs</text>
+  <rect x="704" y="488" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="508" class="th">Origin certificate (ACM)</text><text x="714" y="525" class="ts">signed by Cloudflare's Origin CA</text>
+  <rect x="704" y="544" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
+  <text x="714" y="564" class="th">Seed snapshot (RDS)</text><text x="714" y="581" class="ts">every step but seed starts here</text>
+  <rect x="704" y="600" width="218" height="62" rx="7" fill="#fbe9e1" stroke="#c2542e"/>
+  <text x="714" y="620" class="th">Safety net</text><text x="714" y="637" class="ts">deletes the app stack after 3 h</text><text x="714" y="653" class="ts">and the load stack after 1 h</text>
+
+  <!-- what the app draws from core -->
+  <line x1="648" y1="355" x2="702" y2="311" class="dl"/>
+  <path d="M570 236 H682 V447 H702" class="dl"/>
+  <text x="576" y="254" class="ts">trust CA · logs</text>
+</svg>
+<figcaption>Solid arrows are requests and connections; dashed ones are operator access and what the app draws from core.
+Every task pulls its image, reads its secrets and writes its logs through the VPC endpoints. The load balancer
+presents the origin certificate from ACM, reads its trust CA from the vault, and writes access logs there.
+Auth core and mock inference are discovered directly via AWS Cloud Map (Route 53 private DNS: <code>&lt;project&gt;.internal</code>) with no internal load balancer.
+Load generators run inside AWS as a separate LoadStack and VPC, sending traffic out to Cloudflare over the public internet.</figcaption>
+</figure>
+
+<h3>Every connection</h3>
+<table>
+  <tr><th>From</th><th>To</th><th>Port</th><th>How</th><th>For</th></tr>
+  <tr><td>operator</td><td>Cloudflare</td><td>443</td><td>HTTPS, public internet</td><td>browser access, allowed by operator IP at edge</td></tr>
+  <tr><td>load generators (LoadStack)</td><td>Cloudflare</td><td>443</td><td>HTTPS over internet, with <code>x-&lt;project&gt;-load-key</code></td><td>simulated users from AWS Load VPC hitting public edge</td></tr>
+  <tr><td>Cloudflare</td><td>load balancer</td><td>443</td><td>HTTPS, mutual TLS</td><td>every request that passed the allow-list</td></tr>
+  <tr><td>load balancer</td><td>API</td><td>3001</td><td>HTTP, inside the VPC</td><td><code>/api/*</code> for the hostname</td></tr>
+  <tr><td>load balancer</td><td>web (nginx)</td><td>8080</td><td>HTTP, inside the VPC</td><td>everything else for the hostname</td></tr>
+  <tr><td>API, worker</td><td>auth core</td><td>3567</td><td>HTTP via Cloud Map (<code>auth.&lt;project&gt;.internal</code>), no internal ALB</td><td>sessions and sign-in</td></tr>
+  <tr><td>API, worker</td><td>mock inference</td><td>4141</td><td>HTTP via Cloud Map (<code>mock.&lt;project&gt;.internal</code>), no internal ALB</td><td>replies, embeddings, judge and rewrite calls</td></tr>
+  <tr><td>API, worker</td><td>Postgres</td><td>5432</td><td>TLS, certificate verified</td><td>app data and the queue; the API runs migrations at start</td></tr>
+  <tr><td>auth core</td><td>Postgres</td><td>5432</td><td>TLS</td><td>its own <code>auth</code> schema</td></tr>
+  <tr><td>API, worker</td><td>Valkey</td><td>6379</td><td>TLS (<code>rediss://</code>)</td><td>news and stops between backend copies</td></tr>
+  <tr><td>warm-up task</td><td>Postgres</td><td>5432</td><td>TLS, certificate verified</td><td>reads every block once after a restore</td></tr>
+  <tr><td>operator, via bastion</td><td>Postgres, Valkey</td><td>5432, 6379</td><td>SSM port forward; the bastion opens no ports</td><td><code>aws-prod db-tunnel</code> → <code>localhost:15433</code></td></tr>
+  <tr><td>every task</td><td>VPC endpoints</td><td>443</td><td>HTTPS to AWS APIs</td><td>images (ECR, S3), secrets, logs, SSM</td></tr>
+</table>
+<p class="note">The API and the worker never talk to each other directly. The API queues work in Postgres; the worker
+picks it up and announces the result through Valkey, which the API copy holding the user's request is listening to.
+The worker takes no requests from the load balancer.</p>
+
+<h3>Every service is its own, sized on its own</h3>
+<p>Each box is an ECS service with its own task definition, task size and count. The API, the worker and mock inference
+are built from the same backend image but each starts its own command: the API runs migrations and then
+<code>server.aws.js</code>, the worker <code>worker.js</code>, the mock <code>mock/server.ts</code>. The auth core is SuperTokens'
+own server, the same container the single-server setup runs; the backend talks to it through the <code>supertokens-node</code> library.
+Per step, in tasks × vCPU per task:</p>
+<table>
+  <tr><th>Step</th><th>API</th><th>Worker</th><th>Auth core</th><th>Mock</th><th>Web</th></tr>
+  <tr><td><code>seed</code></td><td>1 × 2</td><td>1 × 1</td><td>2 × 2</td><td>1 × 0.5</td><td>1 × 0.25</td></tr>
+  <tr><td><code>smoke</code></td><td>1 × 1</td><td>1 × 1</td><td>1 × 1</td><td>1 × 0.5</td><td>1 × 0.25</td></tr>
+  <tr><td><code>step10</code></td><td>2 × 0.5</td><td>1 × 1</td><td>1 × 0.5</td><td>1 × 0.5</td><td>1 × 0.25</td></tr>
+  <tr><td><code>step50</code></td><td>20 × 1</td><td>10 × 1</td><td>4 × 1</td><td>6 × 1</td><td>2 × 0.25</td></tr>
+  <tr><td><code>step100</code></td><td>40 × 1</td><td>20 × 1</td><td>8 × 1</td><td>12 × 1</td><td>3 × 0.25</td></tr>
+</table>
+<p class="note">None of them scales automatically: each step fixes every count. Long-lived connections never move to new
+tasks, so the API is sized for the run's target before load starts rather than left to react. The auth core gets 4 vCPU at
+<code>seed</code>, more than any step below <code>step50</code>, because 100,000 sign-ups hash 100,000 passwords.</p>
+
+<h2>3. The way in, and its checks</h2>
+<p>A request meets these in order. Checks 2, 4 and 5 each stand on their own: Cloudflare's address ranges are
+shared by every Cloudflare customer, so it is the client certificate that stops another customer's zone from
+proxying to this load balancer.</p>
+<table>
+  <tr><th>#</th><th>Where</th><th>Check</th><th>Defined in</th><th>A request that fails it sees</th></tr>
+  <tr><td>1</td><td><span class="tag t-cf">Cloudflare</span></td>
+      <td><b>Allow-list</b>: the source address is the operator's, or the request carries this run's key in the load-key header</td>
+      <td><code>cloudflare/app</code></td><td>Cloudflare's block page (403)</td></tr>
+  <tr><td>2</td><td><span class="tag t-app">AWS</span></td>
+      <td><b>Address</b>: the load balancer's security group admits only Cloudflare's published IPv4 ranges</td>
+      <td><code>config/cloudflareRanges.ts</code></td><td>a connection that never opens (Cloudflare shows 522)</td></tr>
+  <tr><td>3</td><td>both</td>
+      <td><b>Origin certificate</b>: Cloudflare, in strict mode for this hostname, accepts only a certificate its Origin CA signed for it</td>
+      <td><code>cloudflare/core</code>, <code>cloudflare/app</code></td><td>Cloudflare 526</td></tr>
+  <tr><td>4</td><td>both</td>
+      <td><b>Client certificate</b>: the listener runs mutual TLS in verify mode and accepts only a client certificate signed by aws-prod's own CA</td>
+      <td><code>cloudflare/core</code>, <code>lib/app/origin.ts</code></td><td>a failed handshake (Cloudflare shows 525)</td></tr>
+  <tr><td>5</td><td><span class="tag t-app">AWS</span></td>
+      <td><b>Host</b>: only requests for the hostname match a listener rule</td>
+      <td><code>lib/app/origin.ts</code></td><td>421 Misdirected request</td></tr>
+</table>
+<div class="gate bad"><b>There is no rate limiting in aws-prod.</b> The backend's AWS entry point (<code>server.aws.ts</code>)
+turns the app's limits off and leaves them to the edge, and the edge's sign-in limit is off because the Free plan
+can't hold it to this hostname or let the generators through. The allow-list is the only gate. That holds while it
+stays on, and Terraform refuses to switch it off unless the edge limit is on; opening aws-prod to the public needs a
+rate limit back first.</div>
+
+<h2>4. One message, step by step</h2>
+<div class="card">
+<ol>
+  <li>The browser posts to <code>/api/threads/:id/chat</code>. Cloudflare checks the allow-list and forwards it over strict TLS, presenting the client certificate.</li>
+  <li>The load balancer verifies the certificate, matches the host and the <code>/api/*</code> path, and picks an API task.</li>
+  <li>The API verifies the session (the auth core holds the signing keys), stores the arrival and queues its judgment in one Postgres transaction. It subscribes to the user's Valkey channel <em>before</em> the commit.</li>
+  <li>A worker task picks up the job, asks the mock for an embedding (and, if needed, a judge or rewrite call), commits the verdict, then publishes it to Valkey.</li>
+  <li>The API task holding the request hears the verdict and streams the mock's reply back through the load balancer and Cloudflare. The browser's push stream, held on any API task, hears the title and Fact news later.</li>
+</ol>
+</div>
+
+<h2>5. Why Valkey</h2>
+<div class="card">
+  <p>With several copies of the API and the worker, the code that produces news and the code waiting for it usually
+  run in different processes. Three things must cross between them:</p>
+  <table>
+    <tr><th>Message</th><th>From</th><th>To</th></tr>
+    <tr><td>A verdict</td><td>the worker that judged the arrival</td><td>the API copy holding the chat request that waits on it</td></tr>
+    <tr><td>A finished or failed capture</td><td>the worker that ran it</td><td>the API copy holding a waiting Handover</td></tr>
+    <tr><td>A user's news and stops</td><td>any copy</td><td>every API copy holding that user's tabs, or their running Exchange</td></tr>
+  </table>
+  <p>Valkey pub/sub carries all three, on one channel per user, so a message reaches only the copies holding that
+  user. It keeps nothing: Postgres stays the only record, and anyone waiting re-reads it, so a lost message costs
+  promptness, never correctness. A deployment that names no Valkey keeps the bus inside one process, as the single
+  server does.</p>
+</div>
+<table>
+  <tr><th>Alternative</th><th>Why not</th></tr>
+  <tr><td><b>Sticky sessions</b> at the load balancer</td><td>They pin a browser's own requests to one API copy, but most news starts on a worker, which cannot know which copy holds the user. They would help only the stop, and not across devices or deploys.</td></tr>
+  <tr><td><b>Postgres LISTEN/NOTIFY</b></td><td>No new service, but every commit that sends a notification takes one exclusive lock shared by the whole Postgres server and holds it until the commit is durable, so notifying commits run one at a time. The queue already pays that for every new job it inserts; push events would more than double it.</td></tr>
+  <tr><td><b>Polling the database</b> while a request waits</td><td>Slower by the poll interval, and many queries a second per waiting chat at the target load. Push to tabs would need polling too.</td></tr>
+</table>
+<p class="note">The decision and its failure rules are in <a href="../../adrs/0012-server-push-event-bus.md">ADR 0012</a>.</p>
+
+<h2>6. The two certificates</h2>
+<p>All the keys are generated by Terraform on the operator's machine and kept in Terraform's state, in the vault
+bucket (encrypted, no public access). Cloudflare's Origin CA only signs; it never sees a private key.</p>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0">Origin certificate: the load balancer proves itself</h3>
+    <table>
+      <tr><td>Signed by</td><td>Cloudflare's Origin CA</td></tr>
+      <tr><td>Presented by</td><td>the load balancer, from ACM</td></tr>
+      <tr><td>Checked by</td><td>Cloudflare (strict TLS, this hostname only)</td></tr>
+      <tr><td>Valid for</td><td>15 years</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Client certificate: Cloudflare proves itself</h3>
+    <table>
+      <tr><td>Signed by</td><td>aws-prod's own CA, made by Terraform</td></tr>
+      <tr><td>Presented by</td><td>Cloudflare, for this hostname only</td></tr>
+      <tr><td>Checked by</td><td>the load balancer's trust store, which reads the CA's public certificate from the vault</td></tr>
+      <tr><td>Valid for</td><td>CA 10 years, certificate 5 years</td></tr>
+    </table>
+  </div>
+</div>
+<p class="note">Neither renews itself; the earliest to expire is the client certificate, five years after core was first set up.</p>
+
+<h2>7. Who owns what, and for how long</h2>
+<table>
+  <tr><th>Lifetime</th><th>Cloudflare (Terraform)</th><th>AWS (CDK)</th></tr>
+  <tr><td><span class="tag t-core">core</span><br><span class="note">always</span></td>
+      <td><code>cloudflare/core</code>: origin certificate, client CA and client certificate (a per-hostname origin-pull certificate)</td>
+      <td>the <code>CDKToolkit</code> stack, vault bucket (Terraform state for both roots, trust CA, spend ledger, access logs), image repositories, secrets, safety net, seed snapshot, origin certificate in ACM</td></tr>
+  <tr><td><span class="tag t-app">app</span><br><span class="note">while up</span></td>
+      <td><code>cloudflare/app</code>: the proxied hostname record, the client-certificate binding, strict TLS, the allow-list (and the sign-in limit, off)</td>
+      <td>network, database, Valkey, the five services, load balancer, bastion</td></tr>
+  <tr><td><span class="tag t-load">load</span><br><span class="note">during a run</span></td>
+      <td>nothing: the generators reach Cloudflare over the internet, as users do</td>
+      <td><code>LoadStack</code>: the generators' own VPC (public subnets), ECS cluster, task definition, and CloudWatch log group</td></tr>
+</table>
+<figure>
+<svg viewBox="0 0 940 230" role="img" aria-label="lifetimes over a test day">
+  <style>.t{font-size:12px;fill:#1d2733}.ts{font-size:10.5px;fill:#5b6b7c}.th{font-size:13px;font-weight:700;fill:#1d2733}</style>
+  <line x1="150" y1="200" x2="920" y2="200" stroke="#9aa6b2"/>
+  <text x="150" y="218" class="ts">raise</text><text x="270" y="218" class="ts">+20 min: up</text><text x="520" y="218" class="ts">+1 h 20</text><text x="900" y="218" class="ts">+3 h</text>
+  <line x1="900" y1="20" x2="900" y2="200" stroke="#c2542e" stroke-dasharray="4 3"/><text x="790" y="34" class="ts" fill="#c2542e">safety net deletes app</text>
+
+  <text x="20" y="62" class="th">core</text>
+  <rect x="150" y="48" width="770" height="22" rx="5" fill="#e3edf8" stroke="#2563a8"/><text x="160" y="63" class="t">always · vault, images, secrets, snapshot, certificate, safety net</text>
+
+  <text x="20" y="110" class="th">app</text>
+  <rect x="150" y="96" width="120" height="22" rx="5" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/><text x="158" y="111" class="ts">creating</text>
+  <rect x="270" y="96" width="400" height="22" rx="5" fill="#e2f2ea" stroke="#2e7d5b"/><text x="280" y="111" class="t">up · runs happen here · torn down by hand</text>
+  <rect x="670" y="96" width="230" height="22" rx="5" fill="#fff" stroke="#c2542e" stroke-dasharray="4 3"/><text x="680" y="111" class="ts">only if forgotten</text>
+
+  <text x="20" y="158" class="th">load</text>
+  <rect x="300" y="144" width="220" height="22" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="310" y="159" class="t">one run (deleted after it)</text>
+  <line x1="660" y1="140" x2="660" y2="170" stroke="#c2542e" stroke-dasharray="4 3"/><text x="540" y="186" class="ts" fill="#c2542e">60-min cap from its start</text>
+</svg>
+<figcaption>Every resource carries a <code>&lt;project&gt;:lifetime</code> tag (core, app or load), so <code>aws-prod sweep</code> can list anything that outlived its teardown.</figcaption>
+</figure>
+<p class="note"><b><code>CDKToolkit</code></b> is what <code>cdk bootstrap</code> creates, once per account and region: a bucket for
+templates and file assets, an ECR repository for image assets, and the roles CDK uses to publish, look up and deploy, including
+the CloudFormation execution role stacks are created through. aws-prod creates the permissions boundary that fences those roles
+itself, before bootstrapping. The Cloudflare zone and API token are set up by hand. The app root takes over the zone's
+<code>http_config_settings</code>, <code>http_request_firewall_custom</code> and <code>http_ratelimit</code> rule phases; a zone has one
+of each, so a raise is refused if anything else already owns one.</p>
+
+<h2>8. What passes between Cloudflare and AWS</h2>
+<table>
+  <tr><th>Value</th><th>From → to</th><th>How</th><th>When</th></tr>
+  <tr><td>Origin certificate + key</td><td>Terraform state → ACM → listener</td><td>streamed by the core command; ARN kept in SSM</td><td>core</td></tr>
+  <tr><td>Client CA</td><td>Terraform state → vault bucket → trust store</td><td>core command</td><td>core</td></tr>
+  <tr><td>Client certificate id</td><td><code>cloudflare/core</code> → <code>cloudflare/app</code></td><td>Terraform output, passed as a variable</td><td>every raise</td></tr>
+  <tr><td>Load balancer DNS name</td><td>CloudFormation output → hostname record</td><td>passed as a Terraform variable</td><td>every raise, after the app stack</td></tr>
+  <tr><td>Run key</td><td>SSM → allow-list and generators</td><td>Terraform reads it from the environment, never the command line; generators get it as a task secret</td><td>minted per raise</td></tr>
+  <tr><td>Operator's addresses</td><td>operator's machine → allow-list</td><td>asked of Cloudflare's trace endpoint, IPv4 and IPv6</td><td>every edge apply</td></tr>
+  <tr><td>Cloudflare's IPv4 ranges</td><td>repo config → security group</td><td>synthesized into the app stack, compared with Cloudflare's live list before each raise</td><td>every raise</td></tr>
+  <tr><td>Terraform state</td><td>both roots → vault bucket</td><td>S3 backend with a lockfile, encrypted</td><td>every apply</td></tr>
+</table>
+<p class="note">The dependency runs one way at a time. At core, Cloudflare's side is made first and AWS takes its
+certificates. At each raise, AWS's side is made first and Cloudflare takes its load balancer's name.</p>
+
+<h2>9. The backend this shape needs</h2>
+<div class="card">
+  <ul>
+    <li><b>The API and the worker run apart.</b> The AWS entry point serves the API only and refuses to start without Valkey; the worker is its own process, chosen by <code>PROCESS_ROLE</code>.</li>
+    <li><b>News and stops cross copies over Valkey</b> (section 5).</li>
+    <li><b>Thread passes hold no connection across inference.</b> They commit optimistically, so only connections doing work count against the database's limit (<a href="../../adrs/0011-durable-background-work-queue.md">ADR 0011</a>).</li>
+    <li><b>One pending reply per Thread</b> is enforced by the database, so two copies cannot start the same Exchange.</li>
+    <li><b>A worker frees only jobs whose lock outlived the task time limit</b>, which only a crashed or frozen worker leaves, so many workers can share the queue.</li>
+    <li><b>Rate-limit counters stay per process</b>, and aws-prod runs with them off (section 3).</li>
+  </ul>
+</div>
+
+<h2>10. Decisions the ADR left open</h2>
+<table>
+  <tr><th>Decision</th><th>Why</th></tr>
+  <tr><td>Migrations run at API start</td><td>A deploy never races an empty database. The migration lock serializes tasks that start together.</td></tr>
+  <tr><td>Verified TLS to Postgres by an image layer (CA bundle + <code>PGSSLMODE</code>)</td><td>No app change: <code>pg</code> reads it from the environment when the URL carries no TLS options. The auth core's driver encrypts without verifying.</td></tr>
+  <tr><td>Daily spend budget set very high</td><td>Inference is mocked, so it should never refuse, but the check stays on the measured path.</td></tr>
+  <tr><td>The load generator signs in with header tokens</td><td>No cookie jar to keep. The backend already accepts bearer tokens.</td></tr>
+  <tr><td>Seeding goes through the real sign-up</td><td>The population is created exactly as users are, with Thread and Exchange rows to match.</td></tr>
+  <tr><td>Fixed-bucket histograms in the generator</td><td>Reports from many generators add up into one set of percentiles.</td></tr>
+  <tr><td>Performance Insights, Container Insights, load-balancer access logs, flow logs (rejects only)</td><td>A test run is only worth what it can measure. All of them are usage-priced and small.</td></tr>
+  <tr><td>Terraform owns the zone's three rule-phase entrypoints, guarded before each raise</td><td>A zone has one entrypoint per phase, so taking one over would replace other rules and deleting it would remove them.</td></tr>
+  <tr><td>Valkey in every step</td><td>One shape to test, and it costs pennies. It carries news and stops between backend copies.</td></tr>
+</table>
+
+</main>
+</body>
+</html>

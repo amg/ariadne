@@ -65,10 +65,9 @@ async function closedSegment() {
   });
   await insertThreadSegment({ threadId, startMessageId: boundary.id, modelId: EMBEDDING_MODEL_ID });
   events = [];
-  unsubscribe = subscribe(
-    (event) => event.threadId === threadId,
-    (event) => events.push(event),
-  );
+  unsubscribe = subscribe(userId, (event) => {
+    if (event.threadId === threadId) events.push(event);
+  }).close;
   return { userId, threadId, segmentId: segment.id };
 }
 

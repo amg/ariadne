@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "tsx watch app/server.ts",
     "start": "tsx app/server.ts",
+    "worker": "tsx app/worker.ts",
     "mock": "tsx mock/server.ts",
-    "migrate": "tsx src/db/db.ts",
+    "build": "esbuild app/server.ts app/server.aws.ts app/worker.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outdir=dist",
+    "migrate": "tsx src/db/migrate.ts",
     "migrate:prod": "tsx scripts/migrate-prod.ts",
     "queue:retry-failed": "tsx scripts/queue-retry-failed.ts",
     "smoke": "tsx smoke/e2e.ts",
@@ -32,6 +34,7 @@
     "dotenv": "^17.4.2",
     "fastify": "^5.12.4",
     "graphile-worker": "^0.18.0",
+    "ioredis": "^5.11.1",
     "js-tiktoken": "^1.0.21",
     "kysely": "^0.29.5",
     "pg": "^8.23.0",
@@ -43,6 +46,7 @@
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.20.2",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

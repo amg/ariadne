@@ -2,7 +2,7 @@ import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { recordMessageExpansion } from '@queries/messageEmbeddings/recordMessageExpansion';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { computeInferenceCostUsd } from '@services/aiService/pricing';
 import { type Result, err, ok } from '../../../types/result';
@@ -33,7 +33,9 @@ import { naiveRefusalDetector } from './naiveRefusalDetector';
  * This step fails open: every outcome — including all failures — is
  * persisted, the raw message stays the fallback, and the transformer never
  * stops here. A stored outcome row short-circuits the whole step so reruns
- * never redo the rewrite tier.
+ * never redo the rewrite tier. When two passes rewrite the same arrival at
+ * once, the first outcome stored stands and the later steps of both read
+ * it; the spend of both is recorded.
  */
 
 /** Rewrite budget: one attempt at temperature 0, then a single retry. */
@@ -268,8 +270,9 @@ export const rewriteMessageStep: MessageStep = {
       mode,
     });
 
-    // Persists the terminal state on the arrival row. The embedding column
-    // is left null for the embed step to fill.
+    // Persists the terminal state on the arrival row unless another pass
+    // stored one first. The embedding column is left null for the embed
+    // step to fill.
     await recordMessageExpansion({
       messageId: userMessageId,
       modelId: EMBEDDING_MODEL_ID,
@@ -279,7 +282,7 @@ export const rewriteMessageStep: MessageStep = {
 
     // The rewrite/judge spends land in `message_side_costs`, keyed by step.
     if (decision.tried && decision.rewriteCostUsd !== null) {
-      await upsertSideCost({
+      await addSideCost({
         messageId: userMessageId,
         kind: 'rewrite',
         model: env.REWRITE_MODEL,
@@ -289,7 +292,7 @@ export const rewriteMessageStep: MessageStep = {
       });
     }
     if (decision.judgeCostUsd !== null) {
-      await upsertSideCost({
+      await addSideCost({
         messageId: userMessageId,
         kind: 'judge',
         model: env.JUDGE_MODEL,

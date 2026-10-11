@@ -1,0 +1,20 @@
+{
+  "name": "aws-prod-infra",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "synth": "CDK_DEFAULT_ACCOUNT=123456789012 AWS_PROD_HOSTNAME=aws-prod.example.com AWS_PROD_ZONE=example.com AWS_PROD_PROJECT=aws-prod cdk synth --quiet -c step=step100 -c imageTag=synth-check",
+    "check": "npm run typecheck && npm run synth"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1148.0",
+    "@types/node": "^22.20.2",
+    "aws-cdk": "^2.1145.0",
+    "aws-cdk-lib": "^2.273.0",
+    "constructs": "^10.8.1",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Message } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { upsertMessageEmbedding } from '@queries/messageEmbeddings/upsertMessageEmbedding';
+import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -591,7 +591,7 @@ describe('analyzeThread — persistence, reuse and provenance', () => {
     // Rows stored under a different embedding model are stale geometry —
     // re-embedded, never compared (provenance identity = model_id, the architectural decision).
     for (const assistant of [a1, a2, a3]) {
-      await upsertMessageEmbedding({
+      await recordTurnEmbedding({
         messageId: assistant.id,
         embedding: buildMockEmbedding('stale geometry fixture'),
         modelId: 'stale/embed-model',

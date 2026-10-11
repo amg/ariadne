@@ -5,7 +5,10 @@
  * CORS_ORIGINS passthrough that had vanished from the dev compose file):
  *
  *   1. code → .env.dev.example   every process.env.X the backend reads must be
- *                                documented in .env.dev.example.
+ *                                documented in .env.dev.example, unless
+ *                                aws-prod's service definitions set it: some
+ *                                vars (Valkey, the edge's rate limit) exist
+ *                                only there, and dev and home prod never set them.
  *   2. .env.dev.example → code   declared vars nobody reads are stale config
  *                                docs.
  *   3. compose passthrough       the COMPOSE_DEV_PASSTHROUGH list must each
@@ -39,6 +42,9 @@ const EXEMPT = new Set([
 const COMPOSE_DEV_PASSTHROUGH = ['DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_PORT'];
 
 const BACKEND_SCAN_DIRS = ['src', 'app', 'queue', 'scripts', 'mock', 'smoke', 'test'];
+
+/** Where aws-prod sets the backend's environment; setting a var there documents it. */
+const AWS_PROD_SERVICES = join(ROOT, 'infra', 'lib', 'app', 'services.ts');
 
 function collectTsFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -84,16 +90,32 @@ function readDeclaredVars(envExamplePath) {
   return declared;
 }
 
+/** Every `NAME:` key in aws-prod's service definitions (environment and secrets). */
+function readAwsProdVars() {
+  const vars = new Set();
+  let text;
+  try {
+    text = readFileSync(AWS_PROD_SERVICES, 'utf8');
+  } catch {
+    return vars;
+  }
+  for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]*):\s/g)) vars.add(m[1]);
+  return vars;
+}
+
 const errors = [];
 const codeVars = readVarsFromCode();
 const devDeclared = readDeclaredVars(join(ROOT, '.env.dev.example'));
+const awsProdSet = readAwsProdVars();
 const composeText = readFileSync(join(ROOT, 'compose.dev.yml'), 'utf8');
 
 // 1. code → .env.dev.example
 for (const v of [...codeVars].sort()) {
-  if (EXEMPT.has(v)) continue;
+  if (EXEMPT.has(v) || awsProdSet.has(v)) continue;
   if (!devDeclared.has(v)) {
-    errors.push(`env read in backend code but undocumented: ${v} (add it to .env.dev.example)`);
+    errors.push(
+      `env read in backend code but undocumented: ${v} (add it to .env.dev.example, or set it in infra/lib/app/services.ts if only aws-prod uses it)`,
+    );
   }
 }
 

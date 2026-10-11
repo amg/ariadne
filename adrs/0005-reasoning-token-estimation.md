@@ -1,3 +1,7 @@
+---
+description: Reasoning tokens the provider does not report are estimated from the reasoning text with a tokenizer.
+---
+
 # ADR 0005: Reasoning Token Estimation
 
 ## Status

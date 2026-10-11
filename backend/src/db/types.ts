@@ -346,7 +346,6 @@ export type MessageUsage = Selectable<MessageUsageTable>;
 export type NewMessageUsage = Insertable<MessageUsageTable>;
 
 export type MessageSideCost = Selectable<MessageSideCostsTable>;
-export type NewMessageSideCost = Insertable<MessageSideCostsTable>;
 
 export type ModelConfig = Selectable<ModelConfigsTable>;
 export type NewModelConfig = Insertable<ModelConfigsTable>;
@@ -377,10 +376,6 @@ export type NewArrivalEmbedding = {
   messageId: string;
   embedding: number[];
   modelId: string;
-  /** The self-contained rewrite the embedding came from; null when the raw message was embedded. */
-  rewrittenText?: string | null;
-  /** The recorded end of the arrival's try at a rewrite; pass through unchanged on re-writes. */
-  expandOutcome?: ExpandOutcome | null;
   /** The arrival's embedding spend; the rewrite step never touches it. */
   embeddingCostUsd?: number | null;
 };

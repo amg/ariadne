@@ -1,42 +1,59 @@
+---
+description: Inference goes through the Vercel AI SDK; provider and model are chosen per task in configuration, the mock stands in by configuration, and the embedding model is pinned.
+---
+
 # ADR 0002: AI Provider and Streaming Framework
 
 ## Status
-Accepted, amended 2026 (see Amendment 1 below)
+Accepted.
 
 ## Context
-We need to connect to an external AI inference provider, generate responses, and stream them in real-time to the frontend chat UI using Server-Sent Events (SSE). Writing manual SSE parsing and chunk management can be tedious and prone to edge-case bugs (e.g., handling mid-stream network drops).
+The app sends prompts to an external inference provider and streams the
+replies to the chat UI over Server-Sent Events. Hand-written SSE parsing
+and chunk handling is tedious and easy to get wrong, especially around
+mid-stream network drops.
+
+Inference may move between providers, and load tests replace it with a
+mock. Changing provider must be a configuration change and nothing more.
 
 ## Decision
-*   **AI Provider**: DeepInfra.
-*   **Integration Standard**: OpenAI-compatible API format (DeepInfra supports this natively).
-*   **Streaming Framework**: Vercel AI SDK (`ai` and `@ai-sdk/openai`).
+
+### One SDK in front of every provider
+Inference goes through the **Vercel AI SDK**, which handles streaming on
+the backend and the chat state on the frontend. Each provider is reached
+through its official AI SDK provider package, so the code beneath speaks
+only the SDK. Providers are reached over the OpenAI-compatible API, and
+the mock inference server speaks the same wire format, so it stands in
+for a provider by configuration, as it does for load tests.
+
+### Provider and model are chosen per task
+Each task (chat, titling, rewrite, judge, memory) names its model, and
+its provider, in configuration. Several providers can be configured at
+once, and the mock is simply one more of them.
+
+### The embedding model is pinned
+The embedding model is the exception: its identity is fixed in code, and
+only the provider serving it may change. Stored vectors and the drift
+calibration are measurements in that one model's space, so a different
+embedding model is a data migration (re-embed, recalibrate), never a
+configuration flip. The pinned model is open-weight so that several
+providers can serve it. A new provider for it is accepted only once its
+vectors match the current provider's on a reference set, because the
+same weights at a different precision can drift.
+
+## Considered
+* **Hand-rolled SSE parsing**: the bugs the SDK already solves.
+* **A generic OpenAI adapter pointed at the provider's URL**: works, but
+  loses the provider's own typing and defaults.
+* **The provider's hosted AI-SDK-shaped endpoint**: a parallel surface
+  that reports less usage detail (no cost estimate, no cache details)
+  than the OpenAI-compatible API the provider package already speaks.
 
 ## Consequences
-*   **Easier**: DeepInfra provides an OpenAI-compatible endpoint. By using the Vercel AI SDK, we can plug in the DeepInfra base URL and use standard OpenAI adapters. The SDK handles all the heavy lifting for SSE stream parsing, both on the backend (`streamText`) and the frontend (`useChat`). We do not need to build custom streaming adapters.
-*   **Harder**: We add a dependency on the Vercel AI SDK ecosystem, but it is highly modular and standard in the JS/TS ecosystem.
-
-## Amendment 1 (2026): provider package
-The Decision above named the generic `@ai-sdk/openai` adapter with a manually
-configured DeepInfra base URL. DeepInfra has since published an official AI SDK
-provider package; we pivot to it.
-
-**Used**
-*   `ai` + `@ai-sdk/deepinfra` (`createDeepInfra({ apiKey })`, then
-    `deepinfra(modelId)` in `streamText`/`generateText`). Same Vercel AI SDK
-    mechanics as before; the provider integration is now first-class rather
-    than assembled by hand.
-
-**Rejected**
-*   `@ai-sdk/openai` with manual base URL — works, but no DeepInfra-specific
-    typing/defaults. The mock-server escape hatch it was held back for ended
-    up riding the provider package itself: `createDeepInfra({ baseURL })`
-    with `MOCK_AI_BASE_URL`, so `@ai-sdk/openai` never entered the code.
-*   DeepInfra's hosted AI-SDK-style endpoint (`AISDKIn`/`AISDKOut` schemas) —
-    parallel surface with a slimmer `UsageInfo` (no `estimated_cost`, no cache
-    details); our provider package already speaks the OpenAI-compatible wire
-    format directly, so no reason to route through it.
-*   Hand-rolled SSE parsing — unchanged rejection from the original Context.
-
-## Consequences (Amendment 1)
-*   The implementation uses `@ai-sdk/deepinfra`; this amendment supersedes
-    the package named in the original Decision. `useChat` on the frontend is unaffected.
+* **Easier**: no custom streaming code on either side; moving a task to
+  another provider touches configuration only.
+* **Harder**: the app depends on the AI SDK ecosystem. The choice of
+  embedding provider is constrained by who hosts the pinned model, not
+  by preference: a provider that does not host it can take over the
+  generating tasks only, while embeddings stay with one that does, or
+  run on our own hardware.

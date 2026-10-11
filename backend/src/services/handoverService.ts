@@ -33,7 +33,9 @@ type Arrival = { userId: string; threadId: string; messageId: string };
  * capture already queued or running is waited on as it is, so asking
  * again never restarts its attempts, and one that gave up is not tried
  * again here. Listening starts first, so a capture finishing meanwhile is
- * still heard. No closed segment on record means nothing to wait for.
+ * still heard; news lost between backend copies is caught by looking at
+ * the capture again when the wait runs out. No closed segment on record
+ * means nothing to wait for.
  */
 async function closedSegmentCaptureSettled(
   memory: Extract<MemoryFeature, { kind: 'on' }>,
@@ -43,22 +45,26 @@ async function closedSegmentCaptureSettled(
   if (!logged) return true;
   const { segmentId } = logged;
 
-  let unsubscribe: () => void = () => {};
+  let heard: () => void = () => {};
   const settled = new Promise<void>((resolve) => {
-    unsubscribe = subscribe(
-      (event) =>
-        (event.kind === 'memory-captured' || event.kind === 'memory-capture-failed') &&
-        event.segmentId === segmentId,
-      () => resolve(),
-    );
+    heard = resolve;
+  });
+  const subscription = subscribe(userId, (event) => {
+    const captureSettled =
+      event.kind === 'memory-captured' || event.kind === 'memory-capture-failed';
+    if (captureSettled && event.segmentId === segmentId) heard();
   });
   try {
+    await subscription.ready;
     const job = await memory.findMemoryCaptureSegmentJobOrNull(segmentId);
     if (job?.state === 'dead') return true;
     if (job === null) await memory.enqueueMemoryCaptureSegment({ userId, threadId, segmentId });
-    return await settledWithin(settled, env.HANDOVER_WAIT_MS);
+    if (await settledWithin(settled, env.HANDOVER_WAIT_MS)) return true;
+    // A finished capture leaves no job behind; a dead one gave up.
+    const after = await memory.findMemoryCaptureSegmentJobOrNull(segmentId);
+    return after === null || after.state === 'dead';
   } finally {
-    unsubscribe();
+    subscription.close();
   }
 }
 

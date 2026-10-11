@@ -37,12 +37,11 @@ afterAll(async () => {
 
 useTestDb();
 
-function listen(threadId: string) {
+function listen(userId: string, threadId: string) {
   events = [];
-  unsubscribe = subscribe(
-    (event) => event.threadId === threadId,
-    (event) => events.push(event),
-  );
+  unsubscribe = subscribe(userId, (event) => {
+    if (event.threadId === threadId) events.push(event);
+  }).close;
 }
 
 /** A thread with one settled Turn, and a second arrival on a new topic. */
@@ -71,7 +70,7 @@ describe('whenArrivalJudged', () => {
     const { id: threadId } = await insertThread({ userId });
     const opening = await insertMessage({ threadId, role: 'user', content: 'Hello there' });
     const params = { userId, threadId, messageId: opening.id };
-    listen(threadId);
+    listen(userId, threadId);
 
     await whenArrivalJudged({ params, judgment: await judgeArrival(params), memory: memoryOn });
 
@@ -83,7 +82,7 @@ describe('whenArrivalJudged', () => {
   it('queues the closed segment before announcing the pause, and the capture lands', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
-    listen(threadId);
+    listen(userId, threadId);
     const judgment = await judgeArrival(params);
     if (judgment.kind !== 'judged' || !judgment.closedSegment) {
       throw new Error('expected a fire with a closed segment');
@@ -116,7 +115,7 @@ describe('whenArrivalJudged', () => {
   it('queues no capture without Memory, and still announces the pause', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
-    listen(threadId);
+    listen(userId, threadId);
     const judgment = await judgeArrival(params);
     if (judgment.kind !== 'judged' || !judgment.closedSegment) {
       throw new Error('expected a fire with a closed segment');
@@ -131,7 +130,7 @@ describe('whenArrivalJudged', () => {
   it('announces nothing for an arrival that is gone', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
-    listen(threadId);
+    listen(userId, threadId);
 
     await whenArrivalJudged({ params, judgment: { kind: 'gone' }, memory: memoryOn });
 
@@ -142,7 +141,7 @@ describe('whenArrivalJudged', () => {
 describe('whenJudgmentAbandoned', () => {
   it('tells the waiting chat to retry', () => {
     const params = { userId: randomUUID(), threadId: randomUUID(), messageId: randomUUID() };
-    listen(params.threadId);
+    listen(params.userId, params.threadId);
 
     whenJudgmentAbandoned(params);
 

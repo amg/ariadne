@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
-import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
+import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -106,23 +106,27 @@ describe('getThreadSummary', () => {
     });
     // The embedding spend rides the arrival row; the rewrite/judge spends
     // land as expansion-cost rows.
-    await upsertArrivalEmbedding({
+    await recordArrivalEmbedding({
       messageId: userMessage.id,
       embedding: new Array<number>(1024).fill(0),
       modelId: EMBEDDING_MODEL_ID,
       embeddingCostUsd: 0.00000001,
     });
-    await upsertSideCost({
+    await addSideCost({
       messageId: userMessage.id,
       kind: 'rewrite',
       model: env.REWRITE_MODEL,
       costUsd: '0.0000002000',
+      promptTokens: null,
+      completionTokens: null,
     });
-    await upsertSideCost({
+    await addSideCost({
       messageId: userMessage.id,
       kind: 'judge',
       model: env.REWRITE_MODEL,
       costUsd: '0.0000003000',
+      promptTokens: null,
+      completionTokens: null,
     });
 
     const summary = await getThreadSummary({ userId, threadId });
@@ -149,17 +153,21 @@ describe('getThreadSummary', () => {
     const { userId, threadId } = await createUserAndThread();
     await addChatExchange(threadId, '0.0000052500');
     const boundary = await insertMessage({ threadId, role: 'user', content: 'new topic' });
-    await upsertSideCost({
+    await addSideCost({
       messageId: boundary.id,
       kind: 'fact_extraction',
       model: env.MEMORY_MODEL,
       costUsd: '0.0000004000',
+      promptTokens: null,
+      completionTokens: null,
     });
-    await upsertSideCost({
+    await addSideCost({
       messageId: boundary.id,
       kind: 'fact_duplicate_check',
       model: env.MEMORY_MODEL,
       costUsd: '0.0000001000',
+      promptTokens: null,
+      completionTokens: null,
     });
 
     const summary = await getThreadSummary({ userId, threadId });

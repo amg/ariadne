@@ -23,7 +23,8 @@ function writeEvent(raw: ServerResponse, event: ServerEvent): void {
  * The push transport: one long-lived event stream per tab, authenticated
  * by the same session cookie as every other request. On connect it
  * re-emits the current state of the user's arrivals, then delivers live
- * news for that user until the connection closes.
+ * news for that user, from whichever backend copy it comes, until the
+ * connection closes.
  */
 export async function setupEventsGetRoute(fastify: FastifyInstance) {
   fastify.get(
@@ -43,10 +44,7 @@ export async function setupEventsGetRoute(fastify: FastifyInstance) {
       // The stream counts as open once its headers arrive, before any event.
       raw.flushHeaders();
 
-      const unsubscribe = subscribe(
-        (event) => event.userId === userId,
-        (event) => writeEvent(raw, event),
-      );
+      const subscription = subscribe(userId, (event) => writeEvent(raw, event));
 
       // Unref'd so a lingering stream never holds the process at shutdown.
       const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), HEARTBEAT_INTERVAL_MS);
@@ -56,10 +54,13 @@ export async function setupEventsGetRoute(fastify: FastifyInstance) {
       // must still release its subscription and heartbeat.
       raw.on('close', () => {
         clearInterval(heartbeat);
-        unsubscribe();
+        subscription.close();
       });
 
       try {
+        // The snapshot is read once news from other copies is sure to
+        // arrive, so what lands meanwhile is either in it or delivered.
+        await subscription.ready;
         for (const event of await currentArrivalEvents(userId)) writeEvent(raw, event);
       } catch (error) {
         request.log.error({ err: error }, 'could not re-emit arrival state on connect');

@@ -1,3 +1,7 @@
+---
+description: Query modules own the database connection singleton instead of receiving it; replaces the injection convention of 0001.
+---
+
 # ADR 0004: Query Modules Own the Database Connection Singleton
 
 ## Status

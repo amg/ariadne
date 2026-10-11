@@ -1,42 +1,37 @@
 # Ari
 
-A self-hosted chat application with real-time streaming, per-Turn cost tracking, and user authentication. Everything runs in Docker — your data stays yours.
+A self-hosted chat application with streaming replies, per-Turn cost
+tracking, topic-drift awareness and opt-in memory. Everything but
+inference runs in Docker on your own hardware, so your data stays yours.
 
 ## What You Get
 
-- **Real chat experience** — Streaming Exchanges (SSE), multiple Threads, edit and Retry actions
-- **Cost visibility** — See exactly what each Turn costs in tokens and USD; Running total per Thread
-- **User accounts** — SuperTokens authentication (email/password), isolated Threads per user
-- **Thread health** — Topic drift detection, segment boundaries, cost accumulation awareness
-- **Memory (opt-in)** — Facts captured at segment close, fresh Threads seeded with what mattered before, per-user toggle
-- **Self-hosted** — No cloud dependencies, runs on your hardware
+- **Chat** — Streaming Exchanges over SSE, multiple Threads, edit and Retry
+- **Cost visibility** — What each Turn costs in tokens and USD, with a running total per Thread
+- **User accounts** — Email and password sign-in, Threads isolated per user
+- **Thread health** — Topic drift detection, so a Thread that wanders off its topic is noticed before the reply
+- **Memory (opt-in)** — Facts captured as a conversation moves on, and fresh Threads seeded with what mattered before
+- **A daily spend budget** — A hard cap on what the deployment can spend on inference each day
 
 ## Quick Start
 
-### Development (run locally with `npm run dev`)
+### Development
 
-This is how you'll work on the code. The database and auth run in Docker; the app runs on your machine for fast iteration.
+The database and auth run in Docker; the app runs on your machine for fast iteration.
 
 ```bash
-# 1. Copy the env template (one-time setup)
-cp .env.dev.example .env
-# Edit .env with your API keys and preferences
-
-# 2. Start infrastructure (PostgreSQL + SuperTokens)
+cp .env.dev.example .env          # one-time; fill in your API key
 docker compose -f compose.dev.yml --env-file .env up -d
-
-# 3. Run migrations (creates tables)
 npm run migrate
-
-# 4. Start the app
 npm run dev
 ```
 
-Access at `http://localhost:5173`. Backend runs on `3001`, database on `15432`, SuperTokens on `3567`.
+Open `http://localhost:5173`.
 
-### Staging (full Docker build)
+### Staging
 
-Use this to exercise the exact container images before they go to prod. Shares `.env` with the dev tier, so they publish the same ports — bring dev infrastructure down before lifting staging, and vice versa. Separate container, volume, and network names, so staging never touches dev or prod data.
+The full container build, to exercise the exact images before prod. It shares
+`.env` and its ports with dev, so run one or the other:
 
 ```bash
 docker compose -f compose.dev.yml --env-file .env down
@@ -44,118 +39,95 @@ docker compose -f compose.staging.yml --env-file .env up -d
 npm run migrate
 ```
 
-Same access URLs, but everything's containerized.
-
 ### Production (Cloudflare Tunnel)
 
-For actual deployment. The app has zero exposed ports — Cloudflare Tunnel handles ingress.
+No ports are exposed to the internet; a Cloudflare Tunnel routes your domain to
+the `frontend` container, which joins an existing external `cloudflare-network`.
 
 ```bash
-# 1. Set up your production env file
-cp .env.prod.example .env.prod
-# Edit .env.prod with your credentials (DB password, API keys, spend budget)
-
-# 2. Run migrations
+cp .env.prod.example .env.prod    # one-time; fill in credentials and the spend budget
 ENV_FILE=.env.prod npm run migrate:prod
-
-# 3. Deploy
 docker compose -f compose.prod.yml --env-file .env.prod up -d
 ```
 
-**What happens:** Frontend joins your existing `cloudflare-network`, backend stays internal, database listens on port `15432` for LAN tooling. Configure your tunnel to route your domain to the `frontend` container by name.
-
-**Background work:** the backend runs its own job queue in Postgres and installs the queue's `queues` schema on every boot, so the database user needs `CREATE` on the database. A job that runs out of attempts stays failed until you put it back in line. A chat whose drift check failed for good shows "couldn't check this message" until then:
+The backend runs its job queue in Postgres and installs the queue's schema on
+boot, so the database user needs `CREATE` on the database. A job that runs out
+of attempts stays failed (a chat whose drift check failed shows "couldn't check
+this message") until you fix the cause and put it back in line:
 
 ```bash
-ENV_FILE=.env.prod npm run queue:retry-failed   # prints what it re-queued
+ENV_FILE=.env.prod npm run queue:retry-failed
 ```
 
-Run it after fixing the cause (usually a missing or rejected API key). Failed jobs that a newer job has already taken over are listed and left alone.
+### aws-prod
 
-## Environment Setup
+A multi-copy production deployment on AWS, raised only for load tests and torn
+down afterwards. See [`infra/README.md`](infra/README.md).
 
-Two env files — one for local dev, one for production. Both are gitignored.
+## Configuration
 
-| File | Git? | When | What it configures |
-|------|------|------|-------------------|
-| `.env` | ❌ | `npm run dev`, `compose.dev.yml`, `compose.staging.yml` | Local development and staging |
-| `.env.prod` | ❌ | `compose.prod.yml` | Production deployment |
+`.env` configures dev and staging; `.env.prod` configures production. Both are
+gitignored; the `.example` files list every variable with its meaning. The ones
+that matter most:
 
-**Setup:**
+| Variable | What it does |
+|---|---|
+| `DATABASE_URL` or `DB_*` | Postgres connection |
+| `DEEPINFRA_API_KEY` | The inference provider's key |
+| `MOCK_AI_BASE_URL` | Use the mock inference server instead (`backend/mock`) |
+| `DAILY_SPEND_BUDGET_USD` | The daily spend cap; unset means no cap |
+| `DEFAULT_MODEL`, `TITLING_MODEL`, `REWRITE_MODEL`, `JUDGE_MODEL`, `MEMORY_MODEL` | The model for each task |
+| `THREAD_ANALYSIS_MODE` | The drift gate: `off`, `heuristic` (default) or `always` |
+| `FEATURE_MEMORY` | Turns Memory on; off by default |
+
+Feature toggles are read at boot, so a change needs a backend restart.
+
+## Testing
+
 ```bash
-# Local dev
-cp .env.dev.example .env
-# Edit .env with your keys
-
-# Production
-cp .env.prod.example .env.prod
-# Edit .env.prod with prod credentials
+cd backend && npm test
 ```
 
-**Required variables** (see `.env.prod.example` for templates):
-- `DATABASE_URL` or `DB_USER`/`DB_PASSWORD`/`DB_NAME` — PostgreSQL connection
-- `DEEPINFRA_API_KEY` — AI provider (DeepInfra)
-- `SUPERTOKENS_CONNECTION_URI` — Auth service (defaults to `http://127.0.0.1:3567`)
-- `CORS_ORIGINS` — Allowed origins (defaults to localhost for dev)
-- `DAILY_SPEND_BUDGET_USD` — Safety cap on daily AI spend (e.g., `5.0`)
-
-**Optional variables:**
-- `FEATURE_MEMORY` — User memory (Fact capture, Thread Seeds, the Memory and Settings screens). Off by default; the backend reads it at boot, so restart it after a change.
-- `THREAD_ANALYSIS_MODE` — Live drift gate: `off` (disabled), `heuristic` (cheap checks, the default), `always` (rewrite + judge runs on every arrival).
-- `DEFAULT_MODEL`, `TITLING_MODEL`, `REWRITE_MODEL`, `JUDGE_MODEL`, `MEMORY_MODEL` — Model per task, all defaulting to `Qwen/Qwen3.5-9B` on DeepInfra.
-- `GATE_WAIT_MS`, `HANDOVER_WAIT_MS` — How long a chat waits for its drift check, and a handover for the old chat's memory, before telling the browser to try again. Both default to 10 seconds.
+Tests run against real Postgres, never mocks, in a dedicated `chatbot_test`
+database that is created next to the one configured in `.env` (or at
+`TEST_DATABASE_URL`). Test files run in parallel, each on its own clone of it,
+so the database user needs `CREATEDB`. `npm run gate` at the root runs every
+check, the tests and the frontend build.
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|------------|
-| Frontend | React 19 + React Router v7 + TypeScript 6 + Vite 8 |
-| Backend | Node.js 22 + Fastify 5 + TypeScript 7 |
-| Database | PostgreSQL 16 with pgvector |
+|---|---|
+| Frontend | React, React Router, Vite, TypeScript |
+| Backend | Node.js, Fastify, Kysely, TypeScript |
+| Database | PostgreSQL with pgvector |
+| Background work | graphile-worker (in Postgres) |
 | Auth | SuperTokens (self-hosted) |
-| AI | DeepInfra (OpenAI-compatible) |
-| Infrastructure | Docker Compose |
+| AI | Vercel AI SDK, any OpenAI-compatible provider |
+| Deployment | Docker Compose; CDK and Terraform for aws-prod |
 
 ## Project Structure
 
 ```
-alex-chat-bot/
-├── frontend/           # React app (Vite build)
-│   ├── src/
-│   │   ├── components/ # UI components
-│   │   ├── pages/      # Route pages (Chat, Memory, Settings, About)
-│   │   ├── services/   # API client
-│   │   └── config/     # SuperTokens and feature-toggle config
-│   └── nginx.conf      # Production nginx config
-├── backend/
-│   ├── app/            # Fastify server and routes
-│   ├── src/
-│   │   ├── db/         # Database layer (Kysely queries)
-│   │   ├── services/   # Business logic (AI, threads, drift gate, memory)
-│   │   └── config/     # Environment variables
-│   └── mock/           # Mock AI server for testing
-├── compose.*.yml       # Docker Compose files (dev/staging/prod)
-├── adrs/               # Architecture Decision Records
-└── docs/               # Deployment guides and technical notes
+├── frontend/   React app
+├── backend/    API, background worker, mock inference server
+├── infra/      aws-prod: CDK, Terraform, load generator, operator scripts
+├── scripts/    Repository checks
+├── adrs/       Architecture decisions
+├── docs/       Flows, architecture, ideas
+└── CONTEXT.md  Domain vocabulary
 ```
-
-## Backend Notes
-
-**Query isolation:** All database access lives in `backend/src/db/queries/<table>/<operation>.ts`. Services call queries, never touch Kysely directly. This makes testing and reasoning about data flow trivial.
-
-**Testing:** Real end-to-end tests against actual PostgreSQL. No mocks. They always run against a dedicated `chatbot_test` database, never the dev DB. By default it is auto-provisioned next to the database configured in the root `.env` (`DATABASE_URL` or `DB_*` parts); from the agent container it is reached via the Docker gateway instead. Point elsewhere explicitly with `TEST_DATABASE_URL`. Test files run in parallel, each worker against its own clone of `chatbot_test` (`chatbot_test_w1`…`_wN`; the credentials need CREATEDB); tune the worker count with `npx vitest run --maxWorkers=N`. Run with `npm test` in `backend/`.
-
-**Auth flow:** SuperTokens handles sessions via HTTP-only cookies. Every protected route uses `verifySession()` middleware to extract the user ID. On signup, the SuperTokens user ID is synced to the local `users` table to satisfy foreign key constraints.
 
 ## Documentation
 
 - **[Domain vocabulary](CONTEXT.md)** — The terms (Threads, Turns, Drift, Facts, Seeds, Handovers) the codebase assumes everywhere
-- **[Architecture Decisions](adrs/)** — Why we made key technical choices
+- **[Architecture decisions](adrs/)** — Why the key technical choices were made
 - **[A new message in a Thread](docs/flows/NEW-MESSAGE.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
 - **[Background work](docs/flows/BACKGROUND-WORK.md)** — The queue, the event bus, push to the browser, and how failures surface
-- **[Cloudflare Deployment](docs/ideas/CLOUDFLARE-DEPLOYMENT.md)** — Private server + tunnel setup
-- **[SSE vs WebSocket](docs/ideas/SSE-VS-WEBSOCKET.md)** — Why we chose SSE for streaming
+- **[aws-prod architecture](docs/architecture/AWS-PROD-ARCHITECTURE.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
+- **[aws-prod deployment](docs/architecture/AWS-PROD-DEPLOYMENT.html)** — Raising, running, recovering and the step gates
+- **[Ideas](docs/ideas/)** — Open explorations
 
-## What's Not Done (Yet)
+## Not Done Yet
 
-- **Per-turn memory recall** — Facts are captured and each fresh Thread is seeded from the one before it; retrieving relevant Facts into a reply by query similarity (ADR 0003's RAG read side) is still pending
+- **Memory recall per reply** — Facts are captured and fresh Threads are seeded, but relevant Facts are not yet retrieved into each reply by similarity

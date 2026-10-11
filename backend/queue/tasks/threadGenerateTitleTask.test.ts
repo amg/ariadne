@@ -81,10 +81,9 @@ describe('threadGenerateTitle on the worker', () => {
     const { userId, threadId } = await untitledThreadWithExchange();
     const provider = await startProvider({ title: 'Steam Engine Basics' });
     const events: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.threadId === threadId,
-      (event) => events.push(event),
-    );
+    const unsubscribe = subscribe(userId, (event) => {
+      if (event.threadId === threadId) events.push(event);
+    }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
       await drainQueue(queueTasks(memoryOff));
@@ -122,10 +121,9 @@ describe('threadGenerateTitle on the worker', () => {
     await insertMessage({ threadId, role: 'assistant', content: 'Steam pushes a piston.' });
     const provider = await startProvider({ title: 'Never Used' });
     const events: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.threadId === threadId,
-      (event) => events.push(event),
-    );
+    const unsubscribe = subscribe(userId, (event) => {
+      if (event.threadId === threadId) events.push(event);
+    }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
       await drainQueue(queueTasks(memoryOff));
@@ -147,10 +145,9 @@ describe('threadGenerateTitle on the worker', () => {
     await insertMessage({ threadId, role: 'assistant', content: 'Steam pushes a piston.' });
     const provider = await startProvider({ title: 'Steam Engines Explained' });
     const events: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.threadId === threadId,
-      (event) => events.push(event),
-    );
+    const unsubscribe = subscribe(userId, (event) => {
+      if (event.threadId === threadId) events.push(event);
+    }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: true });
       await drainQueue(queueTasks(memoryOff));

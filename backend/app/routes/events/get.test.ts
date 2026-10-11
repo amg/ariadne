@@ -183,11 +183,14 @@ describe('GET /api/events', () => {
       });
     });
     const unsubscribed = vi.fn();
-    vi.mocked(subscribe).mockImplementationOnce((wants, handle) => {
-      const unsubscribe = actualEvents.subscribe(wants, handle);
-      return () => {
-        unsubscribe();
-        unsubscribed();
+    vi.mocked(subscribe).mockImplementationOnce((subscriber, handle) => {
+      const subscription = actualEvents.subscribe(subscriber, handle);
+      return {
+        ready: subscription.ready,
+        close: () => {
+          subscription.close();
+          unsubscribed();
+        },
       };
     });
 

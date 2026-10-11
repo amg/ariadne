@@ -1,6 +1,6 @@
 import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { upsertMessageEmbedding } from '@queries/messageEmbeddings/upsertMessageEmbedding';
+import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { DEFAULT_USER_ID } from '@services/userService';
@@ -85,7 +85,7 @@ export async function analyzeThread(
   });
   const storedByKey = new Map(storedRows.map((row) => [row.messageId, row]));
 
-  // Persist-upon-use: embed and upsert each Turn's row as soon as the
+  // Persist-upon-use: embed and record each Turn's row as soon as the
   // call succeeds so a later failure loses no progress. Provenance
   // identity is the embedding model alone.
   const onTurnEmbedded = options?.onTurnEmbedded;
@@ -98,7 +98,7 @@ export async function analyzeThread(
     onTurnEmbedded?.(block.turnNumber, blocks.length);
     const embedded = await embedText(block.text);
     if (embedded.type === 'error') return embedded;
-    await upsertMessageEmbedding({
+    await recordTurnEmbedding({
       messageId: block.assistantMessage.id,
       embedding: embedded.data.embedding,
       modelId: EMBEDDING_MODEL_ID,

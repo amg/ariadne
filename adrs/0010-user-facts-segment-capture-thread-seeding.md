@@ -1,3 +1,7 @@
+---
+description: Facts are captured at segment close and fresh Threads are seeded from them; a drift fire on a fresh arrival pauses the reply.
+---
+
 # ADR 0010: User Facts, Segment Capture, and Thread Seeding
 
 ## Status

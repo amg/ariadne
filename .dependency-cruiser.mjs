@@ -57,11 +57,11 @@ export default {
       to: { path: '^@db/db$|^backend/src/db/db(\\.ts)?$' },
     },
     {
-      name: 'backend-queue-started-by-server-only',
+      name: 'backend-queue-started-by-entry-points-only',
       comment:
-        'Only the server entry point starts the worker; everything else reaches a task through the enqueue function it is handed, so the worker can move to its own process.',
+        'Only the entry points (the API server and the worker process) start the worker; everything else reaches a task through the enqueue function it is handed.',
       severity: 'error',
-      from: { path: '^backend/(src|app)/', pathNot: '^backend/app/server\\.ts$' },
+      from: { path: '^backend/(src|app)/', pathNot: '^backend/app/(server|worker)\\.ts$' },
       to: { path: '^@queue/(worker|index)$|^backend/queue/(worker|index)(\\.ts)?$' },
     },
     {

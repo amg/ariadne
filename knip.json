@@ -5,7 +5,13 @@
   "ignore": [".pi/agent/extensions/**"],
   "workspaces": {
     "backend": {
+      "entry": ["app/server.aws.ts"],
       "ignore": ["src/db/migrations/**"]
+    },
+    "infra": {
+      "entry": ["bin/*.ts", "lib/core/safetyNetHandler.ts", "load/main.ts", "load/summarize.ts"],
+      "project": ["**/*.ts"],
+      "ignoreDependencies": ["esbuild", "tsx"]
     }
   }
 }

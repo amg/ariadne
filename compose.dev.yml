@@ -10,6 +10,10 @@
 #   npm run migrate
 #   npm run dev
 
+# Own project name: dev, staging and prod share this directory, and a shared
+# project would let one tier's `up` replace another tier's containers.
+name: alex-chat-bot-dev
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -44,6 +48,9 @@ services:
 
 volumes:
   pgdata_dev:
+    # Pinned to the name it had before dev got its own project name, so the
+    # working set stays where it is.
+    name: alex-chat-bot_pgdata_dev
 
 networks:
   chat-network-dev:

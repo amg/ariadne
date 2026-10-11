@@ -25,7 +25,9 @@ import Fastify from 'fastify';
  * suspends the stream between the first and second token — that is the hook
  * the inter-token idle-guard tests use. The embeddings endpoint exposes
  * request accounting and error injection via the returned `embeddings`
- * control (abort-and-resume tests).
+ * control (abort-and-resume tests). Embedding, rewrite and extraction
+ * requests can be held until released, so tests can interleave two
+ * passes over one Thread step by step.
  */
 
 export type MockInferenceServer = {
@@ -49,6 +51,14 @@ export type MockChatsControl = {
   lastRequest: () => Record<string, unknown> | null;
 };
 
+/** A request the mock keeps waiting until the test lets it go. */
+export type HeldRequest = {
+  /** Resolves once the held request has reached the mock. */
+  arrived: Promise<void>;
+  /** Lets the held request go on to its reply. */
+  release: () => void;
+};
+
 export type MockEmbeddingsControl = {
   /** Total `/embeddings` requests received (failed ones included). */
   requestCount: () => number;
@@ -56,6 +66,13 @@ export type MockEmbeddingsControl = {
   failFrom: (requestNumber: number) => void;
   /** Stop failing requests (accounting is kept). */
   clearFailures: () => void;
+  /** Holds the next `/embeddings` request not yet held until it is released. */
+  holdNext: () => HeldRequest;
+  /**
+   * While on, every request embeds its texts with its own request number
+   * mixed in, so two calls on the same text return different vectors.
+   */
+  varyByRequest: (on: boolean) => void;
 };
 
 export type MockRewritesControl = {
@@ -76,6 +93,8 @@ export type MockRewritesControl = {
    * deterministic reply. Pass [] to clear.
    */
   replySequence: (texts: string[]) => void;
+  /** Holds the next rewrite request not yet held until it is released. */
+  holdNext: () => HeldRequest;
 };
 
 export type MockJudgesControl = {
@@ -96,6 +115,8 @@ export type MockMemoryControl = {
   forceExtraction: (text: string | null) => void;
   /** Fail every extraction request with a 500. */
   failExtractions: () => void;
+  /** Holds the next extraction request not yet held until it is released. */
+  holdNextExtraction: () => HeldRequest;
   /** Total classification requests received (failed ones included). */
   classificationCount: () => number;
   /** Fail every classification request with a 500. */
@@ -175,6 +196,31 @@ export function buildMockEmbedding(text: string): number[] {
 }
 
 let counter = 0;
+
+/** Requests armed to wait, oldest first; each takes the next one to arrive. */
+type HoldQueue = { arrive: () => void; released: Promise<void> }[];
+
+/** Arms a hold on the next request to reach `queue`. */
+function armHold(queue: HoldQueue): HeldRequest {
+  let arrive: () => void = () => {};
+  let release: () => void = () => {};
+  const arrived = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  queue.push({ arrive, released });
+  return { arrived, release };
+}
+
+/** Waits out the oldest armed hold, if any. */
+async function waitIfHeld(queue: HoldQueue): Promise<void> {
+  const hold = queue.shift();
+  if (!hold) return;
+  hold.arrive();
+  await hold.released;
+}
 
 function buildUsage(args: { promptTokens: number; completionTokens: number }) {
   const { promptTokens, completionTokens } = args;
@@ -479,18 +525,26 @@ function classificationReply(body: ChatCompletionsBody): string | null {
 
 export async function startMockInferenceServer(options?: {
   port?: number;
+  /** The address to listen on; loopback unless other machines must reach it. */
+  host?: string;
 }): Promise<MockInferenceServer> {
   const app = Fastify({ logger: false });
 
   // Per-instance `/embeddings` test hooks (accounting + error injection).
-  const embeddingsState = { requestCount: 0, failFrom: Number.POSITIVE_INFINITY };
+  const embeddingsState = {
+    requestCount: 0,
+    failFrom: Number.POSITIVE_INFINITY,
+    holds: [] as HoldQueue,
+    varyByRequest: false,
+  };
   // forcedReply: null = deterministic; replySequence drained one call at a time.
   const rewritesState: {
     failAll: boolean;
     requestCount: number;
     forcedReply: string | null;
     replySequence: string[];
-  } = { failAll: false, requestCount: 0, forcedReply: null, replySequence: [] };
+    holds: HoldQueue;
+  } = { failAll: false, requestCount: 0, forcedReply: null, replySequence: [], holds: [] };
   const judgesState = { failAll: false };
   const chatsState: { lastRequest: Record<string, unknown> | null } = { lastRequest: null };
   const memoryState: {
@@ -501,7 +555,9 @@ export async function startMockInferenceServer(options?: {
     failExtractions: boolean;
     classificationCount: number;
     failClassifications: boolean;
+    extractionHolds: HoldQueue;
   } = {
+    extractionHolds: [],
     extractionCount: 0,
     lastExtractionPrompt: null,
     duplicateCheckCount: 0,
@@ -520,12 +576,13 @@ export async function startMockInferenceServer(options?: {
 
   // Memory calls answer in full (no short-form cap): an extraction reply
   // is a JSON document. Null when the request is not a memory call.
-  const memoryResponseOrNull = (
+  const memoryResponseOrNull = async (
     body: ChatCompletionsBody,
-  ): { status: number; payload: unknown } | null => {
+  ): Promise<{ status: number; payload: unknown } | null> => {
     if (body.stream === true) return null;
     const extraction = extractionReply(body);
     if (extraction !== null) {
+      await waitIfHeld(memoryState.extractionHolds);
       memoryState.extractionCount += 1;
       memoryState.lastExtractionPrompt = lastUserContentOrNull(body);
       if (memoryState.failExtractions) {
@@ -566,7 +623,7 @@ export async function startMockInferenceServer(options?: {
   app.post('/v1/openai/chat/completions', async (request, reply) => {
     const body = (request.body ?? {}) as ChatCompletionsBody;
 
-    const memoryResponse = memoryResponseOrNull(body);
+    const memoryResponse = await memoryResponseOrNull(body);
     if (memoryResponse !== null) {
       return reply.code(memoryResponse.status).send(memoryResponse.payload);
     }
@@ -579,6 +636,7 @@ export async function startMockInferenceServer(options?: {
     if (isRewriteCall) {
       rewritesState.requestCount += 1;
       rewriteOverride = resolveRewriteOverride();
+      await waitIfHeld(rewritesState.holds);
     }
 
     // Expansion-tier injection hook: rewrite calls fail while armed, so
@@ -626,7 +684,9 @@ export async function startMockInferenceServer(options?: {
         : (body.input ?? []).filter((value) => typeof value === 'string');
 
     embeddingsState.requestCount += 1;
-    if (embeddingsState.requestCount >= embeddingsState.failFrom) {
+    const requestNumber = embeddingsState.requestCount;
+    await waitIfHeld(embeddingsState.holds);
+    if (requestNumber >= embeddingsState.failFrom) {
       return reply.code(500).send({
         error: {
           message: 'Injected embedding failure (mock).',
@@ -644,7 +704,9 @@ export async function startMockInferenceServer(options?: {
       data: values.map((value, index) => ({
         object: 'embedding',
         index,
-        embedding: buildMockEmbedding(value),
+        embedding: buildMockEmbedding(
+          embeddingsState.varyByRequest ? `${value}#${requestNumber}` : value,
+        ),
       })),
       model: body.model ?? 'mock-embedding-model',
       usage: { prompt_tokens: promptTokens, total_tokens: promptTokens },
@@ -652,7 +714,7 @@ export async function startMockInferenceServer(options?: {
   });
 
   const port = options?.port ?? 0;
-  await app.listen({ port, host: '127.0.0.1' });
+  await app.listen({ port, host: options?.host ?? '127.0.0.1' });
   const address = app.server.address() as AddressInfo;
 
   return {
@@ -665,6 +727,10 @@ export async function startMockInferenceServer(options?: {
       },
       clearFailures: () => {
         embeddingsState.failFrom = Number.POSITIVE_INFINITY;
+      },
+      holdNext: () => armHold(embeddingsState.holds),
+      varyByRequest: (on: boolean) => {
+        embeddingsState.varyByRequest = on;
       },
     },
     rewrites: {
@@ -682,6 +748,7 @@ export async function startMockInferenceServer(options?: {
       replySequence: (texts: string[]) => {
         rewritesState.replySequence = [...texts];
       },
+      holdNext: () => armHold(rewritesState.holds),
     },
     judges: {
       failAll: () => {
@@ -701,6 +768,7 @@ export async function startMockInferenceServer(options?: {
       failExtractions: () => {
         memoryState.failExtractions = true;
       },
+      holdNextExtraction: () => armHold(memoryState.extractionHolds),
       classificationCount: () => memoryState.classificationCount,
       failClassifications: () => {
         memoryState.failClassifications = true;

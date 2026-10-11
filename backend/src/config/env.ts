@@ -72,7 +72,36 @@ export type EnvConfig = {
   SUPERTOKENS_API_KEY: string | undefined;
   /** Whether new accounts can be created; sign-in is unaffected. */
   AUTH_SIGNUP_ENABLED: boolean;
+  /**
+   * Whether a Cloudflare rule limits the auth routes by real client
+   * address, so the app leaves them unlimited. Off: the app limits them.
+   */
+  AUTH_RATE_LIMIT_AT_EDGE: boolean;
+
+  // Running as several backend copies
+  /**
+   * The Redis every backend copy shares for news and stops (event bus).
+   * Unset: everything stays inside this one process. Rate-limit counts are
+   * in-memory (home) or at the Cloudflare edge (prod).
+   */
+  VALKEY_URL: string | undefined;
+  /** What this process runs: the API, the background worker, or both. */
+  PROCESS_ROLE: ProcessRole;
 };
+
+/** What one backend process runs. */
+export type ProcessRole = 'all' | 'api' | 'worker';
+const PROCESS_ROLES: readonly ProcessRole[] = ['all', 'api', 'worker'];
+
+/** The role named in the environment; anything unknown refuses to start. */
+function getProcessRole(key: string): ProcessRole {
+  const value = process.env[key]?.trim().toLowerCase() || 'all';
+  const role = PROCESS_ROLES.find((known) => known === value);
+  if (role === undefined) {
+    throw new Error(`${key} must be one of ${PROCESS_ROLES.join(', ')}, got: ${value}`);
+  }
+  return role;
+}
 
 /**
  * Helper to get a string from env with fallback.
@@ -285,6 +314,17 @@ export const env: EnvConfig = {
   },
   get AUTH_SIGNUP_ENABLED() {
     return getBoolean('AUTH_SIGNUP_ENABLED', true);
+  },
+  get AUTH_RATE_LIMIT_AT_EDGE() {
+    return getBoolean('AUTH_RATE_LIMIT_AT_EDGE', false);
+  },
+
+  // Running as several backend copies
+  get VALKEY_URL() {
+    return process.env.VALKEY_URL?.trim() || undefined;
+  },
+  get PROCESS_ROLE() {
+    return getProcessRole('PROCESS_ROLE');
   },
 };
 

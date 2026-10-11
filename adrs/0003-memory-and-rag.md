@@ -1,3 +1,7 @@
+---
+description: Memory is retrieval-augmented generation over pgvector in Postgres; how Facts are captured and fed back is decided in 0010.
+---
+
 # ADR 0003: Memory and RAG Strategy (pgvector)
 
 ## Status

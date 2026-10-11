@@ -1,6 +1,5 @@
 import { db } from '@db/db';
-import type { ExpandOutcome, MessageEmbedding } from '@db/types';
-import { toMessageEmbedding } from './embeddingMapping';
+import type { ExpandOutcome } from '@db/types';
 
 export interface RecordMessageExpansionProps {
   messageId: string;
@@ -15,15 +14,12 @@ export interface RecordMessageExpansionProps {
  * The rewrite step's one write for an arrival: the expansion outcome
  * rides the arrival row before any vector exists — the row is born here
  * with a null embedding, and the embed step fills the vector into the
- * same row later. On conflict the expansion columns are replaced
- * (a re-run of the step re-records its outcome); the stored vector is
- * never touched by this write. The rewrite/judge spends land in
- * `message_side_costs`.
+ * same row later. Written only if the arrival has no row yet: a pass that
+ * finds one already stored leaves it as it is. The rewrite/judge spends
+ * land in `message_side_costs`.
  */
-export async function recordMessageExpansion(
-  row: RecordMessageExpansionProps,
-): Promise<MessageEmbedding> {
-  const result = await db
+export async function recordMessageExpansion(row: RecordMessageExpansionProps): Promise<void> {
+  await db
     .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: row.messageId,
@@ -32,14 +28,6 @@ export async function recordMessageExpansion(
       expandedText: row.expandedText ?? null,
       expandOutcome: row.expandOutcome,
     })
-    .onConflict((oc) =>
-      oc.column('messageId').doUpdateSet({
-        expandedText: (eb) => eb.ref('excluded.expandedText'),
-        expandOutcome: (eb) => eb.ref('excluded.expandOutcome'),
-      }),
-    )
-    .returningAll()
-    .executeTakeFirstOrThrow();
-
-  return toMessageEmbedding(result);
+    .onConflict((oc) => oc.column('messageId').doNothing())
+    .execute();
 }

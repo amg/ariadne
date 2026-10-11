@@ -1,0 +1,20 @@
+# The repo-root build context for Dockerfile.backend and Dockerfile.frontend
+# (compose and aws-prod alike). Each image installs and builds inside itself,
+# so nothing built on the host belongs in it, and no secret ever should.
+
+# Installed and built inside the image
+**/node_modules
+**/dist
+
+# Secrets and local settings
+**/.env
+**/.env.*
+**/*.pem
+
+# Never part of an image
+.git
+infra/cdk.out
+infra/.runs
+build
+.testing
+.work

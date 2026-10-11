@@ -9,11 +9,11 @@
  * down by whoever decided it. `editFactContent` replaces a Fact with a
  * user-edited sentence.
  *
- * `captureFacts`, `segmentTurns`, `factsNamedIn`, `namesInFact` and
+ * `readFacts`, `segmentTurns`, `factsNamedIn`, `namesInFact` and
  * `renderedSeedOrNull` are exported for their tests only; nothing else in
  * the app should reach them.
  */
-export { captureFacts } from './captureFacts';
+export { readFacts } from './readFacts';
 export type { MemoryFeature, SegmentToCapture } from './memoryFeature';
 export {
   captureSegment,

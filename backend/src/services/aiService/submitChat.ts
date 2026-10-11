@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import type { Message } from '@db/types';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { secondsUntilUtcMidnight, sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
+import { insertPendingReplyOrNull } from '@queries/messages/insertPendingReplyOrNull';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
@@ -236,6 +238,21 @@ async function budgetExceededErrorOrNull(): Promise<ResultError | null> {
   );
 }
 
+function newestAssistantIndexOf(rows: Message[]): number {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i]?.role === 'assistant') return i;
+  }
+  return -1;
+}
+
+/** Whether a `pending` reply is young enough that its process may still be streaming it. */
+function isLivePending(row: Message | undefined): row is Message {
+  if (row?.exchangeStatus !== 'pending') return false;
+  return Date.now() - row.createdAt.getTime() <= env.EXCHANGE_STALENESS_MS;
+}
+
+const EXCHANGE_IN_FLIGHT_MESSAGE = 'An exchange is already running in this thread.';
+
 /**
  * One exchange per thread at a time, and the lazy half of staleness
  * recovery. A newest assistant row still `pending` means an exchange is
@@ -243,26 +260,17 @@ async function budgetExceededErrorOrNull(): Promise<ResultError | null> {
  * history: bounce it. A pending row older than the staleness window
  * belongs to a dead process: settle it as interrupted here so the thread
  * moves on. Run on rows read before the gate wait, it only refuses early;
- * the claim re-runs it on fresh rows, one start at a time.
+ * the claim re-runs it on fresh rows, and the database refuses a second
+ * pending reply whatever the rows said.
  */
 async function guardOrSettleStaleExchange(
   rows: Awaited<ReturnType<typeof listMessagesByThread>>,
   scope: { userId: string; threadId: string; memory: MemoryFeature },
 ): Promise<ResultError | null> {
-  let newestAssistantIndex = -1;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'assistant') {
-      newestAssistantIndex = i;
-      break;
-    }
-  }
-  const newestAssistant = newestAssistantIndex >= 0 ? rows[newestAssistantIndex] : undefined;
+  const newestAssistantIndex = newestAssistantIndexOf(rows);
+  const newestAssistant = rows[newestAssistantIndex];
   if (!newestAssistant || newestAssistant.exchangeStatus !== 'pending') return null;
-
-  const ageMs = Date.now() - newestAssistant.createdAt.getTime();
-  if (ageMs <= env.EXCHANGE_STALENESS_MS) {
-    return err('exchange_in_flight', 'An exchange is already running in this thread.');
-  }
+  if (isLivePending(newestAssistant)) return err('exchange_in_flight', EXCHANGE_IN_FLIGHT_MESSAGE);
 
   const systemPrompt = await assembledSystemPrompt({ ...scope, basePrompt: SYSTEM_PROMPT });
   await settleCrashedExchange(rows, newestAssistant, newestAssistantIndex, systemPrompt);
@@ -321,17 +329,9 @@ async function claimExchange({
     const inFlight = await guardOrSettleStaleExchange(rows, { userId, threadId, memory });
     if (inFlight) return inFlight;
 
+    const assistantMessage = await insertPendingReplyOrNull({ threadId }, trx);
+    if (!assistantMessage) return err('exchange_in_flight', EXCHANGE_IN_FLIGHT_MESSAGE);
     await setMessagesAbandoned({ messageIds: replyIds, abandoned: true }, trx);
-    const assistantMessage = await insertMessage(
-      {
-        threadId,
-        role: 'assistant',
-        content: '',
-        // Marks the exchange running until settlement flips it.
-        exchangeStatus: 'pending',
-      },
-      trx,
-    );
     return ok({ precedingRows: rows.slice(0, userIndex), userMessage, assistantMessage });
   });
 }
@@ -458,26 +458,32 @@ async function unansweredArrivalErrorOrNull(rows: Message[]): Promise<ResultErro
   return err('arrival_unanswered', 'The last message has no reply yet: retry it first.');
 }
 
+type StoredArrival = { userMessage: Message; listener: VerdictListener };
+
 /**
  * Stores the arrival and queues its judgment in one transaction, with a
- * listener already open for the verdict: the judgment cannot land before
- * anyone hears it.
+ * listener already sure to hear the verdict: the judgment cannot land
+ * before anyone hears it.
  */
 async function storeArrival(
   { userId, threadId, content }: { userId: string; threadId: string; content: string },
   judging: ArrivalJudging,
-): Promise<{ userMessage: Message; listener: VerdictListener }> {
-  const opened: { listener?: VerdictListener } = {};
+): Promise<StoredArrival> {
+  const arrival: Arrival = { userId, threadId, messageId: randomUUID() };
+  const listener = listenForVerdict(arrival);
   try {
-    return await inTransaction(async (trx) => {
-      const userMessage = await insertMessage({ threadId, role: 'user', content }, trx);
-      const arrival: Arrival = { userId, threadId, messageId: userMessage.id };
-      opened.listener = listenForVerdict(arrival);
+    await listener.ready;
+    const userMessage = await inTransaction(async (trx) => {
+      const stored = await insertMessage(
+        { id: arrival.messageId, threadId, role: 'user', content },
+        trx,
+      );
       await judging.enqueueDriftGateJudgeArrival(arrival, trx);
-      return { userMessage, listener: opened.listener };
+      return stored;
     });
+    return { userMessage, listener };
   } catch (error) {
-    opened.listener?.close();
+    listener.close();
     throw error;
   }
 }

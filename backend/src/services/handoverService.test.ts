@@ -195,10 +195,9 @@ describe('handOverArrival', () => {
     const { userId, threadId, pausedMessageId } = await pausedThread();
     const segmentId = await closedSegmentIdOf(pausedMessageId);
     const heard: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.kind === 'memory-captured' && event.threadId === threadId,
-      (event) => heard.push(event),
-    );
+    const subscription = subscribe(userId, (event) => {
+      if (event.kind === 'memory-captured' && event.threadId === threadId) heard.push(event);
+    });
 
     const result = await handOverArrival({
       userId,
@@ -206,7 +205,7 @@ describe('handOverArrival', () => {
       messageId: pausedMessageId,
       memory: memoryOn,
     });
-    unsubscribe();
+    subscription.close();
     if (result.type !== 'success') throw new Error(`handover failed: ${result.code}`);
 
     // The move waited on the queued capture of the closed segment, not on a clock.

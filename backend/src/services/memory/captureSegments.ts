@@ -1,6 +1,6 @@
 import type { Message } from '@db/types';
-import { withThreadLock } from '@queries/locks/withThreadLock';
 import { capturePointersOf } from '@queries/memoryCaptureProgress/capturePointersOf';
+import { recordSegmentCapture } from '@queries/memoryCaptureProgress/recordSegmentCapture';
 import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import {
@@ -10,8 +10,8 @@ import {
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
-import { type CaptureTurn, captureFacts } from './captureFacts';
 import type { SegmentToCapture } from './memoryFeature';
+import { type CaptureTurn, readFacts } from './readFacts';
 
 /**
  * The live Turns of a segment up to the row that settles it: from its first
@@ -55,7 +55,10 @@ function unsettledTurns(rows: Message[], startMessageId: string): CaptureTurn[] 
 export interface CapturePassReport {
   /** False when the user switched memory off: nothing was read. */
   memoryEnabled: boolean;
-  /** Segments that held unread Turns when the pass reached them. */
+  /**
+   * Segments that held unread Turns when the pass reached them, short of
+   * those another pass captured first.
+   */
   owed: number;
   /** Segments whose capture failed; their pointers stay put for a retry. */
   failed: number;
@@ -74,6 +77,7 @@ function emptyReport(memoryEnabled: boolean): CapturePassReport {
 type SegmentRead = {
   segmentId: string;
   turns: CaptureTurn[];
+  /** The segment's pointer as this pass found it. */
   capturedThroughAt: Date | null;
   /** The message the read's spend is recorded against. */
   spendMessageId: string;
@@ -94,8 +98,10 @@ function settledRead(rows: Message[], segment: SegmentNeedingCapture): SegmentRe
 }
 
 /**
- * Reads one segment past its pointer and adds the outcome to the report.
- * False when the read failed.
+ * Reads one segment past its pointer, then stores the Facts and moves the
+ * pointer together, unless another pass moved it first: that pass
+ * captured these Turns, so this one owed nothing. Adds the outcome to the
+ * report. False when the read failed.
  */
 async function readSegment(
   userId: string,
@@ -103,8 +109,7 @@ async function readSegment(
   read: SegmentRead,
   report: CapturePassReport,
 ): Promise<boolean> {
-  report.owed += 1;
-  const captured = await captureFacts({
+  const captured = await readFacts({
     userId,
     turns: read.turns,
     blockedCategories: settings.memoryBlockedCategories,
@@ -118,16 +123,27 @@ async function readSegment(
         captured.message ? `: ${captured.message}` : ''
       }`,
     );
+    report.owed += 1;
     report.failed += 1;
     report.failureCode ??= captured.code;
     return false;
   }
-  await upsertCaptureProgress({ segmentId: read.segmentId, throughAt: read.throughAt });
-  report.added += captured.data.added;
-  report.replaced += captured.data.replaced;
-  if (captured.data.added + captured.data.replaced > 0) {
+  const stored = await recordSegmentCapture({
+    segmentId: read.segmentId,
+    readFrom: read.capturedThroughAt,
+    throughAt: read.throughAt,
+    facts: captured.data,
+  });
+  if (!stored) return true;
+
+  const replaced = captured.data.filter((fact) => fact.replacesFactId !== null).length;
+  const added = captured.data.length - replaced;
+  report.owed += 1;
+  report.added += added;
+  report.replaced += replaced;
+  if (captured.data.length > 0) {
     console.log(
-      `[memory capture] segment ${read.segmentId}: ${captured.data.added} Fact(s) added, ${captured.data.replaced} replaced`,
+      `[memory capture] segment ${read.segmentId}: ${added} Fact(s) added, ${replaced} replaced`,
     );
   }
   return true;
@@ -139,15 +155,10 @@ async function readSegment(
  * gone — is a pass with nothing read, so capturing it twice stores nothing
  * extra. A user who switched memory off has the pointer jump to the settle
  * row instead: nothing is gathered, and nothing is deferred until memory
- * returns. Capture passes on one Thread run one at a time.
+ * returns. When two passes read the same Turns at once, the first to
+ * store its reading wins, and the other reports nothing owed.
  */
-export function captureSegment(segment: SegmentToCapture): Promise<CapturePassReport> {
-  return withThreadLock({ threadId: segment.threadId, kind: 'memory-capture' }, () =>
-    captureSegmentLocked(segment),
-  );
-}
-
-async function captureSegmentLocked({
+export async function captureSegment({
   userId,
   threadId,
   segmentId,
@@ -227,19 +238,10 @@ async function captureNewestSegment(
 /**
  * The on-demand pass: everything in the thread not yet read, the newest
  * segment included even though it has not settled. Settled segments are
- * read first, oldest first, and a failure stops the pass there. Capture
- * passes on one Thread run one at a time.
+ * read first, oldest first, and a failure stops the pass there. A segment
+ * another pass captures meanwhile counts as nothing owed.
  */
-export function captureUnreadTurns(thread: {
-  userId: string;
-  threadId: string;
-}): Promise<CapturePassReport> {
-  return withThreadLock({ threadId: thread.threadId, kind: 'memory-capture' }, () =>
-    captureUnreadTurnsLocked(thread),
-  );
-}
-
-async function captureUnreadTurnsLocked({
+export async function captureUnreadTurns({
   userId,
   threadId,
 }: {

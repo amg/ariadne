@@ -125,6 +125,19 @@ describe('the worker', () => {
     });
   });
 
+  it('fails an attempt that runs past the time limit as recoverable, and frees its job', async () => {
+    const hung: QueueTask<'probeRun'> = { execute: () => new Promise<void>(() => {}) };
+    await enqueueProbe('hung');
+
+    await drainQueue({ probeRun: registeredTask('probeRun', hung, { timeLimitMs: 50 }) });
+
+    expect(await findJobByKeyOrNull({ task: 'probeRun', key: 'hung' })).toMatchObject({
+      state: 'queued',
+      errorClass: 'recoverable',
+      lastError: '[recoverable] task_timed_out: ran past 50 ms',
+    });
+  });
+
   it('queues a fresh job behind a dead one when the same key is asked for again', async () => {
     let failing = true;
     const probe = probeTask(() => (failing ? new TaskFailure('provider_not_configured') : null));

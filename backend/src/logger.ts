@@ -8,7 +8,7 @@ import { env } from '@config/env';
  * Color scheme (computed inside pino-pretty's `messageFormat`, so it degrades
  * to plain text automatically when `colorize` is off):
  *
- *   Request line — one per request (server.ts onResponse hook):
+ *   Request line — one per request (server entry point onResponse hook):
  *     POST /api/threads/.../generate-title → 502 5666ms
  *       method+URL   bright cyan
  *       → 2xx green · 3xx blue · 4xx yellow · 5xx bright red

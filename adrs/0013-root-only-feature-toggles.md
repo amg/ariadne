@@ -1,3 +1,7 @@
+---
+description: Feature toggles are read only at the entry points and passed down as values.
+---
+
 # ADR 0013: Root-Only Feature Toggles
 
 ## Status

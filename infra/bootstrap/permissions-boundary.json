@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CeilingIsEverything",
+      "Effect": "Allow",
+      "Action": ["*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyRolesAndUsersWithoutThisBoundary",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:CreateRole",
+        "iam:PutRolePermissionsBoundary",
+        "iam:PutUserPermissionsBoundary"
+      ],
+      "Resource": "*",
+      "Condition": { "StringNotEquals": { "iam:PermissionsBoundary": "@BOUNDARY_ARN@" } }
+    },
+    {
+      "Sid": "DenyBoundaryPolicyAlteration",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion"
+      ],
+      "Resource": "@BOUNDARY_ARN@"
+    },
+    {
+      "Sid": "DenyBoundaryRemoval",
+      "Effect": "Deny",
+      "Action": ["iam:DeleteUserPermissionsBoundary", "iam:DeleteRolePermissionsBoundary"],
+      "Resource": "*"
+    }
+  ]
+}

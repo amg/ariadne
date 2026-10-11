@@ -1,5 +1,4 @@
 import { env } from '@config/env';
-import { withThreadLock } from '@queries/locks/withThreadLock';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { type Result, err, ok } from '../../types/result';
 import { buildLiveTurns } from './messageTransformer/liveTurns';
@@ -47,19 +46,18 @@ const EMPTY_OUTCOME: LiveArrivalOutcome = {
  * the target Message, or fill the whole thread when no target is given.
  * Off means no pass runs and the caller sees the empty outcome.
  *
- * Passes on one thread run strictly one at a time, wherever they run:
- * each pass snapshots the arrivals at its start, so two overlapping passes
- * would re-judge and re-log what the other writes after its snapshot. The
- * later pass re-reads the store, finds the arrivals done, and degrades to
- * a pure read.
+ * Passes on one thread may overlap. Each arrival's judgment is stored by
+ * whichever pass gets there first, and every pass reports what is stored,
+ * so overlapping passes agree on every verdict; the loser only pays for a
+ * duplicate round of inference.
  */
 export async function runLiveGate({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
   if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
-  return withThreadLock({ threadId, kind: 'live-chain' }, () =>
-    transformArrivals(upToMessageId === undefined ? { threadId } : { threadId, upToMessageId }),
+  return transformArrivals(
+    upToMessageId === undefined ? { threadId } : { threadId, upToMessageId },
   );
 }
 
@@ -78,9 +76,6 @@ async function transformArrivals({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
-  // Fresh read at pass start: the lane may run after the store has
-  // advanced between the caller's request and its turn under the lock.
-  if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
   const rows = await listMessagesByThread({ threadId });
   // Only the live conversation is gated; abandoned rows keep what they had.
   const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));

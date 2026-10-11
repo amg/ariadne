@@ -164,10 +164,9 @@ describe('driftGateJudgeArrival on the worker', () => {
   it('announces the gate failed when it cannot judge at all, and stays dead', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const events: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.threadId === threadId,
-      (event) => events.push(event),
-    );
+    const unsubscribe = subscribe(userId, (event) => {
+      if (event.threadId === threadId) events.push(event);
+    }).close;
     const savedUrl = process.env.MOCK_AI_BASE_URL;
     const savedKey = process.env.DEEPINFRA_API_KEY;
     process.env.MOCK_AI_BASE_URL = '';
@@ -191,10 +190,9 @@ describe('driftGateJudgeArrival on the worker', () => {
   it('judges a queued arrival once, however often it was queued while waiting', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const events: ServerEvent[] = [];
-    const unsubscribe = subscribe(
-      (event) => event.threadId === threadId,
-      (event) => events.push(event),
-    );
+    const unsubscribe = subscribe(userId, (event) => {
+      if (event.threadId === threadId) events.push(event);
+    }).close;
     try {
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });

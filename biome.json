@@ -5,6 +5,9 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "files": {
+    "ignore": ["infra/cdk.out", "infra/node_modules", "infra/.runs"]
+  },
   "organizeImports": {
     "enabled": true
   },

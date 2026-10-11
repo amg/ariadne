@@ -11,6 +11,10 @@
 #   docker compose -f compose.staging.yml --env-file .env up -d
 #   npm run migrate
 
+# Own project name: dev, staging and prod share this directory, and a shared
+# project would let one tier's `up` replace another tier's containers.
+name: alex-chat-bot-staging
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -86,6 +90,9 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     container_name: chat_frontend_staging
+    # The tab reads "Staging Ari", like dev's "Dev Ari"
+    environment:
+      - TITLE_PREFIX=Staging
     ports:
       - "${FRONTEND_PORT:-5173}:8080"
     depends_on:

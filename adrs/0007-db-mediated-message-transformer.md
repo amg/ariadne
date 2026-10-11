@@ -1,3 +1,7 @@
+---
+description: Message transformer steps communicate only through the database, never through memory.
+---
+
 # ADR 0007: Message transformer steps communicate through the database
 
 ## Status

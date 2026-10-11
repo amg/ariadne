@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -65,7 +64,7 @@ describe('addSideCost', () => {
 
   it('takes the added count when the stored one is unknown', async () => {
     const messageId = await createMessage();
-    await upsertSideCost({ ...cost(messageId, '0.0000001000', null) });
+    await addSideCost(cost(messageId, '0.0000001000', null));
 
     await addSideCost(cost(messageId, '0.0000001000', 7));
 

@@ -1,3 +1,7 @@
+---
+description: Thread topic drift is detected on two timescales, offline scoring of stored Turns and a live gate on each arrival.
+---
+
 # ADR 0006: Thread topic drift detection
 
 ## Status

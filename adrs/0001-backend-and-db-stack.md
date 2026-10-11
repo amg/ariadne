@@ -1,3 +1,7 @@
+---
+description: Node.js on PostgreSQL, queried through Kysely.
+---
+
 # ADR 0001: Backend Runtime and Database Stack
 
 ## Status

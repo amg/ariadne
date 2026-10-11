@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
+import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -65,7 +65,7 @@ describe('sumDailySpend', () => {
     });
 
     // Embedding spend
-    await upsertArrivalEmbedding({
+    await recordArrivalEmbedding({
       messageId: user.id,
       embedding: new Array<number>(1024).fill(0),
       modelId: EMBEDDING_MODEL_ID,
@@ -73,17 +73,21 @@ describe('sumDailySpend', () => {
     });
 
     // Side-call spend (rewrite + judge)
-    await upsertSideCost({
+    await addSideCost({
       messageId: user.id,
       kind: 'rewrite',
       model: 'test-model',
       costUsd: '0.0000003000',
+      promptTokens: null,
+      completionTokens: null,
     });
-    await upsertSideCost({
+    await addSideCost({
       messageId: user.id,
       kind: 'judge',
       model: 'test-model',
       costUsd: '0.0000002000',
+      promptTokens: null,
+      completionTokens: null,
     });
 
     const total = await sumDailySpend();

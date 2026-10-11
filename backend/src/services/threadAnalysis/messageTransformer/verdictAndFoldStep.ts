@@ -1,11 +1,14 @@
-import type { Message, MessageEmbedding } from '@db/types';
+import { randomUUID } from 'node:crypto';
+import type { Message, MessageEmbedding, NewSegmentDriftLog } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { upsertMessageEmbedding } from '@queries/messageEmbeddings/upsertMessageEmbedding';
+import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import {
+  type OpenedSegment,
+  appendArrivalVerdict,
+} from '@queries/segmentDriftLogs/appendArrivalVerdict';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { insertSegmentDriftLog } from '@queries/segmentDriftLogs/insertSegmentDriftLog';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
-import { insertThreadSegment } from '@queries/threadSegments/insertThreadSegment';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { type Result, err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
@@ -26,6 +29,11 @@ import type { MessageStep } from './messageStep';
  * already-recorded rows are replayed (never re-embedded, never re-judged),
  * anything missing is computed and persisted. The step short-circuits when
  * the target arrival already has its verdict row and its turn is folded.
+ *
+ * An arrival's verdict and the segments it opens commit together, and only
+ * if no other pass wrote them first. A pass that finds it lost that race
+ * stops there: the arrival is judged, and the caller reads what the winner
+ * stored.
  *
  * This step cannot fail open: an arrival whose embedding is missing means
  * the transformer has not finished, and the exchange surfaces the
@@ -54,12 +62,8 @@ interface LiveLedgerState {
   completedTurns: number;
   /** The segment row the next verdict logs against. */
   currentSegmentId: string | null;
-  /**
-   * Persisted segment rows queued ahead of the current fill: arrivals that
-   * replay a fire advance the queue; arrivals that outrun it insert fresh
-   * rows.
-   */
-  storedSegments: { id: string; startMessageId: string }[];
+  /** Stored segment ids by the arrival that starts them. */
+  storedSegmentIdByStart: Map<string, string>;
   /** Message ids with a recorded verdict already. */
   loggedMessageIds: Set<string>;
 }
@@ -78,23 +82,24 @@ interface ArrivedJudgment {
 }
 
 /**
- * Secures the segment row to log the next verdict against. Replayed
- * arrivals consume the next queued stored row; the first arrival past the
- * stored segments allocates a fresh one. Always called with the message
- * that the segment will start at, which keeps the replay and the fresh
- * paths identical.
+ * Moves the ledger onto the segment starting at the given arrival: the
+ * stored one when the chain holds it, else a fresh one the arrival opens,
+ * added to `opened` for the arrival's commit.
  */
-async function allocateSegment(state: LiveLedgerState, threadId: string, startMessageId: string) {
-  const stored = state.storedSegments.shift();
-  if (stored) state.currentSegmentId = stored.id;
-  else {
-    const inserted = await insertThreadSegment({
-      threadId,
-      startMessageId,
-      modelId: EMBEDDING_MODEL_ID,
-    });
-    state.currentSegmentId = inserted.id;
+function openSegment(
+  state: LiveLedgerState,
+  threadId: string,
+  startMessageId: string,
+  opened: OpenedSegment[],
+): void {
+  const storedId = state.storedSegmentIdByStart.get(startMessageId);
+  if (storedId !== undefined) {
+    state.currentSegmentId = storedId;
+    return;
   }
+  const segment = { id: randomUUID(), threadId, startMessageId, modelId: EMBEDDING_MODEL_ID };
+  opened.push(segment);
+  state.currentSegmentId = segment.id;
 }
 
 /**
@@ -141,14 +146,15 @@ function evaluateArrivalAgainstLedger(
   };
 }
 
-/** Writes the arrival's verdict row unless one is recorded already. */
-async function logArrivalIfNeeded(
+/** The arrival's verdict row in the current segment; null when one is recorded already. */
+function verdictRowOrNull(
   state: LiveLedgerState,
   userMessageId: string,
   judged: ArrivedJudgment,
-) {
-  if (state.loggedMessageIds.has(userMessageId)) return;
-  await insertSegmentDriftLog({
+): NewSegmentDriftLog | null {
+  if (state.loggedMessageIds.has(userMessageId)) return null;
+  return {
+    // Set before any arrival is judged: every arrival opens one when none is current.
     segmentId: state.currentSegmentId as string,
     messageId: userMessageId,
     modelId: EMBEDDING_MODEL_ID,
@@ -159,14 +165,13 @@ async function logArrivalIfNeeded(
     verdict: judged.arrivedVerdict,
     fireChannel: judged.fireChannel,
     slowDriftStartMessageId: judged.slowDriftStartMessageId,
-  });
-  state.loggedMessageIds.add(userMessageId);
+  };
 }
 
 /**
  * Resolves the embedding for a completed turn. Prefers the stored row when
  * it already carries a vector for this embedding model; otherwise embeds
- * the turn text and upserts.
+ * the turn text and records it, folding whichever vector is stored first.
  */
 async function resolveTurnVector(input: {
   text: string;
@@ -179,7 +184,7 @@ async function resolveTurnVector(input: {
   }
   const embedded = await embedText(input.text);
   if (embedded.type === 'error') return embedded;
-  const row = await upsertMessageEmbedding({
+  const row = await recordTurnEmbedding({
     messageId: input.assistantMessage.id,
     embedding: embedded.data.embedding,
     modelId: EMBEDDING_MODEL_ID,
@@ -248,22 +253,28 @@ async function foldComplete(row: LiveTurnRow): Promise<boolean> {
 }
 
 /**
+ * How one arrival's processing ended: judged and folded by this pass, or
+ * left to the pass that stored its judgment first.
+ */
+type ArrivalProcessed = 'judged' | 'written-by-another-pass';
+
+/**
  * Processes one arrival during the fill-forward pass: secures its segment,
- * judges it against the live gravity point, logs the verdict when missing,
- * starts a fresh segment on a fire, and folds its completed turn.
+ * judges it against the live gravity point, commits the verdict when
+ * missing together with the fresh segment a fire starts, and folds its
+ * completed turn.
  */
 async function processArrival(input: {
   state: LiveLedgerState;
   threadId: string;
   row: LiveTurnRow;
   storedByMessageId: Map<string, MessageEmbedding>;
-}): Promise<Result<undefined>> {
+}): Promise<Result<ArrivalProcessed>> {
   const { state, threadId, row, storedByMessageId } = input;
   const userMessageId = row.userMessage.id;
 
-  if (state.currentSegmentId === null) {
-    await allocateSegment(state, threadId, userMessageId);
-  }
+  const opened: OpenedSegment[] = [];
+  if (state.currentSegmentId === null) openSegment(state, threadId, userMessageId, opened);
 
   const stored = storedByMessageId.get(userMessageId);
   if (!stored || stored.embedding === null || stored.modelId !== EMBEDDING_MODEL_ID) {
@@ -274,13 +285,19 @@ async function processArrival(input: {
   }
 
   const judged = evaluateArrivalAgainstLedger(state, stored.embedding, userMessageId);
-  await logArrivalIfNeeded(state, userMessageId, judged);
+  const verdict = verdictRowOrNull(state, userMessageId, judged);
 
   if (judged.fired) {
     // A fired arrival burns the segment it was judged in. Its own
     // completed turn will re-seed the next segment's gravity point.
     state.memberSum = null;
-    await allocateSegment(state, threadId, userMessageId);
+    openSegment(state, threadId, userMessageId, opened);
+  }
+
+  if (verdict !== null || opened.length > 0) {
+    const appended = await appendArrivalVerdict({ openedSegments: opened, verdict });
+    if (!appended) return ok('written-by-another-pass');
+    state.loggedMessageIds.add(userMessageId);
   }
 
   const folded = await completeTurn({
@@ -290,7 +307,7 @@ async function processArrival(input: {
     reseed: judged.fired,
   });
   if (folded.type === 'error') return folded;
-  return ok(undefined);
+  return ok('judged');
 }
 
 /**
@@ -299,6 +316,8 @@ async function processArrival(input: {
  * missing is computed and persisted on the spot. Abandoned arrivals are
  * filtered from the ledger: their segments and logs stay stored (usage
  * keeps tracking them) but the live chain follows only the live conversation.
+ * Stops early, without error, at the first arrival another pass wrote
+ * first: that pass owns the chain from there.
  */
 async function fillForwardToArrival(input: {
   threadId: string;
@@ -338,12 +357,9 @@ async function fillForwardToArrival(input: {
     anchorMemberCount: 0,
     completedTurns: 0,
     currentSegmentId: null,
-    storedSegments: storedSegments
-      .filter((segment) => !abandonedIds.has(segment.startMessageId))
-      .map((segment) => ({
-        id: segment.id,
-        startMessageId: segment.startMessageId,
-      })),
+    storedSegmentIdByStart: new Map(
+      storedSegments.map((segment) => [segment.startMessageId, segment.id]),
+    ),
     loggedMessageIds: new Set(storedLogsByMessageId.keys()),
   };
 
@@ -352,6 +368,7 @@ async function fillForwardToArrival(input: {
     if (!row) continue;
     const processed = await processArrival({ state, threadId, row, storedByMessageId });
     if (processed.type === 'error') return processed;
+    if (processed.data === 'written-by-another-pass') break;
   }
   return ok(undefined);
 }

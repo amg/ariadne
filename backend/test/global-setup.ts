@@ -11,6 +11,7 @@ import { sql } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool, escapeIdentifier } from 'pg';
 import type { TestProject } from 'vitest/node';
+import { findTestRedis } from './redis';
 import { TEMPLATE_DB_URL_ENV, workerDatabaseName } from './worker-db';
 
 /**
@@ -227,4 +228,10 @@ export default async function globalSetup(project: TestProject): Promise<void> {
 
   // Workers are spawned after setup and inherit this env.
   process.env[TEMPLATE_DB_URL_ENV] = databaseUrl;
+
+  // Redis sits next to the database, or on this machine.
+  const databaseHost = new URL(databaseUrl).hostname;
+  await findTestRedis(
+    [...new Set([databaseHost, '127.0.0.1', detectGatewayIp() ?? ''])].filter(Boolean),
+  );
 }

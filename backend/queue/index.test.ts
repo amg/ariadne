@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { env } from '@config/env';
+import { db } from '@db/db';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
@@ -14,6 +15,7 @@ import {
 import { memoryOff } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { run } from 'graphile-worker';
+import { sql } from 'kysely';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const savedMockBaseUrl = process.env.MOCK_AI_BASE_URL;
@@ -90,6 +92,8 @@ describe('startQueue', () => {
           'running',
         'the crashed process holds the job',
       );
+      // It took the job long ago.
+      await sql`update queues._private_jobs set locked_at = now() - interval '1 hour'`.execute(db);
 
       await startQueue({ memory: memoryOff });
 

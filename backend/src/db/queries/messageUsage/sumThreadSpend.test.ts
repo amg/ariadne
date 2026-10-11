@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
-import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
+import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumThreadSpend } from '@queries/messageUsage/sumThreadSpend';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -39,35 +39,43 @@ async function seedFullSpend(threadId: string): Promise<void> {
     costUsd: '0.0000050000',
     finishReason: 'stop',
   });
-  await upsertArrivalEmbedding({
+  await recordArrivalEmbedding({
     messageId: user.id,
     embedding: new Array<number>(1024).fill(0),
     modelId: EMBEDDING_MODEL_ID,
     embeddingCostUsd: 0.00000001,
   });
-  await upsertSideCost({
+  await addSideCost({
     messageId: user.id,
     kind: 'rewrite',
     model: env.REWRITE_MODEL,
     costUsd: '0.0000002000',
+    promptTokens: null,
+    completionTokens: null,
   });
-  await upsertSideCost({
+  await addSideCost({
     messageId: user.id,
     kind: 'judge',
     model: env.JUDGE_MODEL,
     costUsd: '0.0000003000',
+    promptTokens: null,
+    completionTokens: null,
   });
-  await upsertSideCost({
+  await addSideCost({
     messageId: user.id,
     kind: 'fact_extraction',
     model: env.MEMORY_MODEL,
     costUsd: '0.0000004000',
+    promptTokens: null,
+    completionTokens: null,
   });
-  await upsertSideCost({
+  await addSideCost({
     messageId: user.id,
     kind: 'fact_embedding',
     model: EMBEDDING_MODEL_ID,
     costUsd: '0.0000000500',
+    promptTokens: null,
+    completionTokens: null,
   });
 }
 

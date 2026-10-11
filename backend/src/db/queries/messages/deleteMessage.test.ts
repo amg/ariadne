@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
-import { upsertSideCost } from '@queries/messageSideCosts/upsertSideCost';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
@@ -52,11 +52,13 @@ describe('deleteMessage', () => {
       latencyMs: 42,
     });
     // Side-call spends cascade too.
-    await upsertSideCost({
+    await addSideCost({
       messageId: assistant.id,
       kind: 'rewrite',
       model: 'Qwen/Qwen3.5-9B',
       costUsd: '0.0000000100',
+      promptTokens: null,
+      completionTokens: null,
     });
 
     await deleteMessage({ messageId: assistant.id });

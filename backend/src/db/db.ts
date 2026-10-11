@@ -37,16 +37,6 @@ const benchDb: Kysely<Database> | null = env.BENCH_DATABASE_URL
   ? createDbFromPool(new Pool({ connectionString: env.BENCH_DATABASE_URL }))
   : null;
 
-/** Whether this deployment has a bench database to switch to. */
-export const isBenchDbConfigured = benchDb !== null;
-
-/** Enters the bench scope for the current request context; no-op if unset. */
-export function enterBenchScope(): boolean {
-  if (!benchDb) return false;
-  requestDbScope.enterWith(benchDb);
-  return true;
-}
-
 /**
  * The app-wide database handle.
  *
@@ -91,13 +81,4 @@ export async function migrateToLatest() {
     console.error(error);
     process.exit(1);
   }
-}
-
-// If run directly
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
-if (isMainModule) {
-  migrateToLatest().then(() => {
-    console.log('Migrations complete');
-    process.exit(0);
-  });
 }

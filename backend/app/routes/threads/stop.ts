@@ -9,9 +9,9 @@ type StopParams = {
 };
 
 /**
- * User stop for the thread's live exchange: aborts the provider stream,
- * which settles the exchange as `interrupted` (partial text + estimated
- * spend persist). The connection-close path does the same for a vanished
+ * User stop for the thread's live exchange, on whichever backend copy
+ * streams it: aborts the provider stream, which settles the exchange as
+ * `interrupted` (partial text + estimated spend persist). The connection-close path does the same for a vanished
  * client; this endpoint makes the stop explicit and callable — 200 except
  * 404 when nothing is running.
  */
@@ -29,7 +29,7 @@ export async function setupThreadStopRoute(fastify: FastifyInstance) {
       if (!isValidUuid(threadId)) {
         return reply.code(400).send({ error: 'Invalid thread id' });
       }
-      const stopped = stopThreadExchange(threadId);
+      const stopped = await stopThreadExchange({ userId, threadId });
       if (!stopped) {
         return reply.code(404).send({ error: 'No exchange is running in this thread.' });
       }

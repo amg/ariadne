@@ -13,7 +13,7 @@ export interface Arrival {
   messageId: string;
 }
 
-/** The live gate's judgment of one arrival, as the stream reports it. */
+/** The live gate's judgment of one arrival. */
 export interface ArrivalVerdict {
   messageId: string;
   verdict: GateVerdict;
@@ -80,10 +80,13 @@ function outcomeOfEvent(event: GateEvent): ArrivalGateOutcome {
 }
 
 /**
- * Hears the outcome of one arrival's judgment. Open it before the judgment
- * can land, so nothing published in between is missed.
+ * Hears the outcome of one arrival's judgment. Open it, and wait until it
+ * is `ready`, before the judgment can land, so nothing published in
+ * between is missed.
  */
 export interface VerdictListener {
+  /** Resolves once the verdict is published; never rejects. */
+  ready: Promise<void>;
   /** The first outcome heard, or null once the time is up or the signal aborts. */
   next(ms: number, signal?: AbortSignal): Promise<ArrivalGateOutcome | null>;
   close(): void;
@@ -92,16 +95,14 @@ export interface VerdictListener {
 export function listenForVerdict(arrival: Arrival): VerdictListener {
   let heard: ArrivalGateOutcome | null = null;
   let wake: (() => void) | null = null;
-  const unsubscribe = subscribe(
-    (event) => isGateEventFor(event, arrival.messageId),
-    (event) => {
-      if (!isGateEventFor(event, arrival.messageId)) return;
-      heard ??= outcomeOfEvent(event);
-      wake?.();
-    },
-  );
+  const subscription = subscribe(arrival.userId, (event) => {
+    if (!isGateEventFor(event, arrival.messageId)) return;
+    heard ??= outcomeOfEvent(event);
+    wake?.();
+  });
 
   return {
+    ready: subscription.ready,
     next: (ms, signal) =>
       new Promise((resolve) => {
         if (heard !== null || signal?.aborted) {
@@ -118,7 +119,7 @@ export function listenForVerdict(arrival: Arrival): VerdictListener {
         signal?.addEventListener('abort', finish, { once: true });
         wake = finish;
       }),
-    close: unsubscribe,
+    close: () => subscription.close(),
   };
 }
 
@@ -150,12 +151,29 @@ type AwaitArrivalGateProps = {
 };
 
 /**
+ * The outcome from a stored verdict, or a judgment that failed fatally.
+ * Null while the judgment is still owed.
+ */
+async function settledGateOutcomeOrNull(
+  messageId: string,
+  judging: ArrivalJudging,
+): Promise<ArrivalGateOutcome | null> {
+  const stored = await storedGateOutcomeOrNull(messageId);
+  if (stored) return stored;
+  const job = await judging.findDriftGateJudgeArrivalJobOrNull(messageId);
+  return judgmentFailed(job) ? { kind: 'failed' } : null;
+}
+
+/**
  * Waits, up to the gate's wait limit, for the arrival's judgment. A stored
  * verdict answers at once. A judgment still queued or running is waited
  * on. One that gave up after recoverable failures, or was never queued, is
  * queued again and waited on; one that failed fatally answers `failed`
  * until the operator re-queues it. With the gate switched off nothing is
  * judged, and the arrival is clear.
+ *
+ * The stored state is checked again once the listener is sure to hear, and
+ * once more when the wait runs out.
  */
 export async function awaitArrivalGate({
   arrival,
@@ -165,6 +183,7 @@ export async function awaitArrivalGate({
 }: AwaitArrivalGateProps): Promise<ArrivalGateOutcome> {
   try {
     if (env.THREAD_ANALYSIS_MODE === 'off') return { kind: 'clear', verdict: null };
+    await listener.ready;
     const stored = await storedGateOutcomeOrNull(arrival.messageId);
     if (stored) return stored;
 
@@ -172,7 +191,9 @@ export async function awaitArrivalGate({
     if (judgmentFailed(job)) return { kind: 'failed' };
     if (job === null || job.state === 'dead') await judging.enqueueDriftGateJudgeArrival(arrival);
 
-    return (await listener.next(env.GATE_WAIT_MS, signal)) ?? { kind: 'pending' };
+    const heard = await listener.next(env.GATE_WAIT_MS, signal);
+    if (heard) return heard;
+    return (await settledGateOutcomeOrNull(arrival.messageId, judging)) ?? { kind: 'pending' };
   } finally {
     listener.close();
   }

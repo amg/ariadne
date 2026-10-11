@@ -49,9 +49,13 @@ flowchart LR
   PC -- "events by kind" --> UI
 ```
 
-The worker runs inside the API process for now. Only the server's entry
-point starts it, so moving it into its own container is a deployment
-change. Section 6 covers what that move would still need.
+The worker runs inside the API process by default, as on the home
+server, which is the shape drawn here. It can also run as a process of
+its own, with any number of API and worker copies side by side; they
+then share news and stops through Valkey. Only the two entry points
+start the worker, so choosing between the shapes is configuration.
+[AWS-PROD-ARCHITECTURE.html](../architecture/AWS-PROD-ARCHITECTURE.html) shows that
+split shape as deployed.
 
 ### Where each part runs
 
@@ -203,16 +207,34 @@ Three layers keep repeated requests from turning into repeated work:
    still owed. Running it twice changes nothing the second time unless
    the world changed in between. The Drift gate replays stored verdicts
    and never re-embeds or re-judges.
-3. **Serialized per Thread.** Judging a Thread's arrivals takes a
-   Postgres advisory lock on that Thread's live chain, so two judgments
-   never interleave. The lock lives in the database, not in process
-   memory, so it would still hold if the worker moved elsewhere.
+3. **Optimistic per Thread.** Two passes over one Thread (two
+   judgments, or two captures) may overlap, and nothing makes them wait
+   for each other. Each does all its inference first, holding no
+   database connection, then writes its results in one short
+   transaction that succeeds only if no other pass wrote first. The
+   loser reads what the winner stored and reports that, as a pass that
+   finds its work already done always has. A rewrite or embedding a
+   judgment stores before reaching its verdict is kept only if none is
+   stored yet, so overlapping judgments reach their verdict on the same
+   inputs. The loser's inference was still paid for, so its spend is
+   added to the record. Overlap is rare, so an occasional duplicate
+   round of inference costs far less than holding a connection through
+   every pass. All of this lives in the database, so it holds wherever
+   the worker runs.
 
 ## 3. The event bus
 
-The bus is an in-process publish/subscribe channel. Every event names
-the user it is for and, where it has one, its Thread. Producers never
-know who is listening.
+The bus is a publish/subscribe channel. Every event names the user it
+is for and, where it has one, its Thread. Producers never know who is
+listening. Inside one process it delivers at once. With Valkey
+configured, it also carries each user's events, on a channel of that
+user's own, to the other backend copies listening to them, and a
+user's stop to whichever copy runs the Exchange.
+
+- **Lost news is caught by reading again.** Between copies, delivery is
+  at most once. A chat waiting on its verdict, or a Handover waiting on
+  its capture, reads the database once it is sure to hear the news, and
+  once more when its wait runs out.
 
 - **Nothing is kept.** A subscriber that arrives late never sees an
   earlier event. The database stays authoritative, and the bus is only
@@ -353,10 +375,16 @@ from the code, not the HTTP status.
 
 ### Containment
 
-- **A crash mid-task loses nothing.** At boot, the backend releases any
-  jobs its previous process still held, and they run again. Because
-  every task checks the current state before acting, re-running half-done
-work is safe.
+- **No attempt runs forever.** Every attempt has the same time limit.
+  One that runs past it fails as recoverable, with a warning in the log,
+  and the job is retried like any other failure. The overrun work is not
+  cancelled, only no longer waited for.
+- **A crash mid-task loses nothing.** Because live workers end every
+  attempt within the time limit, a job locked well beyond it belongs to
+  a worker that crashed or froze: any running worker releases it and it
+  runs again. Because every task checks the current state before acting,
+  re-running half-done work is safe. Tasks must stay idempotent for both
+  rules to hold.
 - **News failures stay contained.** A listener that throws, or a
   give-up hook that fails, is logged without affecting the job or other
   listeners. If the connect-time snapshot fails, the stream still
@@ -367,10 +395,9 @@ work is safe.
 
 ## 6. Known limits
 
-- **Single process.** The bus, the worker and the registry of running
-  Exchanges all live in one backend process. Running a second replica
-  first needs the bus to cross processes (Postgres LISTEN/NOTIFY is the
-  natural carrier, per ADR 0012).
+- **Several copies need Valkey.** Without it, news and stops stay
+  inside one process, so the API and the worker run together. With it,
+  a stop lost between copies lets that Exchange run to its end.
 - **No automatic sweep.** Dead jobs wait for a Retry or the operator.
   There is no management screen yet.
 - **Toggles are read at boot.** Memory's capture task exists only while

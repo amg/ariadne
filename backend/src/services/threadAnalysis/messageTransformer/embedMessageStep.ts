@@ -1,5 +1,5 @@
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { upsertArrivalEmbedding } from '@queries/messageEmbeddings/upsertArrivalEmbedding';
+import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { computeEmbeddingCostUsd } from '@services/aiService/pricing';
 import { type Result, err, ok } from '../../../types/result';
@@ -12,6 +12,8 @@ import type { MessageStep } from './messageStep';
  * reading when one was accepted, otherwise the raw arrival — into the
  * same arrival row. A stored row that already has a vector for this
  * embedding model short-circuits the call (never re-embed the arrival).
+ * When two passes embed the same arrival at once, the first vector stored
+ * stands, and the verdict step of both reads it.
  *
  * This step cannot fail open: a missing or failed embedding aborts the
  * transformer and the exchange surfaces the failure.
@@ -34,12 +36,10 @@ export const embedMessageStep: MessageStep = {
     if (embedded.type === 'error') return embedded;
     // The step's spend rides the arrival row.
     const embeddingCostUsd = await computeEmbeddingCostUsd(embedded.data.promptTokens);
-    await upsertArrivalEmbedding({
+    await recordArrivalEmbedding({
       messageId: userMessageId,
       embedding: embedded.data.embedding,
       modelId: EMBEDDING_MODEL_ID,
-      rewrittenText: stored?.rewrittenText ?? null,
-      expandOutcome: stored?.expandOutcome ?? null,
       embeddingCostUsd,
     });
     return ok(undefined);

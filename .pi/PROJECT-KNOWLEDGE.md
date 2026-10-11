@@ -1,75 +1,43 @@
 # Chat Bot Project Knowledge
 
-A dockerized, single-user chatbot with streaming replies and cost
-observability plus cross-session factual memory (Facts captured at
-segment close, Seeds at Thread creation; ADR 0010). It also carries a thread-health
-analyzer for topic-drift detection (ADR 0006); its live gate now runs
-with every conversation — arrivals are expanded, embedded, judged, and
-persisted — with the reading surfaced under Conversation/Analysis tabs
-(`?mode=analyze`), behind `THREAD_ANALYSIS_MODE`.
+Ari: a self-hosted chatbot with streaming replies, cost tracking,
+topic-drift detection and opt-in memory.
 
 ## Start Here
 
-Everything user-facing — features, tech stack, quick start, environment
-variables, deployment, project structure — lives in the root `README.md`.
-The README is the single source of project truth; do not replicate it here.
-
-## How it works
-
-`docs/flows/NEW-MESSAGE.md` maps a message end to end (submit, Drift
-gate, Retry, pause, Handover). `docs/flows/BACKGROUND-WORK.md` covers
-the queue, the event bus, push and every failure path. The worker runs
-inside the API process. Feature toggles are read at boot, so flipping
-one needs a restart.
-
-## Memory
-
-ADR 0010 covers the pipeline (Fact capture at segment close, Thread
-Seeds, per-user toggle). `CONTEXT.md` defines the terms (Fact, Memory,
-Seed, Handover). Memory is off by default (`FEATURE_MEMORY`); the
-backend reads toggles at boot, so a change needs a restart.
-
-## Database
-
-One Postgres schema per domain keeps app tables separate from the auth
-provider's ~55 SuperTokens tables (which stay in `public`). The queue
-engine owns its own `queues` schema.
-
-| Schema | Tables |
-|---|---|
-| `chat` | `users`, `threads`, `messages` |
-| `analysis` | `message_embeddings`, `thread_segments`, `segment_drift_logs` |
-| `memory` | `user_facts`, `thread_seeds`, `user_settings`, `memory_capture_progress` |
-| `billing` | `message_usage`, `message_side_costs`, `model_configs` |
-| `auth` | SuperTokens tables (~55) |
-| `public` | `kysely_migration`, `kysely_migration_lock` |
-
-Foreign keys work across schemas. Extensions (`vector`, `uuid-ossp`)
-resolve via the default `search_path`. Code references tables with
-schema-qualified keys (`billing.messageUsage`); `CamelCasePlugin` maps
-each dot-separated part to snake_case at query time.
+The root `README.md` covers features, quick start, configuration,
+testing, tech stack and structure. It is the single source of project
+truth; nothing here repeats it.
 
 ## Knowledge Map
 
-- **`CONTEXT.md`** (repo root) — the domain vocabulary. Code uses these
-  terms as its assumed language.
-- **`adrs/`** — architectural decisions; the code is the source of truth
-  for everything else.
-- **`docs/flows/`** — high-level flow maps with diagrams. Concepts only,
-  never function or column names.
-- **`docs/ideas/`** — open explorations. High level only: how an approach
-  works and why, never implementation specifics.
-- **`docs/project-management/`** — destination for WIP tickets and bugs
-  (`tickets/`, `bugs/`). Once work lands, its ticket is deleted; git
-  history keeps the substance.
-- **`.pi/FUTURE-IMPROVEMENTS.md`** — backlog and in-progress items.
+- **`CONTEXT.md`** — the domain vocabulary the code assumes.
+- **`adrs/`** — architectural decisions. Each opens with a one-line
+  `description`; `adrs/README.md` holds the format and upkeep rules.
+- **`docs/flows/`** — how a message and background work move through the
+  system. Concepts only.
+- **`docs/architecture/`** — HTML reports of deployment shapes (aws-prod
+  architecture and deployment).
+- **`docs/ideas/`** — open explorations, high level only.
+- **`docs/project-management/`** — WIP tickets and bugs; deleted when the
+  work lands.
+- **`infra/README.md`** — operating aws-prod.
+- **`.pi/FUTURE-IMPROVEMENTS.md`** — backlog (gitignored).
 
-## Agent Environment
+## Agent Tips
 
-- `cd backend && npm test` works from both the host and the agent
-  container (real Postgres, no mocks; files run in parallel, each worker
-  on its own clone of `chatbot_test` next to the `.env`-configured
-  database — see README/Testing and `.testing/db.md`).
-- Probing the host database from the agent container (connection string,
-  one-off probe recipes): see `.testing/db.md` (gitignored — throwaway
-  scripts and probes live there, never in the repo).
+- **Tests** run from the agent container too (`cd backend && npm test`).
+  Probing the host database, and throwaway scripts, live in `.testing/`
+  (gitignored; start with `.testing/db.md`), never in the repo.
+- **Redis vs Valkey.** The server is Valkey everywhere; code says
+  "Redis" for the protocol and the ioredis client (`connectRedis`,
+  `redisCarrier`), while deployment names (`VALKEY_URL`, infra, compose)
+  say "Valkey".
+- **Tables are schema-qualified** in code (`billing.messageUsage`): one
+  Postgres schema per domain, with the auth provider's tables in `auth`
+  and the queue in `queues`.
+
+## Skill Loading (CRITICAL)
+
+Before any task, read `.pi/SKILLS-INDEX.md`, load every `SKILL.md` that
+matches the task, then proceed. The skill file is the specification.

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import type { FactCategory, Message } from '@db/types';
-import { withThreadLock } from '@queries/locks/withThreadLock';
 import { captureProgressOf } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
@@ -19,12 +18,12 @@ import { parseFactCandidates } from '@services/aiService/extractFacts';
 import { parseFactDuplicateLabel } from '@services/aiService/judgeFactDuplicate';
 import {
   assembledSystemPrompt,
-  captureFacts,
   captureSegment,
   captureUnreadTurns,
   editFactContent,
   factsNamedIn,
   namesInFact,
+  readFacts,
   renderedSeedOrNull,
   segmentTurns,
 } from '@services/memory';
@@ -86,7 +85,7 @@ async function factsOf(userId: string) {
 async function costsOf(messageId: string) {
   return db
     .selectFrom('billing.messageSideCosts')
-    .select(['kind', 'promptTokens'])
+    .select(['kind', 'promptTokens', 'completionTokens'])
     .where('messageId', '=', messageId)
     .orderBy('kind', 'asc')
     .execute();
@@ -141,15 +140,31 @@ async function storeFact(userId: string, content: string, overrides: object = {}
   if (Object.keys(overrides).length > 0) {
     await db.updateTable('memory.userFacts').set(overrides).where('id', '=', fact.id).execute();
   }
+  return fact;
 }
 
-describe('captureFacts', () => {
-  it('stores extracted Facts with their source Turn and records the spend', async () => {
+/** What a read found, without the vectors. */
+function readOutcome(result: Awaited<ReturnType<typeof readFacts>>) {
+  if (result.type !== 'success') throw new Error(`read failed: ${result.code}`);
+  return result.data.map(({ id, row, replacesFactId }) => ({
+    id,
+    content: row.content,
+    category: row.category,
+    predicate: row.predicate,
+    sourceMessageId: row.sourceMessageId,
+    suppressed: row.suppressed,
+    validAt: row.validAt,
+    replacesFactId,
+  }));
+}
+
+describe('readFacts', () => {
+  it('reads Facts with their source Turn, records the spend, and stores no Fact', async () => {
     const { userId, threadId } = await createUserAndThread();
     const first = await addTurn(threadId, 'I love hiking in the Alps');
     const second = await addTurn(threadId, 'I work as a carpenter');
 
-    const result = await captureFacts({
+    const result = await readFacts({
       userId,
       turns: [
         { userMessage: first.user, assistantReply: first.assistant },
@@ -160,31 +175,38 @@ describe('captureFacts', () => {
       capturedThroughAt: null,
     });
 
-    expect(result).toEqual({ type: 'success', data: { added: 2, replaced: 0 } });
-    expect(await factsOf(userId)).toEqual([
+    expect(readOutcome(result)).toEqual([
       {
+        id: expect.any(String),
         content: 'The user loves hiking in the Alps.',
         category: 'preference',
         predicate: 'loves',
         sourceMessageId: first.user.id,
         suppressed: false,
         validAt: null,
+        replacesFactId: null,
       },
       {
+        id: expect.any(String),
         content: 'The user works as a carpenter.',
         category: 'work',
         predicate: 'works',
         sourceMessageId: second.user.id,
         suppressed: false,
         validAt: null,
+        replacesFactId: null,
       },
     ]);
+    expect(await factsOf(userId)).toEqual([]);
     const costs = await costsOf(second.user.id);
     expect(costs.map((cost) => cost.kind)).toEqual(['fact_embedding', 'fact_extraction']);
   });
 
   it('replaces a Fact said again, keeping its suppression, without a duplicate check', async () => {
     const { userId, threadId } = await createUserAndThread();
+    const known = await storeFact(userId, 'The user loves hiking in the Alps.', {
+      suppressed: true,
+    });
     const turn = await addTurn(threadId, 'I love hiking in the Alps');
     const input = {
       userId,
@@ -193,35 +215,41 @@ describe('captureFacts', () => {
       spendMessageId: turn.user.id,
       capturedThroughAt: null,
     };
-    await captureFacts(input);
-    await db
-      .updateTable('memory.userFacts')
-      .set({ suppressed: true })
-      .where('userId', '=', userId)
-      .execute();
     const checksBefore = mock.memory.duplicateCheckCount();
 
-    const again = await captureFacts(input);
+    const read = await readFacts(input);
 
-    expect(again).toEqual({ type: 'success', data: { added: 0, replaced: 1 } });
-    expect(mock.memory.duplicateCheckCount()).toBe(checksBefore);
-    const rows = await db
-      .selectFrom('memory.userFacts')
-      .select(['content', 'suppressed', 'invalidAt'])
-      .where('userId', '=', userId)
-      .orderBy('createdAt', 'asc')
-      .execute();
-    expect(rows).toEqual([
-      {
-        content: 'The user loves hiking in the Alps.',
-        suppressed: true,
-        invalidAt: expect.any(Date),
-      },
-      { content: 'The user loves hiking in the Alps.', suppressed: true, invalidAt: null },
+    expect(readOutcome(read)).toMatchObject([
+      { content: 'The user loves hiking in the Alps.', suppressed: true, replacesFactId: known.id },
     ]);
-    // A repeated run adds its spend to the same rows instead of replacing them.
-    const extraction = (await costsOf(turn.user.id)).find((c) => c.kind === 'fact_extraction');
-    expect(extraction?.promptTokens).toBeGreaterThan(0);
+    expect(mock.memory.duplicateCheckCount()).toBe(checksBefore);
+    const once = (await costsOf(turn.user.id)).find((c) => c.kind === 'fact_extraction');
+
+    // A repeated read adds its spend to the same rows instead of replacing them.
+    await readFacts(input);
+    const twice = (await costsOf(turn.user.id)).find((c) => c.kind === 'fact_extraction');
+    expect(twice?.promptTokens).toBe(2 * (once?.promptTokens ?? 0));
+  });
+
+  it('checks each candidate against the ones read before it', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const first = await addTurn(threadId, 'I love jazz');
+    const again = await addTurn(threadId, 'I love jazz');
+
+    const read = await readFacts({
+      userId,
+      turns: [
+        { userMessage: first.user, assistantReply: first.assistant },
+        { userMessage: again.user, assistantReply: again.assistant },
+      ],
+      blockedCategories: [],
+      spendMessageId: again.user.id,
+      capturedThroughAt: null,
+    });
+
+    const [said, saidAgain] = readOutcome(read);
+    expect(said).toMatchObject({ sourceMessageId: first.user.id, replacesFactId: null });
+    expect(saidAgain).toMatchObject({ sourceMessageId: again.user.id, replacesFactId: said?.id });
   });
 
   it('drops candidates in blocked categories', async () => {
@@ -229,7 +257,7 @@ describe('captureFacts', () => {
     const turn = await addTurn(threadId, 'I love jazz');
     const other = await addTurn(threadId, 'I live in Lisbon');
 
-    await captureFacts({
+    const read = await readFacts({
       userId,
       turns: [
         { userMessage: turn.user, assistantReply: turn.assistant },
@@ -240,15 +268,15 @@ describe('captureFacts', () => {
       capturedThroughAt: null,
     });
 
-    expect((await factsOf(userId)).map((fact) => fact.category)).toEqual(['location']);
+    expect(readOutcome(read).map((fact) => fact.category)).toEqual(['location']);
   });
 
-  it('fails without storing anything when the extraction reply is unreadable', async () => {
+  it('fails when the extraction reply is unreadable, still recording its spend', async () => {
     const { userId, threadId } = await createUserAndThread();
     const turn = await addTurn(threadId, 'I love jazz');
     mock.memory.forceExtraction('Sure! Here are some facts about the user.');
 
-    const result = await captureFacts({
+    const result = await readFacts({
       userId,
       turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
       blockedCategories: [],
@@ -257,7 +285,6 @@ describe('captureFacts', () => {
     });
 
     expect(result).toMatchObject({ type: 'error', code: 'fact_extraction_unreadable' });
-    expect(await factsOf(userId)).toEqual([]);
     // The call still cost tokens, and the cost is still recorded.
     expect((await costsOf(turn.user.id)).map((cost) => cost.kind)).toEqual(['fact_extraction']);
   });
@@ -272,7 +299,7 @@ describe('captureFacts', () => {
     const older = new Date('2026-10-01T10:00:00Z');
     const newer = new Date('2026-10-02T10:00:00Z');
 
-    const result = await captureFacts({
+    const result = await readFacts({
       userId,
       turns: [
         {
@@ -290,11 +317,9 @@ describe('captureFacts', () => {
     });
 
     // The older turn is context for reading the new one, not a source.
-    expect(result).toEqual({ type: 'success', data: { added: 1, replaced: 0 } });
-    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
-      'The user works as a carpenter.',
+    expect(readOutcome(result)).toMatchObject([
+      { content: 'The user works as a carpenter.', sourceMessageId: second.user.id },
     ]);
-    expect((await factsOf(userId))[0]?.sourceMessageId).toBe(second.user.id);
   });
 
   it('flags older turns as context in the extraction prompt', () => {
@@ -341,7 +366,7 @@ describe('captureFacts', () => {
     });
     const turn = await addTurn(threadId, 'he and kuro were born in march', 'How lovely!');
 
-    await captureFacts({
+    await readFacts({
       userId,
       turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
       blockedCategories: ['credentials'],
@@ -363,7 +388,7 @@ describe('captureFacts', () => {
     await storeFact(userId, 'The user owns a black rabbit named Kuro.');
     const turn = await addTurn(threadId, 'I love jazz');
 
-    await captureFacts({
+    await readFacts({
       userId,
       turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
       blockedCategories: [],
@@ -709,43 +734,63 @@ describe('captureUnreadTurns', () => {
 });
 
 describe('capture passes on one Thread', () => {
-  it('read the Turns once when the on-demand pass meets a segment capture', async () => {
+  /** Each spend line of the message, its token counts doubled. */
+  async function doubledCostsOf(messageId: string) {
+    return (await costsOf(messageId)).map((cost) => ({
+      ...cost,
+      promptTokens: 2 * (cost.promptTokens ?? 0),
+      completionTokens: 2 * (cost.completionTokens ?? 0),
+    }));
+  }
+
+  it('store the Turns once when two passes read them at once, and record both spends', async () => {
     const { userId, threadId, boundary, segmentId } = await threadWithClosedSegment([
       'I love jazz',
     ]);
     const extractions = mock.memory.extractionCount();
 
-    const [onDemand, segment] = await Promise.all([
-      captureUnreadTurns({ userId, threadId }),
-      captureSegment({ userId, threadId, segmentId }),
-    ]);
+    // The segment capture reads the pointer, then waits on its extraction
+    // while the on-demand pass captures the same Turns from start to end.
+    const extraction = mock.memory.holdNextExtraction();
+    const slow = captureSegment({ userId, threadId, segmentId });
+    await extraction.arrived;
+    const fast = await captureUnreadTurns({ userId, threadId });
+    const bothSpends = await doubledCostsOf(boundary.id);
+    extraction.release();
+    const slowReport = await slow;
 
-    expect(onDemand.owed + segment.owed).toBe(1);
-    expect(mock.memory.extractionCount()).toBe(extractions + 1);
+    expect(fast).toMatchObject({ owed: 1, added: 1, failed: 0 });
+    expect(slowReport).toMatchObject({ owed: 0, added: 0, replaced: 0, failed: 0 });
+    expect(mock.memory.extractionCount()).toBe(extractions + 2);
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual(['The user loves jazz.']);
-    const kinds = (await costsOf(boundary.id)).map((cost) => cost.kind);
-    expect(kinds).toEqual([...new Set(kinds)]);
+    expect(await capturedThrough(segmentId)).toEqual(boundary.createdAt);
+    // The two reads were alike, so together they cost twice one of them.
+    expect(await costsOf(boundary.id)).toEqual(bothSpends);
   });
 
-  it('wait for the capture already running on the Thread', async () => {
-    const { userId, threadId, segmentId } = await threadWithClosedSegment(['I love jazz']);
-    const extractions = mock.memory.extractionCount();
-    let release: () => void = () => {};
-    const running = withThreadLock(
-      { threadId, kind: 'memory-capture' },
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    );
+  it('store nothing of a pass whose pointer moved on while it read', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const opening = await addTurn(threadId, 'I love jazz');
+    await insertThreadSegment({
+      threadId,
+      startMessageId: opening.user.id,
+      modelId: EMBEDDING_MODEL_ID,
+    });
+    await captureUnreadTurns({ userId, threadId });
+    await addTurn(threadId, 'I live in Lisbon');
 
-    const waiting = captureSegment({ userId, threadId, segmentId });
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(mock.memory.extractionCount()).toBe(extractions);
+    const extraction = mock.memory.holdNextExtraction();
+    const slow = captureUnreadTurns({ userId, threadId });
+    await extraction.arrived;
+    const fast = await captureUnreadTurns({ userId, threadId });
+    extraction.release();
 
-    release();
-    await running;
-    expect(await waiting).toMatchObject({ owed: 1, added: 1 });
+    expect(fast).toMatchObject({ owed: 1, added: 1 });
+    expect(await slow).toMatchObject({ owed: 0, added: 0, failed: 0 });
+    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
+      'The user loves jazz.',
+      'The user lives in Lisbon.',
+    ]);
   });
 });
 

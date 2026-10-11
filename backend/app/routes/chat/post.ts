@@ -228,7 +228,7 @@ async function respondToChat(
         });
   if (result.type === 'error') return sendExchangeError(reply, result);
   if (isDriftPause(result.data)) return createPauseResponse(result.data);
-  registerActiveExchange(input.threadId, result.data);
+  registerActiveExchange({ userId, threadId }, result.data);
   return createStreamResponse(input.threadId, result.data, signal);
 }
 

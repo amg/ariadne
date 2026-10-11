@@ -18,14 +18,21 @@ COPY backend ./backend
 WORKDIR /app/backend
 RUN npm run typecheck
 
+# Bundle the server and worker into dist/. Packages stay in node_modules.
+# tsx stays in the image too: migrations and the mock server still use it.
+RUN npm run build
+
 # Expose the default backend port (runtime port comes from the PORT env var)
 EXPOSE 3001
 
 # Drop privileges
 USER node
 
-ENV NODE_ENV=production
+# Stack traces point at the .ts sources through the bundle's source maps.
+ENV NODE_ENV=production \
+    NODE_OPTIONS=--enable-source-maps
 
-# Start the server without the file watcher: if boot fails the process exits,
-# so the container's restart policy can bring it back.
-CMD ["npm", "start"]
+# node itself is the container's main process, so stop signals reach the
+# server's own handler. If boot fails the process exits, so the container's
+# restart policy can bring it back.
+CMD ["node", "dist/server.js"]

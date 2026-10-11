@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# aws-prod: raise, test and tear down the chatbot on AWS from the operator's machine.
+# Each command is a script in commands/, runnable on its own too.
+set -euo pipefail
+
+COMMANDS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/commands"
+
+# In the order an operator meets them. Each summary is line 2 of the command's script.
+SECTIONS=(
+  "Once per account|core seed"
+  "Every test run|up load down"
+  "Looking in|status sweep db-tunnel db-password"
+)
+
+usage() {
+  echo "Usage: aws-prod <command> [args]     aws-prod <command> --help for its details"
+  local section name line
+  for section in "${SECTIONS[@]}"; do
+    printf '\n%s\n' "${section%%|*}"
+    for name in ${section#*|}; do
+      line="$(sed -n '2s/^# //p' "$COMMANDS_DIR/$name.sh")"
+      printf '  %-18s %s\n' "${line%%: *}" "${line#*: }"
+    done
+  done
+}
+
+command="${1:-help}"
+case "$command" in
+  help | -h | --help) usage ;;
+  *)
+    if [[ ! -x "$COMMANDS_DIR/$command.sh" ]]; then
+      usage >&2
+      printf '\n\033[31m✖ Unknown command: %s\033[0m\n' "$command" >&2
+      exit 1
+    fi
+    shift
+    exec "$COMMANDS_DIR/$command.sh" "$@"
+    ;;
+esac

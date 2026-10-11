@@ -1,83 +1,86 @@
-# ADR 0008: Spending governance: one daily budget, not per-client rate limits
+---
+description: One daily spend budget per deployment, read from Postgres; client identity stays at the Cloudflare edge; request limits are placed by deployment shape.
+---
+
+# ADR 0008: Spending governance: one daily budget, client identity at the edge
 
 ## Status
 Accepted.
 
 ## Context
+The app needs spending governance: a guarantee that a flood of requests,
+malicious or accidental, cannot burn through the provider account. The
+rule must fit every deployment shape: a single process behind a
+Cloudflare Tunnel, and several backend copies behind Cloudflare's proxy
+and a load balancer.
 
-The app needs spending governance: a guarantee that a flood of requests —
-malicious or accidental — cannot burn through the provider account. The rule
-must fit both of the app's deployments: the home server behind a Cloudflare
-Tunnel today, and the planned production shape on managed infrastructure,
-also behind Cloudflare, running more than one app replica.
+The long-lived deployment is a single self-hosted server with one user,
+or a handful. The multi-copy shape exists to be load tested, with its
+inference mocked, so it spends nothing real. What has to hold is a spend
+number the owner chooses, not fairness between many paying users.
 
-The deployment is single-user, so there is no crowd of clients to share
-capacity between — the need is a spend number that holds, not fairness
-across clients. Around $5/day at home, whatever production traffic
-justifies. And the app cannot tell its real clients apart: every request
-arrives through proxies, so per-client limits inside the app would rely on
-forwarded headers an attacker can influence. Spending governance therefore
-belongs to a number the deployment chooses, while client identity stays
-where it actually exists — at the Cloudflare edge.
+The app cannot tell its real clients apart by address. Every request
+arrives through proxies, so per-address limits inside the app would rely
+on forwarded headers an attacker can influence. Client identity exists
+where the connection actually lands: at the Cloudflare edge.
 
 ## Decision
 
-Client identity stays with Cloudflare. The edge knows the real client IP and
-the tunnel carries it; the app never reads forwarded headers, and no proxy
-trust is ever configured.
+### Client identity stays with Cloudflare
+The edge knows the real client address. The app never reads forwarded
+headers, and no proxy trust is ever configured. A signed-in user is the
+only identity the app keys anything on.
 
-The app enforces one deployment-wide spending budget instead:
+### One daily budget governs spend
+Each deployment sets one daily spend budget, in configuration. It is
+checked when a chat message is submitted, before any Exchange starts,
+against all provider-metered spend recorded for the current UTC day,
+estimated spend from interrupted Exchanges included. Past it, chat is
+refused with a `429` and a `Retry-After` until the day resets. An
+Exchange already streaming finishes, and reads are never blocked. A
+deployment that sets no budget has no check.
 
-| Aspect | Value |
-|---|---|
-| Setting | `DAILY_SPEND_BUDGET_USD`, default **5.0** |
-| Unset | No budget check — behavior is exactly as today |
-| Window | Calendar day, UTC |
-| Checked | Once, when a chat message is submitted, before any Exchange starts |
-| Counts | All provider-metered spend for the day, including estimated rows from interrupted exchanges |
-| Refused with | `429` + `Retry-After` (seconds until the day resets) |
-| In-flight work | Finishes; the exchange already streaming is not stopped |
-| Reads | Never blocked — thread lists, messages, analysis remain open |
+The budget is read from the spend Postgres already records, so it
+survives restarts and crashes and holds the same across any number of
+backend copies, with nothing extra to run. It is a safety cap on what
+the deployment can spend, not a share for each user, which suits a
+deployment with few users who all trust each other.
 
-The budget is read from Postgres, summing the spend the app already records,
-so it naturally survives restarts and crashes and works the same with
-several replicas — no extra infrastructure.
+### Request limits are a second layer, placed by deployment shape
+Request limits stop runaway volume and keep users from crowding each
+other out. The routes that bill outside chat (titling, analysis, model
+refresh) carry tighter caps of their own, so no one can spend around
+the budget without submitting chat.
 
-The routes that bill outside chat get their own caps. Without them, an
-attack could spend through the edges of the budget without ever submitting
-chat, so these sit as the second layer:
+* **A single process** limits in the app, with counts in memory. A
+  request counts against its signed-in user; requests without a session
+  share one bucket. The auth routes share that bucket too, unless the
+  deployment's configuration says an edge rule covers them.
+* **Several copies** limit at the edge, keyed on the real client
+  address, and the app's own limits are off. Counts held in each copy
+  would multiply every limit by the number of copies, and a shared
+  counter would be one more thing to fail exactly when load is highest.
+* **A deployment whose edge cannot express the rule** (a plan that
+  cannot scope it to the hostname, or let its own load generators
+  through) keeps its door closed instead: an allow-list admits only the
+  operator and the generators, and opening it is refused until an edge
+  limit is in place.
 
-| Route | Limit |
-|---|---|
-| `POST /api/threads/:id/generate-title` | 5/min |
-| `GET /api/threads/:id/analysis` | 10/min |
-| Analysis backfill per request | at most 20 arrivals; the rest fills on the next read |
-| `POST /api/models/refresh` | 2/min |
-| Global (all routes) | 100/min, unchanged |
-| `POST /api/chat` | 20/min, unchanged |
-
-These are shared limits for the whole deployment, not per-user — without
-auth and without proxy trust, the app has no client identity to key on.
-They are documented in the code exactly as they are: a coarse guard against
-runaway request volume, one bucket per replica.
-
-The budget is a property of a deployment, and the deployments stay
-separate (tier vocabulary and env files: ADR 0009) — so dev and prod each
-carry their own `DAILY_SPEND_BUDGET_USD`, and migrations run against the
-dev database by default with an explicit switch for prod.
+## Considered
+* **Per-address limits in the app**: need trusted forwarded headers.
+* **Counters shared through Valkey across copies**: tried, then removed.
+  Under load Valkey became unreachable, the counters fell back to each
+  process, and every limit loosened by the number of copies at the
+  worst moment. The edge never degrades when the backend is slammed.
 
 ## Consequences
-
-- Spend can no longer run past the configured daily number while a client
-  is submitting chat; the cap holds through crashes, restarts, and extra
-  replicas.
-- One deployment is one budget — every device of the owner draws from the
-  same pool, which suits a single-user app.
-- Per-user limits must wait for auth. Until then, the budget is the whole
-  defense against multi-account abuse; when per-user limits arrive, the 429
-  they produce and the budget's 429 should surface together in the chat UI
-  (tracked separately).
-- Clients are identified by Cloudflare only; the app ignores forwarding
-  headers and configures no proxy trust.
-- Estimated spend counts as spent. An exchange that ends before the provider
-  reports usage still charged an estimate, and the budget counts it.
+* **Easier**: spend cannot run past the daily number while chat is
+  being submitted, through crashes, restarts and extra copies. Limits
+  live where identity is real.
+* **Harder**: one deployment is one budget, so a single user can
+  exhaust it for everyone on that deployment; per-user limits soften
+  that but do not prevent it. A deployment serving many real users
+  would need a budget per user, and this decision revisited. Estimated
+  spend counts as spent. A
+  multi-copy deployment depends on its edge plan for request limits,
+  and on its allow-list where the plan falls short.

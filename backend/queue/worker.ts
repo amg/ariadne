@@ -9,7 +9,7 @@ import {
   type WorkerUtils,
 } from 'graphile-worker';
 import { logger } from '../src/logger';
-import { classifiedTaskError, classifyTaskError } from './errors';
+import { TaskFailure, classifiedTaskError, classifyTaskError } from './errors';
 import { whenArrivalJudged, whenJudgmentAbandoned } from './flows/driftGate';
 import { whenSegmentCaptureAbandoned, whenSegmentCaptured } from './flows/memoryCapture';
 import { whenThreadTitled } from './flows/threadTitling';
@@ -47,23 +47,69 @@ async function reportGivenUp<Name extends TaskName>(
 }
 
 /**
- * Wraps a task for the worker, recording every failure with its class so
- * readers of the queue can tell a retryable job from one waiting for the
- * operator.
+ * How long one attempt of any task may run. An attempt past it fails as a
+ * recoverable timeout, which frees its job for the next attempt.
+ */
+export const TASK_TIME_LIMIT_SECONDS = 120;
+
+/**
+ * Settles as `work` does, or fails with a recoverable timeout once
+ * `limitMs` has passed. Work past its deadline is not cancelled; it runs
+ * on unobserved, which is safe because every task is idempotent.
+ */
+async function withinTimeLimit(
+  work: Promise<void>,
+  limitMs: number,
+  onTimeout: () => void,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(new TaskFailure('task_timed_out', `ran past ${limitMs} ms`));
+    }, limitMs);
+  });
+  // Once the deadline wins, nobody awaits the work; a late failure of it
+  // must not surface as an unhandled rejection.
+  work.catch(() => {});
+  try {
+    await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Wraps a task for the worker, ending any attempt that runs past the time
+ * limit and recording every failure with its class, so readers of the
+ * queue can tell a retryable job from one waiting for the operator.
  */
 export function registeredTask<Name extends TaskName>(
   name: Name,
   task: QueueTask<Name>,
+  { timeLimitMs = TASK_TIME_LIMIT_SECONDS * 1000 }: { timeLimitMs?: number } = {},
 ): Task<Name> {
   return async (raw, helpers) => {
     // The engine hands back JSON the enqueue side wrote; shape changes ride
     // a renamed task, not this cast.
     const payload = raw as TaskPayload<Name>;
+    const { job } = helpers;
     try {
-      await task.execute(payload);
+      await withinTimeLimit(task.execute(payload), timeLimitMs, () => {
+        logger.warn(
+          {
+            task: name,
+            jobId: job.id,
+            attempt: job.attempts,
+            maxAttempts: job.max_attempts,
+            timeLimitMs,
+          },
+          'queue task ran past its time limit',
+        );
+      });
     } catch (error) {
       const errorClass = classifyTaskError(error);
-      const lastAttempt = helpers.job.attempts >= helpers.job.max_attempts;
+      const lastAttempt = job.attempts >= job.max_attempts;
       if (errorClass === 'fatal' || lastAttempt) {
         await reportGivenUp(name, task, payload, errorClass);
       }
@@ -72,20 +118,10 @@ export function registeredTask<Name extends TaskName>(
   };
 }
 
-/** The tasks that exist only while Memory does; jobs of theirs wait while it is off. */
-function memoryTasks(memory: MemoryFeature): TaskList {
-  if (memory.kind === 'off') return {};
-  return {
-    memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
-      execute: async (segment) => whenSegmentCaptured(await captureMemorySegment(segment)),
-      onGivenUp: async (segment) => whenSegmentCaptureAbandoned(segment),
-    }),
-  };
-}
-
 /**
  * Every task this deployment runs. Each task computes its outcome; its
  * flow translates that outcome into announcements and follow-up work.
+ * Memory's capture runs only while Memory is on; its jobs wait otherwise.
  */
 export function queueTasks(memory: MemoryFeature): TaskList {
   return {
@@ -97,7 +133,12 @@ export function queueTasks(memory: MemoryFeature): TaskList {
     threadGenerateTitle: registeredTask('threadGenerateTitle', {
       execute: async (params) => whenThreadTitled(await titleThread(params)),
     }),
-    ...memoryTasks(memory),
+    ...(memory.kind === 'on' && {
+      memoryCaptureSegment: registeredTask('memoryCaptureSegment', {
+        execute: async (segment) => whenSegmentCaptured(await captureMemorySegment(segment)),
+        onGivenUp: async (segment) => whenSegmentCaptureAbandoned(segment),
+      }),
+    }),
   };
 }
 
