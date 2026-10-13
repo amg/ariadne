@@ -11,6 +11,7 @@ import {
   vaultBucketName,
 } from '../../config/names.ts';
 import { markLifetime } from '../lifetime.ts';
+import { LoadDashboard } from './loadDashboard.ts';
 import { SafetyNet } from './safetyNet.ts';
 
 /** What the app and load stacks take from core. */
@@ -56,6 +57,7 @@ export class CoreStack extends Stack {
     };
 
     new SafetyNet(this, 'SafetyNet');
+    new LoadDashboard(this, 'LoadDashboard');
     new CfnOutput(this, OUTPUTS.vaultBucket, { value: vault.bucketName });
   }
 }

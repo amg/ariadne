@@ -13,6 +13,10 @@ description: Defines code quality standards, complexity limits, testing governan
 *   **Naming**: Name things by outcome and result, not by mechanism. Be explicit about nullability.
 *   **Strategic Duplication**: Extract core business logic and queries. Allow duplication in UI components and test setup where divergence is expected (AHA > DRY).
 *   **Type safety**: Use TypeScript types and interfaces to enforce contracts via structural typing. Avoid `any`; prefer `unknown` at external boundaries with runtime validation. Use discriminated unions for variant types. Let inference handle locals; annotate function signatures explicitly. Avoid type assertions — when unavoidable (third-party libs, narrowing edge cases), add an inline comment explaining why. Consider branded types for non-interchangeable IDs (thread IDs, user IDs).
+*   **Immutable at boundaries**: Treat whatever a function is handed as read-only, and return a new value instead of changing it.
+    - Type collections that cross a boundary as read-only (`ReadonlyMap`, `readonly T[]`); the compiler enforces these. Leave object keys plain.
+    - A function that adds to its input returns a copy with the addition (`{ ...chain, embeddings }`), and the caller uses that copy from then on. TypeScript does not warn when a returned value is ignored, so check the call sites.
+    - Mutating is fine for values a function creates itself (a running sum, a builder, an accumulator in a hot loop), as long as they never leave it.
 
 ## 2. Testing Governance
 *   **Database rules**: the DB-specific rules (no database mocks, real-Postgres tests, isolation, permitted boundary mocks) live in the **db** skill — load it before writing or modifying database tests.

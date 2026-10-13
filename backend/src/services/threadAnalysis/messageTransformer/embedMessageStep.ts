@@ -1,10 +1,9 @@
-import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { computeEmbeddingCostUsd } from '@services/aiService/pricing';
-import { type Result, err, ok } from '../../../types/result';
+import { err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
 import { formattedProspectiveTurn } from '../turns';
+import { currentModelVectorOrNull, withEmbedding } from './liveChain';
 import type { MessageStep } from './messageStep';
 
 /**
@@ -20,28 +19,24 @@ import type { MessageStep } from './messageStep';
  */
 export const embedMessageStep: MessageStep = {
   name: 'embed',
-  async run({ threadId, userMessageId }) {
-    const storedRows = await listMessageEmbeddingsByMessageIds({ messageIds: [userMessageId] });
-    const stored = storedRows[0];
-    if (stored && stored.embedding !== null && stored.modelId === EMBEDDING_MODEL_ID) {
-      return ok(undefined);
-    }
-
-    const rows = await listMessagesByThread({ threadId });
-    const arrival = rows.find((row) => row.id === userMessageId);
+  async run({ chain, arrivalIndex }) {
+    const arrival = chain.arrivals[arrivalIndex];
     if (!arrival) return err('thread_not_found');
+    const userMessageId = arrival.userMessage.id;
+    const stored = chain.embeddings.get(userMessageId);
+    if (currentModelVectorOrNull(stored) !== null) return ok(chain);
 
-    const text = stored?.rewrittenText ?? arrival.content;
+    const text = stored?.rewrittenText ?? arrival.userMessage.content;
     const embedded = await embedText(formattedProspectiveTurn(text));
     if (embedded.type === 'error') return embedded;
     // The step's spend rides the arrival row.
     const embeddingCostUsd = await computeEmbeddingCostUsd(embedded.data.promptTokens);
-    await recordArrivalEmbedding({
+    const recorded = await recordArrivalEmbedding({
       messageId: userMessageId,
       embedding: embedded.data.embedding,
       modelId: EMBEDDING_MODEL_ID,
       embeddingCostUsd,
     });
-    return ok(undefined);
+    return ok(withEmbedding(chain, recorded));
   },
 };

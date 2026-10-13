@@ -20,6 +20,8 @@ export type LoadStackProps = StackProps & {
   step: Step;
   imageTag: string;
   core: CoreResources;
+  /** The load balancer's address, for a run on the direct path. */
+  originAddress?: string;
 };
 
 /**
@@ -27,6 +29,10 @@ export type LoadStackProps = StackProps & {
  * do: over the internet, through Cloudflare. The stack holds only the
  * definition; the load command starts one task per generator and each
  * task exits when its run ends.
+ *
+ * Given an origin address, the generators take the direct path instead:
+ * they skip Cloudflare and present their own client certificate to the
+ * load balancer, which lets their addresses through only for the run.
  */
 export class LoadStack extends Stack {
   /** Pinned rather than looked up, so synthesis needs no AWS call. */
@@ -70,14 +76,21 @@ export class LoadStack extends Stack {
         RAMP_SECONDS: String(step.load.rampSeconds),
         HOLD_SECONDS: String(step.load.holdSeconds),
         THINK_SECONDS: String(step.load.thinkSeconds),
+        ...(props.originAddress ? { ORIGIN_ADDRESS: props.originAddress } : {}),
       },
       secrets: {
-        LOAD_KEY: ecs.Secret.fromSsmParameter(
-          ssm.StringParameter.fromSecureStringParameterAttributes(this, 'RunKey', {
-            parameterName: PARAMETERS.runKey,
-          }),
-        ),
+        LOAD_KEY: secureParameter(this, 'RunKey', PARAMETERS.runKey),
         USER_PASSWORD: ecs.Secret.fromSecretsManager(core.populationPassword),
+        ...(props.originAddress
+          ? {
+              ORIGIN_CLIENT_CERTIFICATE: secureParameter(
+                this,
+                'LoadClientCertificate',
+                PARAMETERS.loadClientCertificate,
+              ),
+              ORIGIN_CLIENT_KEY: secureParameter(this, 'LoadClientKey', PARAMETERS.loadClientKey),
+            }
+          : {}),
       },
       ulimits: [{ name: ecs.UlimitName.NOFILE, softLimit: 1_048_576, hardLimit: 1_048_576 }],
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'generator', logGroup }),
@@ -92,4 +105,10 @@ export class LoadStack extends Stack {
     };
     for (const [key, value] of Object.entries(outputs)) new CfnOutput(this, key, { value });
   }
+}
+
+function secureParameter(scope: Construct, id: string, parameterName: string): ecs.Secret {
+  return ecs.Secret.fromSsmParameter(
+    ssm.StringParameter.fromSecureStringParameterAttributes(scope, id, { parameterName }),
+  );
 }

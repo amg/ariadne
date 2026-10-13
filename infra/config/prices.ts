@@ -12,6 +12,7 @@ export const PRICES = {
   /** Single-AZ PostgreSQL, per instance-hour. */
   rdsInstancePerHour: {
     'm7g.large': 0.22,
+    'm7g.xlarge': 0.44,
     'r7g.large': 0.3,
     'r7g.xlarge': 0.6,
     'r7g.2xlarge': 1.2,

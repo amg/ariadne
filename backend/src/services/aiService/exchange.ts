@@ -49,10 +49,12 @@ type ExchangeDeps = {
   assistantMessageId: string;
   model: string;
   /**
-   * Locally counted tokens of the exchange's stream input. Feeds the
+   * Locally counts the tokens of the exchange's stream input. Feeds the
    * estimated spend row when the provider's usage report never arrives.
+   * Lazy: tokenizing the whole history costs CPU per Turn, and almost
+   * every exchange gets a usage report and never needs it.
    */
-  promptTokensEstimate: number;
+  estimatePromptTokens: () => number;
   /** Inter-token idle deadline. `<= 0` disables the watchdog. */
   idleTimeoutMs: number;
   /** Fired when the idle deadline elapses; caller aborts the stream. */
@@ -237,7 +239,7 @@ export class ChatExchange {
       await buildEstimatedUsageRow({
         messageId: this.deps.assistantMessageId,
         model: this.deps.model,
-        promptTokens: this.deps.promptTokensEstimate,
+        promptTokens: this.deps.estimatePromptTokens(),
         streamedText: this.assistantText,
         finishReason,
         latencyMs: this.latencyMs(),

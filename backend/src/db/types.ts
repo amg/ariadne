@@ -1,4 +1,4 @@
-import type { Generated, Insertable, Kysely, Selectable } from 'kysely';
+import type { ColumnType, Generated, Insertable, Kysely, Selectable } from 'kysely';
 
 /**
  * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
@@ -22,6 +22,7 @@ export interface Database {
   'memory.memoryCaptureProgress': MemoryCaptureProgressTable;
   'billing.messageUsage': MessageUsageTable;
   'billing.messageSideCosts': MessageSideCostsTable;
+  'billing.dailySpend': DailySpendTable;
   'billing.modelConfigs': ModelConfigsTable;
   'queues.jobs': QueueJobsView;
 }
@@ -90,6 +91,17 @@ export interface MessagesTable {
  */
 export const EXCHANGE_STATUSES = ['pending', 'completed', 'interrupted', 'error'] as const;
 export type MessageExchangeStatus = (typeof EXCHANGE_STATUSES)[number];
+
+/**
+ * Daily spend: everything recorded as spent on one UTC day, across chat,
+ * embeddings and side calls. Kept current by the database whenever spend
+ * is written, and kept when the messages behind it are deleted.
+ */
+export interface DailySpendTable {
+  /** The UTC day; written as `YYYY-MM-DD`, read back as a `Date`, never changed. */
+  day: ColumnType<Date, string, never>;
+  costUsd: string; // numeric(20,10) — Kysely selects numeric as string
+}
 
 /**
  * The chat exchange's inference telemetry, linked 1:1 to `messages`.

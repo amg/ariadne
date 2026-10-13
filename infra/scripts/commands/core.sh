@@ -16,6 +16,7 @@ main() {
   deploy_cloudflare_core
   import_origin_certificate
   publish_client_authority
+  publish_load_client_certificate
 }
 
 main "$@"; exit

@@ -47,6 +47,8 @@ const names: Record<string, string | number> = {
   PARAM_RUN_KEY: PARAMETERS.runKey,
   PARAM_SEED_SNAPSHOT: PARAMETERS.seedSnapshotId,
   PARAM_ORIGIN_CERT: PARAMETERS.originCertificateArn,
+  PARAM_LOAD_CLIENT_CERT: PARAMETERS.loadClientCertificate,
+  PARAM_LOAD_CLIENT_KEY: PARAMETERS.loadClientKey,
   STEP_NAMES: STEP_NAMES.join(' '),
 };
 for (const [key, value] of Object.entries(OUTPUTS)) {

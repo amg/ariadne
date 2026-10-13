@@ -1,9 +1,8 @@
 import type { DbExecutor } from '@db/types';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { isLiveArrival } from '@queries/messages/isLiveArrival';
 import { enqueueJob } from '@queries/queue/enqueueJob';
 import { type QueuedJob, findJobByKeyOrNull } from '@queries/queue/findJobByKey';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import type { SegmentToCapture } from '@services/memory';
 import { runLiveGate } from '@services/threadAnalysis';
@@ -66,13 +65,6 @@ export type ArrivalJudgment =
       /** The segment a fire closed, owed a capture; null when none was logged. */
       closedSegment: SegmentToCapture | null;
     };
-
-/** Whether the arrival is still a live user Message of its owner's Thread. */
-async function isLiveArrival({ userId, threadId, messageId }: DriftGateJudgeArrivalParams) {
-  if (!(await findThreadByIdAndUser({ userId, threadId }))) return false;
-  const rows = await listMessagesByThread({ threadId });
-  return rows.some((row) => row.id === messageId && row.role === 'user' && !row.abandoned);
-}
 
 /**
  * Judges one arrival with the Drift gate and reports what it concluded,

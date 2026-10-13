@@ -8,6 +8,7 @@ preflight() { # <step>
   check_core_is_up
   check_cloudflare_ranges_current
   check_zone_rule_phases_free
+  check_bot_fight_mode_off
   check_seed_snapshot_exists
   info "all clear"
 }
@@ -51,6 +52,18 @@ check_zone_rule_phases_free() {
       fail "The zone's $phase rules belong to something else; aws-prod would replace them"
     fi
   done
+}
+
+# Bot Fight Mode challenges traffic from cloud address ranges, the load
+# generators included, and no edge rule can exempt them on the Free plan.
+check_bot_fight_mode_off() {
+  local fight_mode
+  fight_mode="$(cloudflare_api "/zones/$(cloudflare_zone_id)/bot_management" | jq -r '.result.fight_mode | if type == "boolean" then tostring else "unknown" end')"
+  case "$fight_mode" in
+    false) ;;
+    true) fail "Bot Fight Mode is on for $ZONE_NAME and would block the load generators. Turn it off under Security, Bots" ;;
+    *) fail "Could not read Bot Fight Mode for $ZONE_NAME; the Cloudflare token needs Bot Management read" ;;
+  esac
 }
 
 check_seed_snapshot_exists() {

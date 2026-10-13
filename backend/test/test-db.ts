@@ -17,7 +17,7 @@ async function queueJobsStopped(limitMs = 20_000): Promise<void> {
 }
 
 export async function cleanDatabase(): Promise<void> {
-  await sql`truncate table chat.messages, analysis.message_embeddings, analysis.thread_segments, analysis.segment_drift_logs, billing.message_usage, chat.threads, chat.users, billing.model_configs cascade`.execute(
+  await sql`truncate table chat.messages, analysis.message_embeddings, analysis.thread_segments, analysis.segment_drift_logs, billing.message_usage, billing.daily_spend, chat.threads, chat.users, billing.model_configs cascade`.execute(
     db,
   );
   // The queue's jobs live in the engine's own tables; no view can clear them.

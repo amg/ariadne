@@ -27,3 +27,13 @@ publish_client_authority() {
   run_terraform core output -raw client_authority_pem |
     aws s3 cp - "s3://$(vault_bucket)/$ORIGIN_TRUST_KEY" --quiet
 }
+
+# The certificate load generators present on the direct path, where the
+# generator task reads it. Like the origin key, it never touches the disk.
+publish_load_client_certificate() {
+  step "Core: load generators' client certificate into parameters"
+  aws ssm put-parameter --name "$PARAM_LOAD_CLIENT_CERT" --type SecureString --overwrite \
+    --value file://<(run_terraform core output -raw load_client_certificate_pem) >/dev/null
+  aws ssm put-parameter --name "$PARAM_LOAD_CLIENT_KEY" --type SecureString --overwrite \
+    --value file://<(run_terraform core output -raw load_client_private_key_pem) >/dev/null
+}

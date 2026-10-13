@@ -122,6 +122,9 @@ export const PARAMETERS = {
   runKey: `/${PROJECT}/run-key`,
   seedSnapshotId: `/${PROJECT}/seed-snapshot-id`,
   originCertificateArn: `/${PROJECT}/origin-certificate-arn`,
+  /** The client certificate and key load generators present on the direct path. */
+  loadClientCertificate: `/${PROJECT}/load-client-certificate`,
+  loadClientKey: `/${PROJECT}/load-client-key`,
 } as const;
 
 /** Where the origin's client-certificate authority sits in the vault bucket. */

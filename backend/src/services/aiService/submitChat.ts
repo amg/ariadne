@@ -357,8 +357,8 @@ async function startExchange(props: StartExchangeProps): Promise<Result<ChatStre
     assistantMessageId: assistantMessage.id,
     model: config.model,
     // If the provider's usage report never arrives, the spend is still
-    // accounted from the locally counted input tokens.
-    promptTokensEstimate: estimateChatPromptTokens(systemPrompt, modelMessages),
+    // accounted from the locally counted input tokens — counted only then.
+    estimatePromptTokens: () => estimateChatPromptTokens(systemPrompt, modelMessages),
     idleTimeoutMs: config.idleTimeoutMs,
     // Fires on the idle deadline; user stop / client disconnect reuse the controller.
     onIdleTimeout: () => controller.abort(),

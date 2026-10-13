@@ -318,3 +318,10 @@ totals count it the same as provider-reported spend — an interrupted
 Exchange still accounts for what it spent.
 _Avoid_: fallback cost, projected cost
 
+**Daily spend**:
+All provider-metered spend recorded in one UTC day, across chat,
+embeddings and side calls; what the daily budget is checked against.
+Spend counts on the day it is recorded and stays counted when its
+messages are later deleted.
+_Avoid_: running total (that is per Thread), daily total
+

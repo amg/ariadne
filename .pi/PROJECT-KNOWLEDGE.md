@@ -36,6 +36,19 @@ truth; nothing here repeats it.
 - **Tables are schema-qualified** in code (`billing.messageUsage`): one
   Postgres schema per domain, with the auth provider's tables in `auth`
   and the queue in `queues`.
+- **aws-prod runs on the host, not here.** The agent container has no
+  AWS CLI or credentials, so the operator runs every AWS command. Give
+  them a standalone script, or a one-off helper call wrapped as
+  `bash -c 'source scripts/lib/command.sh && load_names <step> && <helper>'`.
+  Sourcing `command.sh` straight into their login shell turns on strict
+  mode there, and the first error closes the session. A run's
+  `infra/.runs/<run>/generator.log` holds each generator's first errors;
+  requests blocked at the edge show in Cloudflare under Security, Events.
+- **Load paths.** `aws-prod load` goes through Cloudflare, as users do.
+  `aws-prod load --direct` skips Cloudflare to measure aws-prod alone:
+  generators present their own client certificate, and their addresses
+  are allowed in only for the length of the run. Steps are proven on the
+  direct path first, then repeated through Cloudflare.
 
 ## Skill Loading (CRITICAL)
 

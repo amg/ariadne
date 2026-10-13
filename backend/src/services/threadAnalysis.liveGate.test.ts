@@ -786,3 +786,33 @@ describe('the analysis surface reads the persisted chain', () => {
     }
   });
 });
+
+describe('runLiveGate — topic-marked conversations', () => {
+  /** A Turn the way a load run makes one: short prompt, the mock's canned reply. */
+  function onTopic(text: string, topicName: string): TurnSpec {
+    const user = `${text} TOPIC:${topicName}`;
+    return { user, assistant: `Mock reply to: ${user}` };
+  }
+
+  it('passes follow-ups on one topic and fires when the topic changes', async () => {
+    const sourdough = [
+      'How do I keep a sourdough starter alive while travelling?',
+      'Does feeding it rye flour change how sour the bread gets?',
+      'What hydration would you start with for a first loaf?',
+      'How long should the bulk ferment run in a warm kitchen?',
+      'Why does my crust come out pale even at high heat?',
+    ].map((text) => onTopic(text, 'sourdough'));
+    // Twice round, about as long as a load run's Thread, so the slow channel gets its say.
+    const specs = [
+      ...sourdough,
+      ...sourdough,
+      onTopic('Which layers should I pack for a winter day hike?', 'hiking'),
+    ];
+    const { threadId } = await seedThread('topic-marked', specs);
+
+    assertSuccess(await runLiveGate({ threadId }));
+
+    const { logs } = await readChain(threadId);
+    expect(logs.map((log) => log.verdict)).toEqual(['muted', ...Array(9).fill('pass'), 'fire']);
+  });
+});

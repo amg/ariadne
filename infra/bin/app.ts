@@ -24,9 +24,18 @@ if (typeof stepName !== 'string') {
 const imageTag: unknown = app.node.tryGetContext('imageTag');
 if (typeof imageTag !== 'string') throw new Error('Pass -c imageTag=<tag> along with the step');
 
+/** Only the load command passes it, for a run on the direct path. */
+const originAddress: unknown = app.node.tryGetContext('originAddress');
+
 const step = stepNamed(stepName);
 const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: REGION };
 
 const core = new CoreStack(app, STACKS.core, { env });
 new AppStack(app, STACKS.app, { env, step, imageTag, core: core.resources });
-new LoadStack(app, STACKS.load, { env, step, imageTag, core: core.resources });
+new LoadStack(app, STACKS.load, {
+  env,
+  step,
+  imageTag,
+  core: core.resources,
+  originAddress: typeof originAddress === 'string' ? originAddress : undefined,
+});

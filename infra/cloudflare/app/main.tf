@@ -1,4 +1,6 @@
-# aws-prod at the edge, for as long as it is up. Destroyed on teardown.
+# aws-prod at the edge. While up, all five below; on teardown the hostname
+# is parked at an address nothing answers on and the rest is removed, so
+# the name never stops resolving and no resolver caches it as missing.
 #
 #   1. The hostname, proxied by Cloudflare, pointing at the load balancer.
 #   2. Cloudflare presents aws-prod's client certificate on this hostname.
@@ -35,15 +37,17 @@ locals {
 resource "cloudflare_record" "hostname" {
   zone_id = var.zone_id
   name    = var.hostname
-  type    = "CNAME"
-  content = var.origin_dns_name
+  type    = var.parked ? "A" : "CNAME"
+  content = var.parked ? "192.0.2.1" : var.origin_dns_name
   proxied = true
-  comment = "aws-prod; removed on teardown"
+  ttl     = 1
+  comment = var.parked ? "aws-prod parked; errors until the next raise" : "aws-prod active origin; parked on teardown"
 }
 
 # ── 2. Client certificate on this hostname ───────────────────────────────
 
 resource "cloudflare_authenticated_origin_pulls" "hostname" {
+  count                                  = var.parked ? 0 : 1
   zone_id                                = var.zone_id
   hostname                               = var.hostname
   authenticated_origin_pulls_certificate = var.client_certificate_id
@@ -53,6 +57,7 @@ resource "cloudflare_authenticated_origin_pulls" "hostname" {
 # ── 3. Strict TLS to the origin ──────────────────────────────────────────
 
 resource "cloudflare_ruleset" "origin_tls" {
+  count   = var.parked ? 0 : 1
   zone_id = var.zone_id
   name    = "aws-prod origin TLS"
   kind    = "zone"
@@ -71,6 +76,7 @@ resource "cloudflare_ruleset" "origin_tls" {
 # ── 4. Allow-list ────────────────────────────────────────────────────────
 
 resource "cloudflare_ruleset" "allow_list" {
+  count   = var.parked ? 0 : 1
   zone_id = var.zone_id
   name    = "aws-prod allow-list"
   kind    = "zone"
@@ -85,7 +91,7 @@ resource "cloudflare_ruleset" "allow_list" {
 
   lifecycle {
     precondition {
-      condition     = var.allow_list_enabled || var.edge_rate_limit
+      condition     = var.parked || var.allow_list_enabled || var.edge_rate_limit
       error_message = "Opening aws-prod (allow_list_enabled=false) leaves sign-in unlimited unless edge_rate_limit is on."
     }
   }
@@ -94,7 +100,7 @@ resource "cloudflare_ruleset" "allow_list" {
 # ── 5. Sign-in rate limit ────────────────────────────────────────────────
 
 resource "cloudflare_ruleset" "auth_rate_limit" {
-  count   = var.edge_rate_limit ? 1 : 0
+  count   = (!var.parked && var.edge_rate_limit) ? 1 : 0
   zone_id = var.zone_id
   name    = "aws-prod auth rate limit"
   kind    = "zone"

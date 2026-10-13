@@ -41,12 +41,15 @@ Start with the configuration; everything else follows from it.
    with IAM Identity Center sign-in and a CLI profile named after the
    project (any other name works through `AWS_PROFILE`).
 3. **Service quotas** in `ap-southeast-2`: Fargate On-Demand vCPUs (step100
-   needs about 125), and anything else the first `step10` run reports.
+   needs about 150), and anything else the first `step10` run reports.
 4. **Cloudflare.** Any zone plan, Free included: the sign-in rate limit is
    off by default (`edge_rate_limit` in `cloudflare/app` says why), and the
-   allow-list keeps everyone but the operator and the generators out. An
-   API token in `CLOUDFLARE_API_TOKEN` that can edit DNS, SSL and
-   certificates, WAF and configuration rules on that zone.
+   allow-list keeps everyone but the operator and the generators out.
+   Bot Fight Mode must be off: it challenges traffic from cloud address
+   ranges, the generators included, and no edge rule can exempt them on
+   the Free plan. An API token in `CLOUDFLARE_API_TOKEN` that can edit
+   DNS, SSL and certificates, WAF and configuration rules on that zone,
+   and read its Bot Management setting.
 5. **Tools on the operator's machine:** AWS CLI v2 with the Session Manager
    plugin, Docker, Terraform 1.10+, Node 22+, jq, curl, openssl.
 6. `npm ci` in this folder.
@@ -59,6 +62,7 @@ scripts/aws-prod seed          # once: create the synthetic population and snaps
 
 scripts/aws-prod up smoke      # raise (about twenty minutes); run again to resume after a failure
 scripts/aws-prod load          # one load run at the raised step, then a summary
+scripts/aws-prod load --direct # the same, skipping Cloudflare to measure aws-prod alone
 scripts/aws-prod down          # tear down everything but core
 
 scripts/aws-prod status        # what is up, and today's worst-case ledger
@@ -72,6 +76,18 @@ also runs on its own as `scripts/commands/<command>.sh`.
 A raise is refused when the day's recorded worst cases would pass $50, and
 the safety net deletes the app stack three hours after a raise and the
 load stack an hour after it starts, whether or not anyone remembers.
+
+## The direct path
+
+Through Cloudflare, a run measures what users get. `load --direct`
+measures aws-prod alone, without Cloudflare's own limits in the result. The origin keeps all three of its
+locks: generators present their own client certificate from the same
+authority as Cloudflare's, requests still name the hostname, and the load
+balancer lets in each generator's address only while the run lasts. The
+addresses close when the run ends, fails or is interrupted. If a run dies
+without closing them, `sweep` reports it and `load --close` cleans up. An
+address left open still needs the certificate, and `down` removes the
+whole security group anyway.
 
 ## Steps
 

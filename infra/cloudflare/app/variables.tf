@@ -9,6 +9,13 @@ variable "hostname" {
 variable "origin_dns_name" {
   description = "The load balancer's DNS name, from the app stack"
   type        = string
+  default     = "origin.invalid"
+}
+
+variable "parked" {
+  description = "When true, parks the hostname at dummy IP 192.0.2.1 and removes the edge rules"
+  type        = bool
+  default     = false
 }
 
 variable "client_certificate_id" {

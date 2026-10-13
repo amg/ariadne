@@ -14,9 +14,9 @@ verify_raise() {
   info "the origin refused a direct connection"
 }
 
-# Resolved through Cloudflare's own DNS rather than the local resolver: every
-# raise recreates the hostname, and a resolver that looked it up while it
-# was down keeps answering "no such name" for up to half an hour.
+# Resolved through Cloudflare's own DNS rather than the local resolver: on
+# a hostname's first raise, a resolver that looked it up before it existed
+# keeps answering "no such name" for up to half an hour.
 wait_for_health() { # <url>
   local attempt
   for attempt in $(seq 1 30); do

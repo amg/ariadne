@@ -30,6 +30,12 @@ export type Step = {
     api: ServiceSize;
     /** Runs the queue; shares Valkey and the database with the API. */
     worker: ServiceSize;
+    /**
+     * Every sign-up and sign-in checks a deliberately slow password hash, about
+     * four a second per vCPU (measured on smoke). Each step's auth handles its
+     * ramp (users / rampSeconds) at about 60% busy; any less and sign-ins
+     * queue, and the run measures the queue.
+     */
     auth: ServiceSize;
     mock: ServiceSize;
     web: ServiceSize;
@@ -65,7 +71,9 @@ export const STEPS: Record<StepName, Step> = {
     services: {
       api: { cpu: 2048, memoryMiB: 4096, count: 1 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 1 },
-      auth: { cpu: 2048, memoryMiB: 4096, count: 2 },
+      // 16 vCPU signs up the population in about half an hour, inside the
+      // load stack's hour.
+      auth: { cpu: 2048, memoryMiB: 4096, count: 8 },
       mock: { cpu: 512, memoryMiB: 1024, count: 1 },
       web: { ...WEB, count: 1 },
     },
@@ -90,7 +98,7 @@ export const STEPS: Record<StepName, Step> = {
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 1 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 1 },
-      auth: { cpu: 1024, memoryMiB: 2048, count: 1 },
+      auth: { cpu: 2048, memoryMiB: 4096, count: 2 },
       mock: { cpu: 512, memoryMiB: 1024, count: 1 },
       web: { ...WEB, count: 1 },
     },
@@ -110,12 +118,12 @@ export const STEPS: Record<StepName, Step> = {
 
   step10: {
     name: 'step10',
-    database: { instanceClass: 'm7g.large', storageGiB: 100, source: 'seedSnapshot' },
+    database: { instanceClass: 'm7g.xlarge', storageGiB: 100, source: 'seedSnapshot' },
     cache: { maxStorageGb: 1, maxEcpuPerSecond: 25_000 },
     services: {
-      api: { cpu: 512, memoryMiB: 1024, count: 2 },
-      worker: { cpu: 1024, memoryMiB: 2048, count: 1 },
-      auth: { cpu: 512, memoryMiB: 1024, count: 1 },
+      api: { cpu: 1024, memoryMiB: 2048, count: 2 },
+      worker: { cpu: 1024, memoryMiB: 2048, count: 4 },
+      auth: { cpu: 2048, memoryMiB: 4096, count: 4 },
       mock: { cpu: 512, memoryMiB: 1024, count: 1 },
       web: { ...WEB, count: 1 },
     },
@@ -140,7 +148,7 @@ export const STEPS: Record<StepName, Step> = {
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 20 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 10 },
-      auth: { cpu: 1024, memoryMiB: 2048, count: 4 },
+      auth: { cpu: 2048, memoryMiB: 4096, count: 12 },
       mock: { cpu: 1024, memoryMiB: 2048, count: 6 },
       web: WEB,
     },
@@ -165,7 +173,7 @@ export const STEPS: Record<StepName, Step> = {
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 40 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 20 },
-      auth: { cpu: 1024, memoryMiB: 2048, count: 8 },
+      auth: { cpu: 2048, memoryMiB: 4096, count: 18 },
       mock: { cpu: 1024, memoryMiB: 2048, count: 12 },
       web: { ...WEB, count: 3 },
     },

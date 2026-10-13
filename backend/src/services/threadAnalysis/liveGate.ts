@@ -1,7 +1,6 @@
 import { env } from '@config/env';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { type Result, err, ok } from '../../types/result';
-import { buildLiveTurns } from './messageTransformer/liveTurns';
+import { type LiveChain, isArrivalFinished, readLiveChain } from './messageTransformer/liveChain';
 import { transformMessage } from './messageTransformer/transformMessage';
 import type { FireChannel, GateVerdict } from './types';
 
@@ -62,10 +61,23 @@ export async function runLiveGate({
 }
 
 /**
- * The fill-forward pass: transforms the thread's user Messages in
- * chronology up to (and including) the target. Each arrival's steps
- * short-circuit on their own stored rows, so a thread that is already
- * done degrades to a pure read and a broken one resumes where it stopped.
+ * Whether the transformer still owes the arrival anything. A judged
+ * arrival whose Turn still waits to fold is left to the next arrival's
+ * judgment, which folds it in the same rebuild, unless it is the last
+ * arrival this pass judges.
+ */
+function owesWork(chain: LiveChain, index: number, targetIndex: number): boolean {
+  const arrival = chain.arrivals[index];
+  if (!arrival || isArrivalFinished(chain, arrival)) return false;
+  return index === targetIndex || !chain.verdicts.has(arrival.userMessage.id);
+}
+
+/**
+ * The fill-forward pass: reads the thread's live chain once, then
+ * transforms the user Messages that still owe work, in chronology, up to
+ * (and including) the target. Finished arrivals cost nothing, so a thread
+ * that is already done degrades to a fixed handful of reads and a broken
+ * one resumes where it stopped.
  *
  * Failure codes: `thread_not_found` (empty/unknown thread), plus any
  * step failure (`provider_not_configured`, `embed_failed`,
@@ -76,28 +88,36 @@ async function transformArrivals({
   threadId,
   upToMessageId,
 }: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
-  const rows = await listMessagesByThread({ threadId });
   // Only the live conversation is gated; abandoned rows keep what they had.
-  const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
-  if (arrivals.length === 0) return ok(EMPTY_OUTCOME);
+  const chain = await readLiveChain(threadId);
+  if (chain.arrivals.length === 0) return ok(EMPTY_OUTCOME);
 
-  let endIndex = arrivals.length;
-  if (upToMessageId !== undefined) {
-    const index = arrivals.findIndex((turn) => turn.userMessage.id === upToMessageId);
-    if (index < 0) return err('thread_not_found');
-    endIndex = index + 1;
-  }
+  const targetIndex =
+    upToMessageId === undefined
+      ? chain.arrivals.length - 1
+      : chain.arrivals.findIndex((turn) => turn.userMessage.id === upToMessageId);
+  const target = chain.arrivals[targetIndex];
+  if (!target) return err('thread_not_found');
 
-  let outcome: LiveArrivalOutcome = EMPTY_OUTCOME;
-  for (let i = 0; i < endIndex; i += 1) {
-    const arrival = arrivals[i];
-    if (!arrival) continue;
-    const transformed = await transformMessage({
-      threadId,
-      userMessageId: arrival.userMessage.id,
-    });
+  let current = chain;
+  for (let i = 0; i <= targetIndex; i += 1) {
+    if (!owesWork(current, i, targetIndex)) continue;
+    const transformed = await transformMessage({ chain: current, arrivalIndex: i });
     if (transformed.type === 'error') return transformed;
-    outcome = transformed.data;
+    current = transformed.data;
   }
-  return ok(outcome);
+
+  const logged = current.verdicts.get(target.userMessage.id);
+  if (!logged) {
+    return err(
+      'thread_analysis_failed',
+      'The transformer finished without recording a verdict for the arriving message.',
+    );
+  }
+  return ok({
+    verdict: logged.verdict,
+    fireChannel: logged.fireChannel,
+    slowDriftStartMessageId: logged.slowDriftStartMessageId,
+    messageId: target.userMessage.id,
+  });
 }

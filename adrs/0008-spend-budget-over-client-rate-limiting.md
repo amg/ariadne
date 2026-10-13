@@ -35,12 +35,14 @@ only identity the app keys anything on.
 Each deployment sets one daily spend budget, in configuration. It is
 checked when a chat message is submitted, before any Exchange starts,
 against all provider-metered spend recorded for the current UTC day,
-estimated spend from interrupted Exchanges included. Past it, chat is
-refused with a `429` and a `Retry-After` until the day resets. An
-Exchange already streaming finishes, and reads are never blocked. A
-deployment that sets no budget has no check.
+estimated spend from interrupted Exchanges and spend of since-deleted
+messages included. Past it, chat is refused with a `429` and a
+`Retry-After` until the day resets. An Exchange already streaming
+finishes, and reads are never blocked. A deployment that sets no budget
+has no check.
 
-The budget is read from the spend Postgres already records, so it
+The budget is read from a per-day total Postgres keeps as it records
+spend, so the check costs the same however busy the day, and it
 survives restarts and crashes and holds the same across any number of
 backend copies, with nothing extra to run. It is a safety cap on what
 the deployment can spend, not a share for each user, which suits a

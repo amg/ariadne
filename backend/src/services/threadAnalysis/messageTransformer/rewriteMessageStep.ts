@@ -1,11 +1,9 @@
 import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
-import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { recordMessageExpansion } from '@queries/messageEmbeddings/recordMessageExpansion';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { computeInferenceCostUsd } from '@services/aiService/pricing';
-import { type Result, err, ok } from '../../../types/result';
+import { err, ok } from '../../../types/result';
 import {
   EMBEDDING_MODEL_ID,
   type JudgeContextDependenceInput,
@@ -20,7 +18,8 @@ import {
   needsRewriteHeuristic,
   parseRewrite,
 } from '../rewrite';
-import { type LiveTurnRow, buildLiveTurns } from './liveTurns';
+import { withEmbedding } from './liveChain';
+import type { LiveTurnRow } from './liveTurns';
 import type { MessageStep } from './messageStep';
 import { naiveRefusalDetector } from './naiveRefusalDetector';
 
@@ -253,27 +252,23 @@ async function rewriteDecision(input: {
 
 export const rewriteMessageStep: MessageStep = {
   name: 'rewrite',
-  async run({ threadId, userMessageId }) {
-    const stored = await listMessageEmbeddingsByMessageIds({ messageIds: [userMessageId] });
-    if (stored.length > 0) return ok(undefined);
-
-    const rows = await listMessagesByThread({ threadId });
-    const arrivals = buildLiveTurns(rows);
-    const index = arrivals.findIndex((turn) => turn.userMessage.id === userMessageId);
-    const arrival = index >= 0 ? arrivals[index] : undefined;
+  async run({ chain, arrivalIndex }) {
+    const arrival = chain.arrivals[arrivalIndex];
     if (!arrival) return err('thread_not_found');
+    const userMessageId = arrival.userMessage.id;
+    if (chain.embeddings.has(userMessageId)) return ok(chain);
 
     const mode: LiveRewriteMode = env.THREAD_ANALYSIS_MODE === 'always' ? 'always' : 'heuristic';
     const decision = await rewriteDecision({
       arrival,
-      prior: index > 0 ? (arrivals[index - 1] ?? null) : null,
+      prior: chain.arrivals[arrivalIndex - 1] ?? null,
       mode,
     });
 
     // Persists the terminal state on the arrival row unless another pass
-    // stored one first. The embedding column is left null for the embed
-    // step to fill.
-    await recordMessageExpansion({
+    // stored one first; the embed step reads whichever is stored. The
+    // embedding column is left null for the embed step to fill.
+    const stored = await recordMessageExpansion({
       messageId: userMessageId,
       modelId: EMBEDDING_MODEL_ID,
       expandOutcome: decision.tried ? decision.expandOutcome : null,
@@ -301,6 +296,6 @@ export const rewriteMessageStep: MessageStep = {
         completionTokens: decision.judgeUsage?.completionTokens ?? null,
       });
     }
-    return ok(undefined);
+    return ok(withEmbedding(chain, stored));
   },
 };

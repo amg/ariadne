@@ -1,3 +1,4 @@
+import { awaitOrigin, takeDirectPath } from './directPath.ts';
 import { type Metrics, type Report, createMetrics } from './metrics.ts';
 import { type Plan, readPlan } from './plan.ts';
 import { runUser, seedUser } from './virtualUser.ts';
@@ -12,6 +13,10 @@ import { runUser, seedUser } from './virtualUser.ts';
 const PROGRESS_EVERY_MS = 30_000;
 
 const plan = readPlan(process.env);
+if (plan.direct !== null) {
+  takeDirectPath(plan.direct);
+  await awaitOrigin(plan);
+}
 const metrics = createMetrics();
 const startedAt = new Date();
 const progress = setInterval(() => printLine('PROGRESS', metrics.snapshot()), PROGRESS_EVERY_MS);
@@ -51,10 +56,16 @@ async function seedAll(plan: Plan, metrics: Metrics): Promise<void> {
   let next = plan.firstUser;
   const last = plan.firstUser + plan.userCount;
   const claimNextUser = (): number | null => (next < last ? next++ : null);
+  let loggedErrors = 0;
 
   const worker = async () => {
     for (let user = claimNextUser(); user !== null; user = claimNextUser()) {
-      await seedUser(plan, user, metrics).catch(() => undefined);
+      await seedUser(plan, user, metrics).catch((error) => {
+        if (loggedErrors < 5) {
+          loggedErrors += 1;
+          console.error(`[seedUser error ${loggedErrors}/5]`, error);
+        }
+      });
     }
   };
   await Promise.all(Array.from({ length: plan.seedConcurrency }, worker));

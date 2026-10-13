@@ -2,59 +2,25 @@ import { db } from '@db/db';
 import { sql } from 'kysely';
 
 /**
- * The global daily spend budget gate: sums all provider-metered USD for
- * the current UTC day across the cost tables. This is the last defense
- * against fund loss — checked before any Exchange starts. Over budget →
- * 429 with Retry-After (seconds until UTC midnight).
+ * The global daily spend budget gate: all provider-metered USD recorded
+ * for the current UTC day across chat, embeddings and side calls
+ * (rewrite, judge, and Fact capture). This is the last defense against
+ * fund loss — checked before any Exchange starts. Over budget → 429 with
+ * Retry-After (seconds until UTC midnight).
  *
- * Includes estimated and interrupted rows — Postgres is the ledger, the
- * sum of recorded spend rows, so it survives restarts, crashes, and
- * replicas by construction.
- *
- * Sums all spend sources: chat (messageUsage), embeddings (messageEmbeddings),
- * and side-call costs (messageSideCosts: rewrite, judge, and Fact capture).
+ * Includes estimated and interrupted spend, and spend whose messages
+ * were deleted since. Postgres keeps the total as spend is recorded, so
+ * it survives restarts, crashes, and replicas by construction, and
+ * costs the same however much was spent today.
  */
 export async function sumDailySpend(): Promise<string> {
-  const [chatResult, embeddingResult, expansionResult] = await Promise.all([
-    // Chat exchange spend
-    db
-      .selectFrom('billing.messageUsage')
-      .select(sql<string>`coalesce(sum(cost_usd), 0)::numeric(14,10)`.as('total'))
-      .where(
-        sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,
-        '=',
-        sql<Date>`date_trunc('day', now() at time zone 'UTC')`,
-      )
-      .executeTakeFirst(),
-    // Embedding spend
-    db
-      .selectFrom('analysis.messageEmbeddings')
-      .select(sql<string>`coalesce(sum(embedding_cost_usd), 0)::numeric(14,10)`.as('total'))
-      .where(
-        sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,
-        '=',
-        sql<Date>`date_trunc('day', now() at time zone 'UTC')`,
-      )
-      .executeTakeFirst(),
-    // Side-call costs (rewrite, judge, and Fact capture)
-    db
-      .selectFrom('billing.messageSideCosts')
-      .select(sql<string>`coalesce(sum(cost_usd), 0)::numeric(14,10)`.as('total'))
-      .where(
-        sql<Date>`date_trunc('day', created_at at time zone 'UTC')`,
-        '=',
-        sql<Date>`date_trunc('day', now() at time zone 'UTC')`,
-      )
-      .executeTakeFirst(),
-  ]);
+  const today = await db
+    .selectFrom('billing.dailySpend')
+    .select('costUsd')
+    .where('day', '=', sql<Date>`(now() at time zone 'UTC')::date`)
+    .executeTakeFirst();
 
-  const chatTotal = chatResult?.total ?? '0';
-  const embeddingTotal = embeddingResult?.total ?? '0';
-  const expansionTotal = expansionResult?.total ?? '0';
-
-  // Sum the three components as numeric strings
-  const total = Number(chatTotal) + Number(embeddingTotal) + Number(expansionTotal);
-  return total.toFixed(10);
+  return Number(today?.costUsd ?? 0).toFixed(10);
 }
 
 /**

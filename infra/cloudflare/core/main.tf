@@ -7,6 +7,10 @@
 #      which Cloudflare presents when it connects to this hostname only.
 #      The load balancer trusts nothing else, so no other Cloudflare
 #      customer's zone can reach the origin.
+#   3. A second client certificate from the same authority, for load
+#      generators on the direct path, which skips Cloudflare to measure
+#      aws-prod alone. It opens nothing by itself: the origin lets a
+#      generator's address through only for the length of its run.
 
 terraform {
   required_version = ">= 1.10"
@@ -88,4 +92,26 @@ resource "cloudflare_authenticated_origin_pulls_certificate" "client" {
   certificate = tls_locally_signed_cert.client.cert_pem
   private_key = tls_private_key.client.private_key_pem
   type        = "per-hostname"
+}
+
+# ── 3. Client certificate load generators present on the direct path ─────
+
+resource "tls_private_key" "load_client" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_cert_request" "load_client" {
+  private_key_pem = tls_private_key.load_client.private_key_pem
+  subject {
+    common_name = "load-generators-to-${var.hostname}"
+  }
+}
+
+resource "tls_locally_signed_cert" "load_client" {
+  cert_request_pem      = tls_cert_request.load_client.cert_request_pem
+  ca_private_key_pem    = tls_private_key.client_authority.private_key_pem
+  ca_cert_pem           = tls_self_signed_cert.client_authority.cert_pem
+  validity_period_hours = 43800
+  allowed_uses          = ["client_auth", "digital_signature", "key_encipherment"]
 }

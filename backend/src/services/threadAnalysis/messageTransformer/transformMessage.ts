@@ -1,18 +1,16 @@
-import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { type Result, err, ok } from '../../../types/result';
-import { EMBEDDING_MODEL_ID } from '../../aiService';
-import type { GateVerdict } from '../types';
+import { type Result, ok } from '../../../types/result';
 import { embedMessageStep } from './embedMessageStep';
+import type { LiveChain } from './liveChain';
 import type { MessageStep, MessageStepInput } from './messageStep';
 import { rewriteMessageStep } from './rewriteMessageStep';
 import { verdictAndFoldStep } from './verdictAndFoldStep';
 
 /**
  * The message transformer: runs the live-lane pipeline for one arriving
- * user message. Steps are ordered rewrite → embed → verdict-and-fold,
- * communicate only through the database, and the runner's responsibilities
- * are ordering, stopping at the first error, and surfacing the recorded
- * verdict back to the caller.
+ * user message. Steps are ordered rewrite → embed → verdict-and-fold, each
+ * handed the chain the previous one returned; the runner's
+ * responsibilities are ordering and stopping at the first error. Success
+ * carries the chain with the arrival's verdict on it.
  */
 
 /** Ordered steps; adding or removing a step happens here and nowhere else. */
@@ -22,34 +20,15 @@ const MESSAGE_STEPS: readonly MessageStep[] = [
   verdictAndFoldStep,
 ];
 
-export interface TransformOutcome {
-  /** Verdict recorded on the target message by this run. */
-  verdict: GateVerdict;
-  fireChannel: 'immediate' | 'slow' | null;
-  slowDriftStartMessageId: string | null;
-  /** The user message this outcome belongs to. */
-  messageId: string;
-}
-
-export async function transformMessage(input: MessageStepInput): Promise<Result<TransformOutcome>> {
+export async function transformMessage({
+  chain,
+  arrivalIndex,
+}: MessageStepInput): Promise<Result<LiveChain>> {
+  let current = chain;
   for (const step of MESSAGE_STEPS) {
-    const ran = await step.run(input);
+    const ran = await step.run({ chain: current, arrivalIndex });
     if (ran.type === 'error') return ran;
+    current = ran.data;
   }
-  const logged = await findSegmentDriftLogByMessageId({
-    messageId: input.userMessageId,
-    modelId: EMBEDDING_MODEL_ID,
-  });
-  if (!logged) {
-    return err(
-      'thread_analysis_failed',
-      'The transformer finished without recording a verdict for the arriving message.',
-    );
-  }
-  return ok({
-    verdict: logged.verdict,
-    fireChannel: logged.fireChannel,
-    slowDriftStartMessageId: logged.slowDriftStartMessageId,
-    messageId: input.userMessageId,
-  });
+  return ok(current);
 }

@@ -4,7 +4,7 @@ import { QUEUE_SCHEMA } from '@queue/index';
 import { useTestDb } from '@test/test-db';
 import { type WorkerUtils, makeWorkerUtils } from 'graphile-worker';
 import { sql } from 'kysely';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { STALE_LOCK_SECONDS, releaseStaleLocks } from './staleLocks';
 
 useTestDb();
@@ -13,6 +13,10 @@ let utils: WorkerUtils;
 
 beforeAll(async () => {
   utils = await makeWorkerUtils({ connectionString: env.DATABASE_URL, schema: QUEUE_SCHEMA });
+});
+
+afterEach(async () => {
+  await sql`update queues._private_jobs set locked_by = null, locked_at = null`.execute(db);
 });
 
 afterAll(async () => {

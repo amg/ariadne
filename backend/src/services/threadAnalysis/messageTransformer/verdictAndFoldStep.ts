@@ -1,22 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import type { Message, MessageEmbedding, NewSegmentDriftLog } from '@db/types';
-import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import type { Message, NewSegmentDriftLog } from '@db/types';
 import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import {
   type OpenedSegment,
   appendArrivalVerdict,
 } from '@queries/segmentDriftLogs/appendArrivalVerdict';
-import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
-import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { type Result, err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
 import { cosineDistance } from '../drift';
 import { type Turn, formattedTurn } from '../turns';
 import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from '../types';
 import { type JudgingParams, createVerdictState, evaluateAndRecord, isColdStart } from '../verdict';
-import { type LiveTurnRow, buildLiveTurns } from './liveTurns';
+import {
+  type LiveChain,
+  currentModelVectorOrNull,
+  isArrivalFinished,
+  readStoredJudgments,
+  withEmbedding,
+  withJudgment,
+} from './liveChain';
+import type { LiveTurnRow } from './liveTurns';
 import type { MessageStep } from './messageStep';
 
 /**
@@ -24,23 +27,26 @@ import type { MessageStep } from './messageStep';
  * gravity point, starts a fresh segment on a fire, and folds completed
  * turns into that gravity point.
  *
- * Every run rebuilds the ledger it needs from stored rows — segments,
- * verdict log, embeddings — and fills forward through the target arrival:
- * already-recorded rows are replayed (never re-embedded, never re-judged),
- * anything missing is computed and persisted. The step short-circuits when
- * the target arrival already has its verdict row and its turn is folded.
+ * Every run rebuilds the ledger from the pass's live chain and fills
+ * forward through the target arrival: already-recorded rows are replayed
+ * (never re-embedded, never re-judged), anything missing is computed,
+ * persisted, and put back on the chain. The step short-circuits when the
+ * target arrival already has its verdict row and its turn is folded.
  *
  * An arrival's verdict and the segments it opens commit together, and only
  * if no other pass wrote them first. A pass that finds it lost that race
- * stops there: the arrival is judged, and the caller reads what the winner
- * stored.
+ * rereads what is stored and fills forward again from there, so the
+ * target always ends with the verdict the first writer stored.
  *
  * This step cannot fail open: an arrival whose embedding is missing means
  * the transformer has not finished, and the exchange surfaces the
  * failure so the retry resumes the fill-forward pass.
  */
 
-/** Mutable state carried across arrivals during one fill-forward pass. */
+/**
+ * State one fill-forward pass accumulates across arrivals. The pass
+ * creates it and folds into it in place; it never leaves the pass.
+ */
 interface LiveLedgerState {
   judging: JudgingParams;
   /** Shared two-channel verdict state: segment baseline + slow sweep. */
@@ -62,10 +68,6 @@ interface LiveLedgerState {
   completedTurns: number;
   /** The segment row the next verdict logs against. */
   currentSegmentId: string | null;
-  /** Stored segment ids by the arrival that starts them. */
-  storedSegmentIdByStart: Map<string, string>;
-  /** Message ids with a recorded verdict already. */
-  loggedMessageIds: Set<string>;
 }
 
 /** The arrival's judgment against the current segment baseline. */
@@ -82,24 +84,22 @@ interface ArrivedJudgment {
 }
 
 /**
- * Moves the ledger onto the segment starting at the given arrival: the
- * stored one when the chain holds it, else a fresh one the arrival opens,
- * added to `opened` for the arrival's commit.
+ * The segment starting at the given arrival: the stored one when the chain
+ * holds it, else a fresh one the arrival must open (`opened`) in its commit.
  */
-function openSegment(
-  state: LiveLedgerState,
-  threadId: string,
+function segmentStartingAt(
+  chain: LiveChain,
   startMessageId: string,
-  opened: OpenedSegment[],
-): void {
-  const storedId = state.storedSegmentIdByStart.get(startMessageId);
-  if (storedId !== undefined) {
-    state.currentSegmentId = storedId;
-    return;
-  }
-  const segment = { id: randomUUID(), threadId, startMessageId, modelId: EMBEDDING_MODEL_ID };
-  opened.push(segment);
-  state.currentSegmentId = segment.id;
+): { id: string; opened: OpenedSegment | null } {
+  const storedId = chain.segmentIdByStart.get(startMessageId);
+  if (storedId !== undefined) return { id: storedId, opened: null };
+  const opened = {
+    id: randomUUID(),
+    threadId: chain.threadId,
+    startMessageId,
+    modelId: EMBEDDING_MODEL_ID,
+  };
+  return { id: opened.id, opened };
 }
 
 /**
@@ -149,10 +149,11 @@ function evaluateArrivalAgainstLedger(
 /** The arrival's verdict row in the current segment; null when one is recorded already. */
 function verdictRowOrNull(
   state: LiveLedgerState,
+  chain: LiveChain,
   userMessageId: string,
   judged: ArrivedJudgment,
 ): NewSegmentDriftLog | null {
-  if (state.loggedMessageIds.has(userMessageId)) return null;
+  if (chain.verdicts.has(userMessageId)) return null;
   return {
     // Set before any arrival is judged: every arrival opens one when none is current.
     segmentId: state.currentSegmentId as string,
@@ -172,27 +173,27 @@ function verdictRowOrNull(
  * Resolves the embedding for a completed turn. Prefers the stored row when
  * it already carries a vector for this embedding model; otherwise embeds
  * the turn text and records it, folding whichever vector is stored first.
+ * Returns the vector with the chain that holds it.
  */
 async function resolveTurnVector(input: {
+  chain: LiveChain;
   text: string;
   assistantMessage: Message;
-  stored: MessageEmbedding | undefined;
-}): Promise<Result<number[]>> {
-  const stored = input.stored;
-  if (stored && stored.embedding !== null && stored.modelId === EMBEDDING_MODEL_ID) {
-    return ok(stored.embedding);
-  }
+}): Promise<Result<{ vector: number[]; chain: LiveChain }>> {
+  const { chain, assistantMessage } = input;
+  const storedVector = currentModelVectorOrNull(chain.embeddings.get(assistantMessage.id));
+  if (storedVector !== null) return ok({ vector: storedVector, chain });
   const embedded = await embedText(input.text);
   if (embedded.type === 'error') return embedded;
   const row = await recordTurnEmbedding({
-    messageId: input.assistantMessage.id,
+    messageId: assistantMessage.id,
     embedding: embedded.data.embedding,
     modelId: EMBEDDING_MODEL_ID,
   });
   if (row.embedding === null) {
     return err('embed_failed', 'The turn embedding wrote without a vector.');
   }
-  return ok(row.embedding);
+  return ok({ vector: row.embedding, chain: withEmbedding(chain, row) });
 }
 
 /** Formats a completed turn. Returns null while the turn is still open. */
@@ -209,54 +210,74 @@ function completeTurnOrNull(row: LiveTurnRow): { text: string; assistantMessage:
 /**
  * Folds a completed turn into the current segment's gravity point. On fire,
  * the segment re-seeds from this turn's own vector instead of accumulating.
+ * Returns the chain holding the turn's embedding.
  */
 async function completeTurn(input: {
   state: LiveLedgerState;
+  chain: LiveChain;
   row: LiveTurnRow;
-  assistantStored: MessageEmbedding | undefined;
   reseed: boolean;
-}): Promise<Result<undefined>> {
+}): Promise<Result<LiveChain>> {
   const completion = completeTurnOrNull(input.row);
-  if (completion === null) return ok(undefined);
-  const folded = await resolveTurnVector({
+  if (completion === null) return ok(input.chain);
+  const resolved = await resolveTurnVector({
+    chain: input.chain,
     text: completion.text,
     assistantMessage: completion.assistantMessage,
-    stored: input.assistantStored,
   });
-  if (folded.type === 'error') return folded;
+  if (resolved.type === 'error') return resolved;
+  const { vector } = resolved.data;
   const { state } = input;
   if (input.reseed || state.memberSum === null) {
-    state.memberSum = [...folded.data];
-    state.currentSegmentAnchor = [...folded.data];
+    state.memberSum = [...vector];
+    state.currentSegmentAnchor = [...vector];
     state.anchorMemberCount = 1;
   } else {
-    state.memberSum = accumulate(state.memberSum, folded.data);
+    state.memberSum = accumulate(state.memberSum, vector);
     if (state.anchorMemberCount < 3 && state.currentSegmentAnchor !== null) {
-      state.currentSegmentAnchor = accumulate(state.currentSegmentAnchor, folded.data);
+      state.currentSegmentAnchor = accumulate(state.currentSegmentAnchor, vector);
       state.anchorMemberCount += 1;
     }
   }
   state.completedTurns += 1;
-  return ok(undefined);
-}
-
-/** True when the arrival's completed turn (if any) already has a stored embedding. */
-async function foldComplete(row: LiveTurnRow): Promise<boolean> {
-  if (!row.assistantReply) return true;
-  const stored = await listMessageEmbeddingsByMessageIds({
-    messageIds: [row.assistantReply.id],
-  });
-  const turnRow = stored[0];
-  return (
-    turnRow !== undefined && turnRow.embedding !== null && turnRow.modelId === EMBEDDING_MODEL_ID
-  );
+  return ok(resolved.data.chain);
 }
 
 /**
- * How one arrival's processing ended: judged and folded by this pass, or
- * left to the pass that stored its judgment first.
+ * Stores the arrival's judgment, when the chain lacks any part of it, and
+ * returns the chain holding it; null when another pass stored it first.
  */
-type ArrivalProcessed = 'judged' | 'written-by-another-pass';
+async function commitJudgment(input: {
+  chain: LiveChain;
+  messageId: string;
+  verdict: NewSegmentDriftLog | null;
+  openedSegments: OpenedSegment[];
+}): Promise<LiveChain | null> {
+  const { chain, messageId, verdict, openedSegments } = input;
+  if (verdict === null && openedSegments.length === 0) return chain;
+  const appended = await appendArrivalVerdict({ openedSegments, verdict });
+  if (!appended) return null;
+  return withJudgment(chain, {
+    messageId,
+    verdict:
+      verdict === null
+        ? null
+        : {
+            segmentId: verdict.segmentId,
+            verdict: verdict.verdict,
+            fireChannel: verdict.fireChannel ?? null,
+            slowDriftStartMessageId: verdict.slowDriftStartMessageId ?? null,
+          },
+    openedSegments,
+  });
+}
+
+/**
+ * How a fill-forward pass ended: every arrival through the target judged
+ * and folded, with the chain holding all of it, or stopped at the first
+ * arrival another pass stored first.
+ */
+type FillEnded = { kind: 'filled'; chain: LiveChain } | { kind: 'written-by-another-pass' };
 
 /**
  * Processes one arrival during the fill-forward pass: secures its segment,
@@ -266,89 +287,63 @@ type ArrivalProcessed = 'judged' | 'written-by-another-pass';
  */
 async function processArrival(input: {
   state: LiveLedgerState;
-  threadId: string;
+  chain: LiveChain;
   row: LiveTurnRow;
-  storedByMessageId: Map<string, MessageEmbedding>;
-}): Promise<Result<ArrivalProcessed>> {
-  const { state, threadId, row, storedByMessageId } = input;
+}): Promise<Result<FillEnded>> {
+  const { state, chain, row } = input;
   const userMessageId = row.userMessage.id;
 
-  const opened: OpenedSegment[] = [];
-  if (state.currentSegmentId === null) openSegment(state, threadId, userMessageId, opened);
+  const chainOpening =
+    state.currentSegmentId === null ? segmentStartingAt(chain, userMessageId) : null;
+  if (chainOpening !== null) state.currentSegmentId = chainOpening.id;
 
-  const stored = storedByMessageId.get(userMessageId);
-  if (!stored || stored.embedding === null || stored.modelId !== EMBEDDING_MODEL_ID) {
+  const vector = currentModelVectorOrNull(chain.embeddings.get(userMessageId));
+  if (vector === null) {
     return err(
       'arrival_signal_missing',
       'The arriving message has no embedding: the transformer has not finished.',
     );
   }
 
-  const judged = evaluateArrivalAgainstLedger(state, stored.embedding, userMessageId);
-  const verdict = verdictRowOrNull(state, userMessageId, judged);
+  const judged = evaluateArrivalAgainstLedger(state, vector, userMessageId);
+  const verdict = verdictRowOrNull(state, chain, userMessageId, judged);
 
-  if (judged.fired) {
-    // A fired arrival burns the segment it was judged in. Its own
-    // completed turn will re-seed the next segment's gravity point.
+  // A fired arrival burns the segment it was judged in. Its own completed
+  // turn will re-seed the next segment's gravity point.
+  const fireOpening = judged.fired ? segmentStartingAt(chain, userMessageId) : null;
+  if (fireOpening !== null) {
     state.memberSum = null;
-    openSegment(state, threadId, userMessageId, opened);
+    state.currentSegmentId = fireOpening.id;
   }
 
-  if (verdict !== null || opened.length > 0) {
-    const appended = await appendArrivalVerdict({ openedSegments: opened, verdict });
-    if (!appended) return ok('written-by-another-pass');
-    state.loggedMessageIds.add(userMessageId);
-  }
-
-  const folded = await completeTurn({
-    state,
-    row,
-    assistantStored: row.assistantReply ? storedByMessageId.get(row.assistantReply.id) : undefined,
-    reseed: judged.fired,
+  const committed = await commitJudgment({
+    chain,
+    messageId: userMessageId,
+    verdict,
+    openedSegments: [chainOpening?.opened, fireOpening?.opened].filter(
+      (segment): segment is OpenedSegment => segment != null,
+    ),
   });
+  if (committed === null) return ok({ kind: 'written-by-another-pass' });
+
+  const folded = await completeTurn({ state, chain: committed, row, reseed: judged.fired });
   if (folded.type === 'error') return folded;
-  return ok('judged');
+  return ok({ kind: 'filled', chain: folded.data });
 }
 
 /**
- * Rebuilds the ledger from stored rows and processes arrivals up to
+ * Rebuilds the ledger from the live chain and processes arrivals up to
  * (inclusive of) the target index. Stored rows are replayed; anything
- * missing is computed and persisted on the spot. Abandoned arrivals are
- * filtered from the ledger: their segments and logs stay stored (usage
- * keeps tracking them) but the live chain follows only the live conversation.
- * Stops early, without error, at the first arrival another pass wrote
- * first: that pass owns the chain from there.
+ * missing is computed and persisted on the spot. The chain holds only the
+ * live conversation: abandoned arrivals keep their stored segments and
+ * logs (usage keeps tracking them) but the ledger never walks them. Stops
+ * early, without error, at the first arrival another pass wrote first.
  */
-async function fillForwardToArrival(input: {
-  threadId: string;
-  /** The live conversation's arrivals: abandoned rows are already out. */
-  arrivals: LiveTurnRow[];
-  targetIndex: number;
-  /** Abandoned user Messages, whose stored segments and logs the ledger skips. */
-  abandonedIds: Set<string>;
-}): Promise<Result<undefined>> {
-  const { threadId, arrivals, targetIndex, abandonedIds } = input;
+async function fillForwardToArrival(
+  chain: LiveChain,
+  targetIndex: number,
+): Promise<Result<FillEnded>> {
   const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
-  const [storedSegments, storedLogs] = await Promise.all([
-    listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
-    listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
-  ]);
-  const storedLogsByMessageId = new Map(
-    storedLogs.filter((log) => !abandonedIds.has(log.messageId)).map((log) => [log.messageId, log]),
-  );
-
-  // One batch fetch of every embedding the fill reads: user-message
-  // arrival rows and assistant-message turn rows.
-  const wantedIds: string[] = [];
-  for (let i = 0; i <= targetIndex; i += 1) {
-    const row = arrivals[i];
-    if (!row) continue;
-    wantedIds.push(row.userMessage.id);
-    if (row.assistantReply) wantedIds.push(row.assistantReply.id);
-  }
-  const storedRows = await listMessageEmbeddingsByMessageIds({ messageIds: wantedIds });
-  const storedByMessageId = new Map(storedRows.map((row) => [row.messageId, row]));
-
   const state: LiveLedgerState = {
     judging,
     verdictState: createVerdictState(judging),
@@ -357,49 +352,51 @@ async function fillForwardToArrival(input: {
     anchorMemberCount: 0,
     completedTurns: 0,
     currentSegmentId: null,
-    storedSegmentIdByStart: new Map(
-      storedSegments.map((segment) => [segment.startMessageId, segment.id]),
-    ),
-    loggedMessageIds: new Set(storedLogsByMessageId.keys()),
   };
 
+  let current = chain;
   for (let i = 0; i <= targetIndex; i += 1) {
-    const row = arrivals[i];
+    const row = current.arrivals[i];
     if (!row) continue;
-    const processed = await processArrival({ state, threadId, row, storedByMessageId });
+    const processed = await processArrival({ state, chain: current, row });
     if (processed.type === 'error') return processed;
-    if (processed.data === 'written-by-another-pass') break;
+    if (processed.data.kind === 'written-by-another-pass') return processed;
+    current = processed.data.chain;
   }
-  return ok(undefined);
+  return ok({ kind: 'filled', chain: current });
+}
+
+/**
+ * Fills forward until the target arrival is finished. Each lost race
+ * reveals rows another pass stored and this pass had not read; with them
+ * reread for the same arrivals, the next fill gets past them. So the fill
+ * ends within one attempt per arrival, plus the one that finishes.
+ */
+async function fillPastOtherPasses(
+  chain: LiveChain,
+  arrivalIndex: number,
+  attemptsLeft: number,
+): Promise<Result<LiveChain>> {
+  const target = chain.arrivals[arrivalIndex];
+  if (!target) return err('thread_not_found');
+  if (isArrivalFinished(chain, target)) return ok(chain);
+  if (attemptsLeft === 0) {
+    return err(
+      'thread_analysis_failed',
+      'Other passes kept storing the chain ahead of this one; the arrival is left unjudged.',
+    );
+  }
+  const filled = await fillForwardToArrival(chain, arrivalIndex);
+  if (filled.type === 'error') return filled;
+  if (filled.data.kind === 'filled') return ok(filled.data.chain);
+  const reread: LiveChain = { ...chain, ...(await readStoredJudgments(chain)) };
+  return fillPastOtherPasses(reread, arrivalIndex, attemptsLeft - 1);
 }
 
 export const verdictAndFoldStep: MessageStep = {
   name: 'verdict-and-fold',
-  async run({ threadId, userMessageId }) {
-    // Abandoned rows stay out of the live ledger: their segments and drift
-    // logs stay stored (usage keeps tracking them) but the chain walks and
-    // folds only the live conversation.
-    const rows = await listMessagesByThread({ threadId });
-    const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
-    const abandonedIds = new Set(
-      rows.filter((row) => row.abandoned && row.role === 'user').map((row) => row.id),
-    );
-    const targetIndex = arrivals.findIndex((turn) => turn.userMessage.id === userMessageId);
-    const target = targetIndex >= 0 ? arrivals[targetIndex] : undefined;
-    if (!target) return err('thread_not_found');
-
-    // Fast path: the verdict is already logged and (when the turn is
-    // complete) already folded. Nothing for this step to fill.
-    const logged = await findSegmentDriftLogByMessageId({
-      messageId: userMessageId,
-      modelId: EMBEDDING_MODEL_ID,
-    });
-    if (logged && (await foldComplete(target))) return ok(undefined);
-
-    const filled = await fillForwardToArrival({ threadId, arrivals, targetIndex, abandonedIds });
-    if (filled.type === 'error') return filled;
-    return ok(undefined);
-  },
+  run: ({ chain, arrivalIndex }) =>
+    fillPastOtherPasses(chain, arrivalIndex, chain.arrivals.length + 1),
 };
 
 /** Adds a vector to the segment's elementwise running sum. */

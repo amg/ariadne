@@ -18,13 +18,26 @@ main() {
   done
   [[ "$found" == 1 ]] || info "nothing left behind in AWS"
 
-  local zone records
+  local group
+  if stack_exists "$APP_STACK"; then
+    group="$(origin_security_group)"
+    if [[ -n "$group" && -n "$(direct_path_rules "$group")" ]]; then
+      info "leftover: the direct path is still open on $group (run: aws-prod load --close)"
+    fi
+  fi
+
+  local zone record content
   zone="$(cloudflare_zone_id)"
-  records="$(cloudflare_api "/zones/$zone/dns_records?name=$HOSTNAME_FQDN" | jq '.result | length')"
-  if [[ "$records" == "0" ]]; then
+  record="$(cloudflare_api "/zones/$zone/dns_records?name=$HOSTNAME_FQDN" | jq -c '.result[0] // empty')"
+  if [[ -z "$record" ]]; then
     info "nothing left behind at Cloudflare"
   else
-    info "leftover: a DNS record for $HOSTNAME_FQDN (run: aws-prod down)"
+    content="$(jq -r '.content' <<<"$record")"
+    if [[ "$content" == "192.0.2.1" ]]; then
+      info "hostname is safely parked at 192.0.2.1 at Cloudflare"
+    else
+      info "leftover: a DNS record for $HOSTNAME_FQDN pointing to $content (run: aws-prod down)"
+    fi
   fi
 }
 

@@ -13,7 +13,8 @@ import Fastify from 'fastify';
  *
  * `POST /v1/openai/embeddings` — deterministic by content: a
  * content-hash-seeded 1024-dim L2-normalized vector (identical text →
- * identical vector, different texts land far apart), OpenAI-compatible
+ * identical vector, different texts land far apart, unless a
+ * `TOPIC:<name>` marker puts them on one topic), OpenAI-compatible
  * shape incl. `usage.prompt_tokens` — the test seam the thread-health
  * analyzer runs against.
  *
@@ -180,17 +181,44 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/** Test hook: `TOPIC:<name>` anywhere in a text puts it on that topic. */
+const TOPIC_HOOK = /TOPIC:(\w+)/;
+
+/**
+ * How much of a topic-marked vector is the topic's own direction. Two texts
+ * on one topic sit at a cosine of about this share: well inside the Drift
+ * gate's bar, while texts on different topics stay near-orthogonal.
+ */
+const TOPIC_SHARE = 0.85;
+
 /**
  * Deterministic 1024-dim embedding (BAAI/bge-m3 dimension): content-hash
  * seeded PRNG, L2-normalized. Identical text always yields the identical
  * vector; different texts land far apart (random vectors in 1024 dims are
  * near-orthogonal) — that is the invariant thread-health e2e relies on.
- * Exported so tests can compute expected vectors without a network round
- * trip.
+ * A `TOPIC:<name>` hook pulls the text toward that topic's direction, so
+ * load runs can hold a conversation without every follow-up firing the
+ * gate. Exported so tests can compute expected vectors without a network
+ * round trip.
  */
 export function buildMockEmbedding(text: string): number[] {
-  const next = mulberry32(hashString32(text));
-  const vector = Array.from({ length: 1024 }, () => next() * 2 - 1);
+  const own = seededUnitVector(text);
+  const topic = text.match(TOPIC_HOOK)?.[1];
+  if (topic === undefined) return own;
+  const shared = seededUnitVector(`TOPIC:${topic}`);
+  const sharedWeight = Math.sqrt(TOPIC_SHARE);
+  const ownWeight = Math.sqrt(1 - TOPIC_SHARE);
+  return normalized(
+    shared.map((value, index) => sharedWeight * value + ownWeight * (own[index] ?? 0)),
+  );
+}
+
+function seededUnitVector(seed: string): number[] {
+  const next = mulberry32(hashString32(seed));
+  return normalized(Array.from({ length: 1024 }, () => next() * 2 - 1));
+}
+
+function normalized(vector: number[]): number[] {
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   return vector.map((value) => value / norm);
 }

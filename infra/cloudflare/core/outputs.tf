@@ -17,3 +17,13 @@ output "client_certificate_id" {
   description = "Bound to the hostname by the app root on every raise"
   value       = cloudflare_authenticated_origin_pulls_certificate.client.id
 }
+
+output "load_client_certificate_pem" {
+  description = "Stored as a parameter for load generators on the direct path"
+  value       = tls_locally_signed_cert.load_client.cert_pem
+}
+
+output "load_client_private_key_pem" {
+  value     = tls_private_key.load_client.private_key_pem
+  sensitive = true
+}

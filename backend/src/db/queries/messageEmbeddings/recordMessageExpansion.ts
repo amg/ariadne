@@ -1,5 +1,6 @@
 import { db } from '@db/db';
-import type { ExpandOutcome } from '@db/types';
+import type { ExpandOutcome, MessageEmbedding } from '@db/types';
+import { toMessageEmbedding } from './embeddingMapping';
 
 export interface RecordMessageExpansionProps {
   messageId: string;
@@ -15,11 +16,14 @@ export interface RecordMessageExpansionProps {
  * rides the arrival row before any vector exists — the row is born here
  * with a null embedding, and the embed step fills the vector into the
  * same row later. Written only if the arrival has no row yet: a pass that
- * finds one already stored leaves it as it is. The rewrite/judge spends
- * land in `message_side_costs`.
+ * finds one already stored leaves it as it is. Returns the stored row,
+ * whichever pass wrote it. The rewrite/judge spends land in
+ * `message_side_costs`.
  */
-export async function recordMessageExpansion(row: RecordMessageExpansionProps): Promise<void> {
-  await db
+export async function recordMessageExpansion(
+  row: RecordMessageExpansionProps,
+): Promise<MessageEmbedding> {
+  const inserted = await db
     .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: row.messageId,
@@ -29,5 +33,14 @@ export async function recordMessageExpansion(row: RecordMessageExpansionProps): 
       expandOutcome: row.expandOutcome,
     })
     .onConflict((oc) => oc.column('messageId').doNothing())
-    .execute();
+    .returningAll()
+    .executeTakeFirst();
+  if (inserted) return toMessageEmbedding(inserted);
+
+  const stored = await db
+    .selectFrom('analysis.messageEmbeddings')
+    .selectAll()
+    .where('messageId', '=', row.messageId)
+    .executeTakeFirstOrThrow();
+  return toMessageEmbedding(stored);
 }

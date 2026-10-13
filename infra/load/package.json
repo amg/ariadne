@@ -1,5 +1,8 @@
 {
   "name": "aws-prod-load",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "undici": "^7.30.0"
+  }
 }
