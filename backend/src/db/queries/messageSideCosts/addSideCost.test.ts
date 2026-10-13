@@ -16,7 +16,7 @@ async function createMessage(): Promise<string> {
 }
 
 async function stored(messageId: string) {
-  const row = await getSideCostByMessageId({ messageId, kind: 'fact_extraction' });
+  const row = await getSideCostByMessageId({ messageId, kind: 'fact_extraction', model: 'm' });
   return (
     row && {
       costUsd: Number(row.costUsd),

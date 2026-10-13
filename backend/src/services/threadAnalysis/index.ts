@@ -12,6 +12,9 @@
 export { analyzeThread } from './analyzeThread';
 export { runLiveGate } from './liveGate';
 export { buildLiveAnalysisView } from './liveView';
+// The queue's fold of one completed Turn — the same routine the verdict
+// step runs inline when that task has not run yet.
+export { foldTurnOfReply } from './messageTransformer/verdictAndFoldStep';
 export { renderThreadReport, type RenderedThreadReport } from './render';
 export {
   type AnchorCounselRow,

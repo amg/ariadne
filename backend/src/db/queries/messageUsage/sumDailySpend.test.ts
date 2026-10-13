@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
-import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import { type AddSideCostRow, addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumDailySpend } from '@queries/messageUsage/sumDailySpend';
@@ -67,7 +67,7 @@ describe('sumDailySpend', () => {
     });
 
     // Embedding spend
-    await recordArrivalEmbedding({
+    await recordMessageEmbedding({
       messageId: user.id,
       embedding: new Array<number>(1024).fill(0),
       modelId: EMBEDDING_MODEL_ID,
@@ -133,8 +133,8 @@ describe('sumDailySpend', () => {
 
     await addSideCost({ ...sideCost, costUsd: '0.0000003000' });
     await addSideCost({ ...sideCost, costUsd: '0.0000004000' });
-    await recordArrivalEmbedding({ ...arrivalEmbedding, embeddingCostUsd: 0.0000001 });
-    await recordArrivalEmbedding({ ...arrivalEmbedding, embeddingCostUsd: 0.0000002 });
+    await recordMessageEmbedding({ ...arrivalEmbedding, embeddingCostUsd: 0.0000001 });
+    await recordMessageEmbedding({ ...arrivalEmbedding, embeddingCostUsd: 0.0000002 });
 
     expect(await sumDailySpend()).toBe('0.0000010000');
   });

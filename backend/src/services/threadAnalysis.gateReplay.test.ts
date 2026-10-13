@@ -3,6 +3,7 @@ import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/li
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import {
   DEFAULT_ANALYZE_OPTIONS,
   DEFAULT_GATE_REPLAY_OPTIONS,
@@ -849,6 +850,7 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     // assistant message to key to; nothing to persist).
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: messages.map((message) => message.id),
+      modelId: EMBEDDING_MODEL_ID,
     });
     const assistantIds = messages.filter((m) => m.role === 'assistant').map((m) => m.id);
     expect(rows.map((row) => row.messageId).sort()).toEqual(assistantIds.sort());
@@ -949,7 +951,10 @@ describe('analyzeThread — gate-replay mode (e2e via the public seam)', () => {
     expect(failed).toMatchObject({ type: 'error', code: 'embed_failed' });
 
     // Turn rows untouched: the abort lost nothing that isn't recomputable.
-    const rows = await listMessageEmbeddingsByMessageIds({ messageIds: assistantIds });
+    const rows = await listMessageEmbeddingsByMessageIds({
+      messageIds: assistantIds,
+      modelId: EMBEDDING_MODEL_ID,
+    });
     expect(rows).toHaveLength(assistantIds.length);
   });
 

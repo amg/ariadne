@@ -8,10 +8,16 @@ description: Conventions for the Postgres/Kysely layer — migrations use the ty
 ## 1. Migrations
 
 *   **Typed schema builder**: Write migration DDL with the typed Kysely schema
-    builder (`db.schema.…`). Column types with no builder literal ride a raw
-    `sql` expression inside the builder (`sql`numeric(14,10)``, `vector`).
+    builder (`db.schema.…`) and migration DML with the query builders
+    (`insertInto().expression()`, `updateTable().from()`, `deleteFrom().using()`).
+    Column types with no builder literal ride a raw `sql` expression inside the
+    builder (`sql`numeric(14,10)``, `vector`).
 *   **Raw `sql` escape hatch**: only what the builder cannot express
-    (extensions, triggers, DML backfills), with the reason stated in a comment.
+    (extensions, locks, triggers and functions), with the reason stated in a comment.
+*   **Untyped connection**: migration signatures take `Kysely<any>` —
+    mid-migration table shapes carry no app-side Database type, and the Migrator
+    itself hands migrations that connection. The biome config turns
+    `noExplicitAny` off for the migrations folder.
 
 ## 2. Queries
 

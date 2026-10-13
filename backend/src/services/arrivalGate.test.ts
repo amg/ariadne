@@ -116,7 +116,7 @@ async function judgmentSettled(messageId: string): Promise<void> {
 async function verdictCount(messageId: string): Promise<number> {
   const rows = await db
     .selectFrom('analysis.segmentDriftLogs')
-    .select('id')
+    .select('messageId')
     .where('messageId', '=', messageId)
     .execute();
   return rows.length;

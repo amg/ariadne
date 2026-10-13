@@ -7,11 +7,12 @@ import type { FireChannel, GateVerdict } from './types';
 /**
  * The live lane of the thread-health gate. Every arriving user message
  * runs through the message transformer — its rewrite try, its embed, and
- * its verdict against the live ledger — and the lane persists as it goes:
- * threads that predate the feature, a failure recovery, and a re-fill
- * after a message edit are all the lane resuming where the persisted
- * arrivals stop. Each transformer step persists as it completes, so
- * stored rows are replayed, never re-embedded or re-judged.
+ * its verdict against the current segment's Gravity point — and the lane
+ * persists as it goes: threads that predate the feature, a failure
+ * recovery, and a re-fill after a message edit are all the lane resuming
+ * where the persisted arrivals stop. Each transformer step persists as it
+ * completes, so stored rows are replayed, never re-embedded or
+ * re-judged.
  */
 
 export interface LiveArrivalOutcome {

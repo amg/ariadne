@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
-import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumThreadSpend } from '@queries/messageUsage/sumThreadSpend';
@@ -39,7 +39,7 @@ async function seedFullSpend(threadId: string): Promise<void> {
     costUsd: '0.0000050000',
     finishReason: 'stop',
   });
-  await recordArrivalEmbedding({
+  await recordMessageEmbedding({
     messageId: user.id,
     embedding: new Array<number>(1024).fill(0),
     modelId: EMBEDDING_MODEL_ID,

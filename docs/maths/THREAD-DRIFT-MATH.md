@@ -61,3 +61,5 @@ With the stick in hand, the math runs every pair of segments and collects all th
 ## 7. The Paper Trail
 
 To ensure our tracker's map is trustworthy, we leave a complete paper trail. Every threshold, noise allowance, and rewrite decision is logged in the final report. This means any topic cut made during the live hike can be flawlessly reproduced from the data alone.
+
+How the live tracker keeps all of this up to date without re-reading the whole hike at every step is told in [DRIFT-GATE-RUNNING-TOTALS.md](DRIFT-GATE-RUNNING-TOTALS.md).

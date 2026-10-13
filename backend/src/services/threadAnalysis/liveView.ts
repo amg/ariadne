@@ -1,6 +1,6 @@
 import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
-import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
@@ -38,15 +38,16 @@ export interface LiveAnalysisPoint {
   fireChannel: 'immediate' | 'slow' | null;
   /** The composite reading judged; null on muted arrivals. */
   driftP: number | null;
-  /** Ledger snapshot at judgment — BEFORE the arrival joined it. */
+  /** Baseline snapshot at judgment — BEFORE the arrival joined it. */
   mu: number | null;
   sigma: number | null;
   zScore: number | null;
   /**
-   * The immediate criterion the reading was judged against: μ +
+   * The immediate criterion the reading was judged against — μ +
    * k·max(σ, σ_floor) once the baseline warms, the flat T_segment while it
-   * bootstraps. The chart's trigger series; derivable only for judged
-   * arrivals.
+   * bootstraps — read from the stored verdict, so a parameter change
+   * redraws no old point's line. The chart's trigger series; null on
+   * muted arrivals.
    */
   immediateThreshold: number | null;
   /** The self-contained rewrite behind the reading, when one landed. */
@@ -90,7 +91,10 @@ async function analyzeModeOffView(threadId: string): Promise<LiveAnalysisView> {
   return {
     threadId,
     mode: 'off',
-    params: { ...DEFAULT_ANALYZE_OPTIONS, embeddingModelId: EMBEDDING_MODEL_ID },
+    params: {
+      ...DEFAULT_ANALYZE_OPTIONS,
+      embeddingModelId: EMBEDDING_MODEL_ID,
+    },
     segments: [],
     points: [],
     pending: false,
@@ -107,7 +111,10 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   const mode = env.THREAD_ANALYSIS_MODE;
   if (mode === 'off') return ok(await analyzeModeOffView(threadId));
 
-  const params = { ...DEFAULT_ANALYZE_OPTIONS, embeddingModelId: EMBEDDING_MODEL_ID };
+  const params = {
+    ...DEFAULT_ANALYZE_OPTIONS,
+    embeddingModelId: EMBEDDING_MODEL_ID,
+  };
 
   const [messageRows, allSegments, allLogs] = await Promise.all([
     listMessagesByThread({ threadId }),
@@ -154,13 +161,13 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
     return index;
   };
 
-  const arrivalRows = await listMessageEmbeddingsByMessageIds({
+  const arrivalRows = await listMessageExpansionsByMessageIds({
     messageIds: userMessages.map((message) => message.id),
   });
   const rewrittenTextById = new Map(
-    arrivalRows
-      .filter((row) => row.modelId === EMBEDDING_MODEL_ID && row.rewrittenText !== null)
-      .map((row) => [row.messageId, row.rewrittenText]),
+    arrivalRows.flatMap((row) =>
+      row.expandedText === null ? [] : [[row.messageId, row.expandedText] as const],
+    ),
   );
   const expandOutcomeById = new Map(arrivalRows.map((row) => [row.messageId, row.expandOutcome]));
 
@@ -168,14 +175,6 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   const contentById = new Map(messages.map((message) => [message.id, message.content]));
 
   const points: LiveAnalysisPoint[] = logs.map((log) => {
-    const baselineWarm = log.mu !== null && log.sigma !== null;
-    const immediateThreshold =
-      log.driftP === null
-        ? null
-        : baselineWarm
-          ? (log.mu as number) +
-            params.immediateK * Math.max(log.sigma as number, params.sigmaFloor)
-          : params.segmentThreshold;
     const turnNumber = arrivalTurnByMessageId.get(log.messageId) ?? 0;
     return {
       messageId: log.messageId,
@@ -188,7 +187,9 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       mu: log.mu,
       sigma: log.sigma,
       zScore: log.zScore,
-      immediateThreshold,
+      // The line each point was judged on, as stored — not one recomputed
+      // from today's params: a calibration change redraws no history.
+      immediateThreshold: log.immediateThreshold,
       rewrittenText: rewrittenTextById.get(log.messageId) ?? null,
       expandOutcome: expandOutcomeById.get(log.messageId) ?? null,
     };

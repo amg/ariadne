@@ -1,4 +1,6 @@
+import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
@@ -75,11 +77,13 @@ async function threadAwaitingFollowUpVerdict(title: string) {
 }
 
 async function followUpSpend(followUpId: string) {
-  const [arrival] = await listMessageEmbeddingsByMessageIds({ messageIds: [followUpId] });
-  const rewrite = await getSideCostByMessageId({ messageId: followUpId, kind: 'rewrite' });
+  const [rewrite, embedding] = await Promise.all([
+    getSideCostByMessageId({ messageId: followUpId, kind: 'rewrite', model: env.REWRITE_MODEL }),
+    getSideCostByMessageId({ messageId: followUpId, kind: 'embedding', model: EMBEDDING_MODEL_ID }),
+  ]);
   return {
-    embeddingCostUsd: Number(arrival?.embeddingCostUsd),
-    rewriteCostUsd: Number(rewrite?.costUsd),
+    embeddingCostUsd: Number(embedding?.costUsd ?? 0),
+    rewriteCostUsd: Number(rewrite?.costUsd ?? 0),
     rewritePromptTokens: rewrite?.promptTokens ?? null,
   };
 }
@@ -135,11 +139,13 @@ describe('two Drift gate passes over one Thread', () => {
 
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: [followUpId, openingReplyId],
+      modelId: EMBEDDING_MODEL_ID,
     });
     const arrival = stored.find((row) => row.messageId === followUpId);
     const turn = stored.find((row) => row.messageId === openingReplyId);
-    expect(arrival?.rewrittenText).toBe(REWRITE_A);
-    expect(arrival?.expandOutcome).toBe('accepted');
+    const [expansion] = await listMessageExpansionsByMessageIds({ messageIds: [followUpId] });
+    expect(expansion?.expandOutcome).toBe('accepted');
+    expect(expansion?.expandedText).toBe(REWRITE_A);
     if (!arrival?.embedding || !turn?.embedding) throw new Error('expected stored vectors');
 
     const [segments, logs] = await Promise.all([

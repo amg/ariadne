@@ -65,7 +65,11 @@ describe('deleteMessage', () => {
 
     expect(await getMessageUsageByMessageId({ messageId: assistant.id })).toBeUndefined();
     expect(
-      await getSideCostByMessageId({ messageId: assistant.id, kind: 'rewrite' }),
+      await getSideCostByMessageId({
+        messageId: assistant.id,
+        kind: 'rewrite',
+        model: 'Qwen/Qwen3.5-9B',
+      }),
     ).toBeUndefined();
   });
 

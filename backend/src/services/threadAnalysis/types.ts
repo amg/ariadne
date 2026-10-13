@@ -42,8 +42,7 @@ export interface ThreadReportParams {
   /**
    * σ_floor: the divisor floor under the baseline's sample σ — a perfectly
    * calm segment (spread near zero) must not read every wobble as a
-   * breakout. Set from the corpus continuation-noise magnitude (~0.02),
-   * not guesswork.
+   * breakout.
    */
   sigmaFloor: number;
   /**
@@ -51,14 +50,13 @@ export interface ThreadReportParams {
    * patrol consumes the RAW drift readings themselves (the same
    * verdict-lane signal the immediate channel judges), accumulated
    * against the detector's own running mean. Fires once the accumulated
-   * rise reaches λ. Ships at 0.5 (pinned against the purpose-built
-   * slow-drift corpus).
+   * rise reaches λ.
    */
   lambda: number;
   /**
-   * δ: the slow patrol's PageHinkley allowance, in drift units — raw
-   * steps below it are noise, not rise. Measured inert on the corpus, so
-   * δ ≈ 0 earns its seat without a sweep.
+   * δ: the slow patrol's PageHinkley allowance, in drift units — each
+   * step's rise above the running mean is reduced by δ, so steady wobble
+   * smaller than δ never accumulates.
    */
   delta: number;
   /**
@@ -456,8 +454,7 @@ export type GateReplayOptionOverrides = Partial<Pick<GateReplayParams, 'sinkhorn
  * the immediate channel fires at z ≥ 2 against the current segment's
  * μ/max(σ, σ_floor) (the constant T_segment bootstraps while the baseline
  * holds < 2 accepted members); the slow patrol rides the RAW drift
- * readings with λ/δ in drift units (λ pinned at 0.5 against the
- * purpose-built slow-drift corpus).
+ * readings with λ/δ in drift units.
  */
 export const DEFAULT_ANALYZE_OPTIONS = {
   segmentThreshold: 0.52,

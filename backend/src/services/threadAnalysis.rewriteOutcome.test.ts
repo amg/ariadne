@@ -1,8 +1,11 @@
+import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
+import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { buildLiveAnalysisView, runLiveGate } from '@services/threadAnalysis';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { useTestDb } from '@test/test-db';
@@ -19,7 +22,7 @@ import { formattedProspectiveTurn } from './threadAnalysis/turns';
  * mirror walk never exercises, because its corpus stays past the 120-char
  * trigger. Here the arrival is a short anaphoric follow-up, so the
  * heuristic sends it through the bounded rewrite loop: what lands (and why
- * it landed) rides `expand_outcome` on the arrival row, and the embedded
+ * it landed) rides the arrival's expansion row, and the embedded
  * vector proves which reading — rewritten or raw — the gate actually used.
  *
  * Counts ride `requestCount` deltas, never absolutes: the mock server is
@@ -68,11 +71,16 @@ async function seedRewriteThread(): Promise<{ threadId: string; arrivalId: strin
   return { threadId: thread.id, arrivalId: arrival.id };
 }
 
+/** The arrival's stored state: its expansion row merged with its vector. */
 async function readArrivalRow(arrivalId: string) {
-  const rows = await listMessageEmbeddingsByMessageIds({ messageIds: [arrivalId] });
-  const row = rows[0];
-  if (!row) throw new Error(`arrival row missing for ${arrivalId}`);
-  return row;
+  const [embeddings, expansions] = await Promise.all([
+    listMessageEmbeddingsByMessageIds({ messageIds: [arrivalId], modelId: EMBEDDING_MODEL_ID }),
+    listMessageExpansionsByMessageIds({ messageIds: [arrivalId] }),
+  ]);
+  const embedding = embeddings[0];
+  const expansion = expansions[0];
+  if (!embedding || !expansion) throw new Error(`arrival row missing for ${arrivalId}`);
+  return { ...expansion, embedding: embedding.embedding };
 }
 
 useTestDb();
@@ -115,16 +123,19 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('accepted');
-    expect(row.rewrittenText).toBe(REWRITE);
-    // The rewrite step's spend lands in the expansion-cost rows.
+    expect(row.expandedText).toBe(REWRITE);
+    // The rewrite step's spend lands in the side-cost rows.
     const rewriteSpend = await getSideCostByMessageId({
       messageId: arrivalId,
       kind: 'rewrite',
+      model: env.REWRITE_MODEL,
     });
     expect(rewriteSpend).toBeDefined();
     expect(Number(rewriteSpend?.costUsd)).toBeGreaterThan(0);
     // The heuristic triggered directly — no judge was consulted.
-    expect(await getSideCostByMessageId({ messageId: arrivalId, kind: 'judge' })).toBeUndefined();
+    expect(
+      await getSideCostByMessageId({ messageId: arrivalId, kind: 'judge', model: env.JUDGE_MODEL }),
+    ).toBeUndefined();
     // The judged signal is the rewrite's embedding, nearly identical despite
     // the float4 round-trip digit loss.
     expect(cosineSimilarity(row.embedding, readingVector(REWRITE))).toBeGreaterThan(0.9999);
@@ -148,7 +159,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed_refused');
-    expect(row.rewrittenText).toBeNull();
+    expect(row.expandedText).toBeNull();
     // The judged signal is the RAW arrival — the refusal never reaches the
     // embedding the way thread 1c36412d's did.
     expect(cosineSimilarity(row.embedding, readingVector(RAW_ARRIVAL))).toBeGreaterThan(0.9999);
@@ -173,7 +184,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('accepted');
-    expect(row.rewrittenText).toBe(REWRITE);
+    expect(row.expandedText).toBe(REWRITE);
     expect(cosineSimilarity(row.embedding, readingVector(REWRITE))).toBeGreaterThan(0.9999);
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(2);
   });
@@ -187,7 +198,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed');
-    expect(row.rewrittenText).toBeNull();
+    expect(row.expandedText).toBeNull();
     expect(cosineSimilarity(row.embedding, readingVector(RAW_ARRIVAL))).toBeGreaterThan(0.9999);
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(2);
   });
@@ -201,9 +212,15 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed_inference');
-    expect(row.rewrittenText).toBeNull();
-    // The provider never billed the attempt — no expansion-cost row lands.
-    expect(await getSideCostByMessageId({ messageId: arrivalId, kind: 'rewrite' })).toBeUndefined();
+    expect(row.expandedText).toBeNull();
+    // The provider never billed the attempt — no side-cost row lands.
+    expect(
+      await getSideCostByMessageId({
+        messageId: arrivalId,
+        kind: 'rewrite',
+        model: env.REWRITE_MODEL,
+      }),
+    ).toBeUndefined();
     expect(cosineSimilarity(row.embedding, readingVector(RAW_ARRIVAL))).toBeGreaterThan(0.9999);
     // Inference failure is not a quality failure — no retry is spent.
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(1);

@@ -13,6 +13,7 @@ import { TaskFailure, classifiedTaskError, classifyTaskError } from './errors';
 import { whenArrivalJudged, whenJudgmentAbandoned } from './flows/driftGate';
 import { whenSegmentCaptureAbandoned, whenSegmentCaptured } from './flows/memoryCapture';
 import { whenThreadTitled } from './flows/threadTitling';
+import { foldTurn } from './tasks/driftGateFoldTurnTask';
 import { judgeArrival } from './tasks/driftGateJudgeArrivalTask';
 import { captureMemorySegment } from './tasks/memoryCaptureSegmentTask';
 import { titleThread } from './tasks/threadGenerateTitleTask';
@@ -94,6 +95,7 @@ export function registeredTask<Name extends TaskName>(
     // a renamed task, not this cast.
     const payload = raw as TaskPayload<Name>;
     const { job } = helpers;
+    const startedAt = Date.now();
     try {
       await withinTimeLimit(task.execute(payload), timeLimitMs, () => {
         logger.warn(
@@ -107,6 +109,9 @@ export function registeredTask<Name extends TaskName>(
           'queue task ran past its time limit',
         );
       });
+      // Worker time per task, as structured fields: load runs read this
+      // to see where a deployment's worker seconds go.
+      logger.info({ task: name, durationMs: Date.now() - startedAt }, 'queue task finished');
     } catch (error) {
       const errorClass = classifyTaskError(error);
       const lastAttempt = job.attempts >= job.max_attempts;
@@ -129,6 +134,11 @@ export function queueTasks(memory: MemoryFeature): TaskList {
       execute: async (params) =>
         whenArrivalJudged({ params, judgment: await judgeArrival(params), memory }),
       onGivenUp: async (params) => whenJudgmentAbandoned(params),
+    }),
+    driftGateFoldTurn: registeredTask('driftGateFoldTurn', {
+      // The fold has no sequel: its checkpoint is the outcome, and the next
+      // judgment is the only thing that reads it.
+      execute: foldTurn,
     }),
     threadGenerateTitle: registeredTask('threadGenerateTitle', {
       execute: async (params) => whenThreadTitled(await titleThread(params)),

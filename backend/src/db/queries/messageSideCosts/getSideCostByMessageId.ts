@@ -1,18 +1,24 @@
 import { db } from '@db/db';
 import type { MessageSideCost, SideCostKind } from '@db/types';
 
-/** One expansion step's spend row for a message, when present. */
+type GetSideCostByMessageIdProps = {
+  messageId: string;
+  kind: SideCostKind;
+  /** Which model's spend row to read; kinds whose model can vary need it. */
+  model: string;
+};
+
+/** One side-pipeline spend row for a message under its model, when present. */
 export async function getSideCostByMessageId({
   messageId,
   kind,
-}: {
-  messageId: string;
-  kind: SideCostKind;
-}): Promise<MessageSideCost | undefined> {
+  model,
+}: GetSideCostByMessageIdProps): Promise<MessageSideCost | undefined> {
   return db
     .selectFrom('billing.messageSideCosts')
     .selectAll()
     .where('messageId', '=', messageId)
     .where('kind', '=', kind)
+    .where('model', '=', model)
     .executeTakeFirst();
 }

@@ -1,4 +1,7 @@
+import { env } from '@config/env';
+import { db } from '@db/db';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -453,7 +456,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     );
   });
 
-  it('keys arrival rows to user Messages; embedding spend rides the arrival row', async () => {
+  it('keys arrival rows to user Messages; embedding spend rides the side-cost row', async () => {
     const { threadId, userMessageIds, assistantMessageIds } = await seedThread(
       'agents and cost',
       TOPIC_SPECS,
@@ -462,20 +465,34 @@ describe('runLiveGate — the fill-forward walk', () => {
 
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: [...userMessageIds, ...assistantMessageIds],
+      modelId: EMBEDDING_MODEL_ID,
     });
     const byMessage = new Map(stored.map((row) => [row.messageId, row]));
     expect(byMessage.size).toBe(userMessageIds.length + assistantMessageIds.length);
 
+    const expansions = await listMessageExpansionsByMessageIds({ messageIds: userMessageIds });
+    const expansionByMessage = new Map(expansions.map((row) => [row.messageId, row]));
     for (const messageId of userMessageIds) {
       const row = byMessage.get(messageId);
       expect(row?.modelId).toBe(EMBEDDING_MODEL_ID);
       // Raw fast paths: the raw message itself was embedded (no rewrite
       // text) and neither the judge nor the rewriter billed anything —
-      // only the embedding step spends, and its cost rides the arrival row.
-      expect(row?.rewrittenText).toBeNull();
-      expect(Number(row?.embeddingCostUsd)).toBeGreaterThan(0);
-      expect(await getSideCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
-      expect(await getSideCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
+      // only the embedding step spends, and its spend lands in the
+      // message's `embedding` side-cost row.
+      expect(expansionByMessage.get(messageId)?.expandOutcome).toBe('not_needed');
+      expect(expansionByMessage.get(messageId)?.expandedText).toBeNull();
+      const spend = await getSideCostByMessageId({
+        messageId,
+        kind: 'embedding',
+        model: EMBEDDING_MODEL_ID,
+      });
+      expect(Number(spend?.costUsd)).toBeGreaterThan(0);
+      expect(
+        await getSideCostByMessageId({ messageId, kind: 'rewrite', model: env.REWRITE_MODEL }),
+      ).toBeUndefined();
+      expect(
+        await getSideCostByMessageId({ messageId, kind: 'judge', model: env.JUDGE_MODEL }),
+      ).toBeUndefined();
     }
     for (const messageId of assistantMessageIds) {
       expect(byMessage.get(messageId)?.modelId).toBe(EMBEDDING_MODEL_ID);
@@ -499,10 +516,8 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(mock.embeddings.requestCount()).toBe(afterFirst);
 
     const replayed = await readChain(threadId);
-    expect(replayed.logs.map((log) => log.id)).toEqual(logs.map((log) => log.id));
-    expect(replayed.segments.map((segment) => segment.id)).toEqual(
-      segments.map((segment) => segment.id),
-    );
+    expect(replayed.logs).toEqual(logs);
+    expect(replayed.segments).toEqual(segments);
   });
 
   it('fills forward to a target arrival, then backfills the remainder', async () => {
@@ -518,7 +533,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     const full = await readChain(threadId);
     expect(full.logs.map((log) => log.messageId)).toEqual(userMessageIds);
     // The partial rows kept their identities across the backfill.
-    expect(full.logs.slice(0, 2).map((log) => log.id)).toEqual(partial.logs.map((log) => log.id));
+    expect(full.logs.slice(0, 2)).toEqual(partial.logs);
   });
 
   it('rejects a target the walk does not own', async () => {
@@ -547,6 +562,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(single.messageId).toBe(unanswered.userMessageIds[0]);
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: unanswered.userMessageIds,
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(stored).toHaveLength(1);
   });
@@ -631,17 +647,26 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).toContain(lastUser);
     const storedAfterEdit = await listMessageEmbeddingsByMessageIds({
       messageIds: userMessageIds,
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(new Set(storedAfterEdit.map((row) => row.messageId))).toEqual(new Set(userMessageIds));
     // The forked arrival is not judged yet — it waits for the next pass.
-    expect(await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] })).toEqual([]);
+    expect(
+      await listMessageEmbeddingsByMessageIds({
+        messageIds: [forkedId],
+        modelId: EMBEDDING_MODEL_ID,
+      }),
+    ).toEqual([]);
 
     // Reply again and the refill judges the forked arrival end-to-end.
     await insertMessage({ threadId, role: 'assistant', content: `revised reply${PAD}` });
     assertSuccess(await runLiveGate({ threadId }));
     const { logs: logsAfterRefill } = await readChain(threadId);
     expect(logsAfterRefill.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
-    const forkedRows = await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] });
+    const forkedRows = await listMessageEmbeddingsByMessageIds({
+      messageIds: [forkedId],
+      modelId: EMBEDDING_MODEL_ID,
+    });
     expect(forkedRows).toHaveLength(1);
 
     const messages = await getMessages({ userId: USER_ID, threadId });
@@ -658,6 +683,98 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     expect(pointIds).not.toContain(lastUser);
     expect(pointIds).toContain(forkedId);
     expect(view.data.pending).toBe(false);
+  });
+});
+
+describe('gate checkpoints — the newest two, kept honest', () => {
+  /** The thread's stored judgment states, by arrival. */
+  async function statesOf(threadId: string) {
+    const rows = await db
+      .selectFrom('analysis.arrivalJudgmentStates as s')
+      .innerJoin('chat.messages as m', 'm.id', 's.messageId')
+      .where('m.threadId', '=', threadId)
+      .orderBy('m.createdAt asc')
+      .select('s.messageId')
+      .execute();
+    return rows.map((row) => row.messageId);
+  }
+
+  /** The thread's stored folds, by the Turn they completed. */
+  async function foldsOf(threadId: string) {
+    return db
+      .selectFrom('analysis.turnFolds as f')
+      .innerJoin('chat.messages as m', 'm.id', 'f.messageId')
+      .where('m.threadId', '=', threadId)
+      .orderBy('f.completedTurns asc')
+      .select(['f.messageId', 'f.completedTurns'])
+      .execute();
+  }
+
+  it('keeps only the newest two checkpoints, however long the Thread grew', async () => {
+    const { threadId, userMessageIds, assistantMessageIds } = await seedThread(
+      'keep two',
+      TOPIC_SPECS,
+    );
+    assertSuccess(await runLiveGate({ threadId }));
+
+    expect(await statesOf(threadId)).toEqual(userMessageIds.slice(-2));
+    expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([4, 5]);
+    const foldOwners = await foldsOf(threadId);
+    expect(foldOwners.map((fold) => fold.messageId)).toEqual(assistantMessageIds.slice(-2));
+  });
+
+  it('rebuilds from scratch when the checkpoints go stale, landing on the same chain verbatim', async () => {
+    const { threadId, userMessageIds } = await seedThread('stale checkpoints', TOPIC_SPECS);
+    assertSuccess(await runLiveGate({ threadId }));
+    const { logs: before } = await readChain(threadId);
+    expect(before).toHaveLength(TOPIC_SPECS.length);
+
+    // The checkpoints and the last two verdicts vanish, as a mid-thread
+    // abandonment or a torn write leaves them: the next judgment cannot
+    // hydrate from what survived and must rebuild honestly.
+    await db
+      .deleteFrom('analysis.segmentDriftLogs')
+      .where('messageId', 'in', userMessageIds.slice(2))
+      .execute();
+    await db.deleteFrom('analysis.arrivalJudgmentStates').execute();
+    await db.deleteFrom('analysis.turnFolds').execute();
+
+    const target = userMessageIds[3];
+    if (!target) throw new Error('seed too short');
+    assertSuccess(await runLiveGate({ threadId }));
+
+    // The rebuilt judgments are the same ones, floats included: the
+    // walk's replayed state and the fast path's hydrated state run the
+    // same math over the same stored vectors. Only the arrival times of
+    // the rewritten rows differ.
+    const judgedOf = (logs: Awaited<ReturnType<typeof readChain>>['logs']) =>
+      logs.map(({ createdAt: _writtenAt, ...judged }) => judged);
+    const { logs: after } = await readChain(threadId);
+    expect(judgedOf(after)).toEqual(judgedOf(before));
+    // The rebuild heals the checkpoints it rebuilt from.
+    expect(await statesOf(threadId)).toEqual(userMessageIds.slice(-2));
+    expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([4, 5]);
+  });
+
+  it('draws the stored criterion, not one recomputed from today’s params', async () => {
+    const { threadId, userMessageIds } = await seedThread('stored criterion', TOPIC_SPECS);
+    assertSuccess(await runLiveGate({ threadId }));
+    const firstArrival = userMessageIds[1];
+    if (!firstArrival) throw new Error('seed too short');
+    // A value no formula would produce: if the chart recomputed the line,
+    // it would draw something else.
+    await db
+      .updateTable('analysis.segmentDriftLogs')
+      .set({ immediateThreshold: 0.47 })
+      .where('messageId', '=', firstArrival)
+      .execute();
+
+    const view = await buildLiveAnalysisView(threadId);
+    if (view.type !== 'success') throw new Error('expected success');
+    const point = view.data.points.find((row) => row.messageId === firstArrival);
+    expect(point?.immediateThreshold).toBe(0.47);
+    // The muted opening arrival carries no line at all.
+    expect(view.data.points[0]?.immediateThreshold).toBeNull();
   });
 });
 
@@ -756,7 +873,7 @@ describe('the analysis surface reads the persisted chain', () => {
     expect(offView.data.pending).toBe(false);
 
     const { logs: logsAfter } = await readChain(threadId);
-    expect(logsAfter.map((log) => log.id)).toEqual(logsBefore.map((log) => log.id));
+    expect(logsAfter).toEqual(logsBefore);
   });
 
   it('getMessages attaches the live verdict to user arrivals only', async () => {
