@@ -746,12 +746,16 @@ async function judgeFromCheckpoints(
 }
 
 /**
- * Fills forward until the target arrival is finished. Each lost race
- * reveals rows another pass stored and this pass had not read; with them
- * reread for the same arrivals, the next fill gets past them. So the fill
- * ends within one attempt per arrival, plus the one that finishes. The
- * target's own Turn folds here when it completed — the queue task may
- * not have run, and the next arrival's judgment would only inline it
+ * Brings the target arrival to its finished state: its verdict stored,
+ * and its Turn folded once the reply has completed. Two passes can
+ * judge the same arrival at the same time, and the pass that stores
+ * first wins — the loser rereads what is now stored and tries again.
+ * The reread carries the rows the winner stored, so the next attempt
+ * replays that arrival instead of racing it again; every attempt gets
+ * at least one arrival further, so the fill ends within one attempt
+ * per arrival, plus the one that finishes. The target's own Turn folds
+ * here too, when its reply has completed — the queue task may not
+ * have run yet, and the next arrival's judgment would fold it inline
  * anyway.
  */
 async function fillPastOtherPasses(
