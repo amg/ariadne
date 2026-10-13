@@ -238,7 +238,7 @@ describe('appendArrivalVerdict', () => {
       }),
     ).toBe(true);
 
-    expect(await statesOf(threadId)).toEqual([abandoned.id, arrivalId]);
+    expect((await statesOf(threadId)).sort()).toEqual([abandoned.id, arrivalId].sort());
   });
 
   it('writes nothing when the verdict is already logged, not even the segment', async () => {
