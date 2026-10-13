@@ -113,7 +113,7 @@ describe('the cost of judging an arrival', () => {
 
     const replayed = await countQueries(() => runLiveGate({ threadId, upToMessageId: arrivalId }));
     expect(replayed.result.type).toBe('success');
-    // The Thread, its embeddings, its verdicts, its segments.
-    expect(replayed.queries).toBe(4);
+    // The Thread, its embeddings, its expansions, its verdicts, its segments.
+    expect(replayed.queries).toBe(5);
   });
 });

@@ -1,6 +1,6 @@
 import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
-import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
@@ -90,7 +90,10 @@ async function analyzeModeOffView(threadId: string): Promise<LiveAnalysisView> {
   return {
     threadId,
     mode: 'off',
-    params: { ...DEFAULT_ANALYZE_OPTIONS, embeddingModelId: EMBEDDING_MODEL_ID },
+    params: {
+      ...DEFAULT_ANALYZE_OPTIONS,
+      embeddingModelId: EMBEDDING_MODEL_ID,
+    },
     segments: [],
     points: [],
     pending: false,
@@ -107,7 +110,10 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   const mode = env.THREAD_ANALYSIS_MODE;
   if (mode === 'off') return ok(await analyzeModeOffView(threadId));
 
-  const params = { ...DEFAULT_ANALYZE_OPTIONS, embeddingModelId: EMBEDDING_MODEL_ID };
+  const params = {
+    ...DEFAULT_ANALYZE_OPTIONS,
+    embeddingModelId: EMBEDDING_MODEL_ID,
+  };
 
   const [messageRows, allSegments, allLogs] = await Promise.all([
     listMessagesByThread({ threadId }),
@@ -154,13 +160,13 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
     return index;
   };
 
-  const arrivalRows = await listMessageEmbeddingsByMessageIds({
+  const arrivalRows = await listMessageExpansionsByMessageIds({
     messageIds: userMessages.map((message) => message.id),
   });
   const rewrittenTextById = new Map(
-    arrivalRows
-      .filter((row) => row.modelId === EMBEDDING_MODEL_ID && row.rewrittenText !== null)
-      .map((row) => [row.messageId, row.rewrittenText]),
+    arrivalRows.flatMap((row) =>
+      row.expandedText === null ? [] : [[row.messageId, row.expandedText] as const],
+    ),
   );
   const expandOutcomeById = new Map(arrivalRows.map((row) => [row.messageId, row.expandOutcome]));
 

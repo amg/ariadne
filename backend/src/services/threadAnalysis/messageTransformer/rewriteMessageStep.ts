@@ -1,11 +1,10 @@
 import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
-import { recordMessageExpansion } from '@queries/messageEmbeddings/recordMessageExpansion';
+import { recordMessageExpansion } from '@queries/messageExpansions/recordMessageExpansion';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { computeInferenceCostUsd } from '@services/aiService/pricing';
 import { err, ok } from '../../../types/result';
 import {
-  EMBEDDING_MODEL_ID,
   type JudgeContextDependenceInput,
   judgeContextDependence,
   rewriteFollowUp,
@@ -18,7 +17,7 @@ import {
   needsRewriteHeuristic,
   parseRewrite,
 } from '../rewrite';
-import { withEmbedding } from './liveChain';
+import { withExpansion } from './liveChain';
 import type { LiveTurnRow } from './liveTurns';
 import type { MessageStep } from './messageStep';
 import { naiveRefusalDetector } from './naiveRefusalDetector';
@@ -133,7 +132,12 @@ async function runRewriteAttempt(
     { temperature },
   );
   if (rewritten.type === 'error') {
-    return { outcome: 'failed_inference', expandedText: null, cost: null, usage: null };
+    return {
+      outcome: 'failed_inference',
+      expandedText: null,
+      cost: null,
+      usage: null,
+    };
   }
   const cost = await computeInferenceCostUsd(
     env.REWRITE_MODEL,
@@ -190,7 +194,12 @@ async function resolveExpansion(input: RewriteContext): Promise<ExpansionEnd> {
     }
   }
   // Exhausted the budget on quality failures; the last refusal-like outcome lands.
-  return { expandOutcome: lastOutcome, expandedText: null, rewriteCostUsd, rewriteUsage };
+  return {
+    expandOutcome: lastOutcome,
+    expandedText: null,
+    rewriteCostUsd,
+    rewriteUsage,
+  };
 }
 
 /**
@@ -203,7 +212,11 @@ async function rewriteDecision(input: {
   prior: LiveTurnRow | null;
   mode: LiveRewriteMode;
 }): Promise<
-  ExpansionEnd & { tried: boolean; judgeCostUsd: number | null; judgeUsage: ReportedUsage | null }
+  ExpansionEnd & {
+    tried: boolean;
+    judgeCostUsd: number | null;
+    judgeUsage: ReportedUsage | null;
+  }
 > {
   const none: ExpansionEnd & {
     tried: boolean;
@@ -239,7 +252,11 @@ async function rewriteDecision(input: {
   // Second chance for short messages the heuristic missed.
   const checked = await backstopVerdict(context);
   if (!checked.rewrite)
-    return { ...none, judgeCostUsd: checked.judgeCostUsd, judgeUsage: checked.judgeUsage };
+    return {
+      ...none,
+      judgeCostUsd: checked.judgeCostUsd,
+      judgeUsage: checked.judgeUsage,
+    };
 
   const expansion = await resolveExpansion(context);
   return {
@@ -256,7 +273,7 @@ export const rewriteMessageStep: MessageStep = {
     const arrival = chain.arrivals[arrivalIndex];
     if (!arrival) return err('thread_not_found');
     const userMessageId = arrival.userMessage.id;
-    if (chain.embeddings.has(userMessageId)) return ok(chain);
+    if (chain.expansions.has(userMessageId)) return ok(chain);
 
     const mode: LiveRewriteMode = env.THREAD_ANALYSIS_MODE === 'always' ? 'always' : 'heuristic';
     const decision = await rewriteDecision({
@@ -265,13 +282,12 @@ export const rewriteMessageStep: MessageStep = {
       mode,
     });
 
-    // Persists the terminal state on the arrival row unless another pass
-    // stored one first; the embed step reads whichever is stored. The
-    // embedding column is left null for the embed step to fill.
+    // Persists the terminal state on the arrival's expansion row unless
+    // another pass stored one first; the embed step reads whichever is
+    // stored.
     const stored = await recordMessageExpansion({
       messageId: userMessageId,
-      modelId: EMBEDDING_MODEL_ID,
-      expandOutcome: decision.tried ? decision.expandOutcome : null,
+      expandOutcome: decision.tried ? decision.expandOutcome : 'not_needed',
       expandedText: decision.tried ? decision.expandedText : null,
     });
 
@@ -296,6 +312,6 @@ export const rewriteMessageStep: MessageStep = {
         completionTokens: decision.judgeUsage?.completionTokens ?? null,
       });
     }
-    return ok(withEmbedding(chain, stored));
+    return ok(withExpansion(chain, stored));
   },
 };

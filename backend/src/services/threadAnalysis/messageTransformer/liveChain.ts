@@ -1,5 +1,6 @@
-import type { MessageEmbedding, SegmentDriftLog } from '@db/types';
+import type { MessageEmbedding, MessageExpansion, SegmentDriftLog } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
@@ -22,6 +23,8 @@ export interface ChainSegment {
 export interface StoredJudgments {
   /** Stored embedding rows of the live arrivals and their replies, by Message. */
   embeddings: ReadonlyMap<string, MessageEmbedding>;
+  /** Stored rewrite outcomes of the live arrivals, by Message. */
+  expansions: ReadonlyMap<string, MessageExpansion>;
   /** Stored verdicts by arrival. */
   verdicts: ReadonlyMap<string, LoggedVerdict>;
   /** Stored segment ids by the arrival that starts them. */
@@ -39,11 +42,15 @@ export interface LiveChain extends StoredJudgments {
   arrivals: readonly LiveTurnRow[];
 }
 
-/** Reads the Thread's live chain: four queries, whatever the Thread's length. */
+/** Reads the Thread's live chain: five queries, whatever the Thread's length. */
 export async function readLiveChain(threadId: string): Promise<LiveChain> {
   const rows = await listMessagesByThread({ threadId });
   const arrivals = buildLiveTurns(rows.filter((row) => !row.abandoned));
-  return { threadId, arrivals, ...(await readStoredJudgments({ threadId, arrivals })) };
+  return {
+    threadId,
+    arrivals,
+    ...(await readStoredJudgments({ threadId, arrivals })),
+  };
 }
 
 /** Reads what is stored now for the given arrivals and their replies. */
@@ -56,13 +63,20 @@ export async function readStoredJudgments({
       ? [arrival.userMessage.id, arrival.assistantReply.id]
       : [arrival.userMessage.id],
   );
-  const [embeddings, logs, segments] = await Promise.all([
-    listMessageEmbeddingsByMessageIds({ messageIds }),
+  const [embeddings, expansions, logs, segments] = await Promise.all([
+    listMessageEmbeddingsByMessageIds({
+      messageIds,
+      modelId: EMBEDDING_MODEL_ID,
+    }),
+    listMessageExpansionsByMessageIds({
+      messageIds: arrivals.map((arrival) => arrival.userMessage.id),
+    }),
     listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
     listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
   ]);
   return {
     embeddings: new Map(embeddings.map((row) => [row.messageId, row])),
+    expansions: new Map(expansions.map((row) => [row.messageId, row])),
     verdicts: new Map(logs.map((log) => [log.messageId, log])),
     segmentIdByStart: new Map(segments.map((segment) => [segment.startMessageId, segment.id])),
   };
@@ -70,7 +84,18 @@ export async function readStoredJudgments({
 
 /** The chain with one more stored embedding row. */
 export function withEmbedding(chain: LiveChain, row: MessageEmbedding): LiveChain {
-  return { ...chain, embeddings: new Map(chain.embeddings).set(row.messageId, row) };
+  return {
+    ...chain,
+    embeddings: new Map(chain.embeddings).set(row.messageId, row),
+  };
+}
+
+/** The chain with one more stored expansion row. */
+export function withExpansion(chain: LiveChain, row: MessageExpansion): LiveChain {
+  return {
+    ...chain,
+    expansions: new Map(chain.expansions).set(row.messageId, row),
+  };
 }
 
 /** The chain with an arrival's stored verdict, if any, and the segments it opened. */
@@ -93,16 +118,15 @@ export function withJudgment(
   return { ...chain, verdicts, segmentIdByStart };
 }
 
-/** The stored vector under the current embedding model; null when none is stored. */
-export function currentModelVectorOrNull(row: MessageEmbedding | undefined): number[] | null {
-  if (!row || row.embedding === null || row.modelId !== EMBEDDING_MODEL_ID) return null;
-  return row.embedding;
+/** The stored vector; null when none is stored under the current embedding model. */
+export function storedVectorOrNull(row: MessageEmbedding | undefined): number[] | null {
+  return row?.embedding ?? null;
 }
 
 /** True when the arrival's completed Turn, if it has one, is embedded under the current model. */
 export function isTurnFolded(chain: LiveChain, arrival: LiveTurnRow): boolean {
   if (!arrival.assistantReply) return true;
-  return currentModelVectorOrNull(chain.embeddings.get(arrival.assistantReply.id)) !== null;
+  return storedVectorOrNull(chain.embeddings.get(arrival.assistantReply.id)) !== null;
 }
 
 /** True when the arrival has its verdict stored and its completed Turn folded. */

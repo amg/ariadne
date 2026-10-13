@@ -45,7 +45,7 @@ export async function appendArrivalVerdict({
         .insertInto('analysis.segmentDriftLogs')
         .values(verdict)
         .onConflict((oc) => oc.columns(['messageId', 'modelId']).doNothing())
-        .returning('id')
+        .returning('messageId')
         .executeTakeFirst();
       if (!logged) throw new WrittenByAnotherPass();
     });

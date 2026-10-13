@@ -148,10 +148,8 @@ describe('the live chain runs one per embedding model', () => {
 
     // The retired chain is untouched, row for row.
     const chainAfter = await readChain(threadId, PRIMARY);
-    expect(chainAfter.logs.map((log) => log.id)).toEqual(chainA.logs.map((log) => log.id));
-    expect(chainAfter.segments.map((segment) => segment.id)).toEqual(
-      chainA.segments.map((segment) => segment.id),
-    );
+    expect(chainAfter.logs).toEqual(chainA.logs);
+    expect(chainAfter.segments).toEqual(chainA.segments);
   });
 
   it('the surfaces read only the current model chain', async () => {

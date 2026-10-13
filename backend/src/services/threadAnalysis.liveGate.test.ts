@@ -1,4 +1,6 @@
+import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
+import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -453,7 +455,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     );
   });
 
-  it('keys arrival rows to user Messages; embedding spend rides the arrival row', async () => {
+  it('keys arrival rows to user Messages; embedding spend rides the side-cost row', async () => {
     const { threadId, userMessageIds, assistantMessageIds } = await seedThread(
       'agents and cost',
       TOPIC_SPECS,
@@ -462,20 +464,34 @@ describe('runLiveGate — the fill-forward walk', () => {
 
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: [...userMessageIds, ...assistantMessageIds],
+      modelId: EMBEDDING_MODEL_ID,
     });
     const byMessage = new Map(stored.map((row) => [row.messageId, row]));
     expect(byMessage.size).toBe(userMessageIds.length + assistantMessageIds.length);
 
+    const expansions = await listMessageExpansionsByMessageIds({ messageIds: userMessageIds });
+    const expansionByMessage = new Map(expansions.map((row) => [row.messageId, row]));
     for (const messageId of userMessageIds) {
       const row = byMessage.get(messageId);
       expect(row?.modelId).toBe(EMBEDDING_MODEL_ID);
       // Raw fast paths: the raw message itself was embedded (no rewrite
       // text) and neither the judge nor the rewriter billed anything —
-      // only the embedding step spends, and its cost rides the arrival row.
-      expect(row?.rewrittenText).toBeNull();
-      expect(Number(row?.embeddingCostUsd)).toBeGreaterThan(0);
-      expect(await getSideCostByMessageId({ messageId, kind: 'rewrite' })).toBeUndefined();
-      expect(await getSideCostByMessageId({ messageId, kind: 'judge' })).toBeUndefined();
+      // only the embedding step spends, and its spend lands in the
+      // message's `embedding` side-cost row.
+      expect(expansionByMessage.get(messageId)?.expandOutcome).toBe('not_needed');
+      expect(expansionByMessage.get(messageId)?.expandedText).toBeNull();
+      const spend = await getSideCostByMessageId({
+        messageId,
+        kind: 'embedding',
+        model: EMBEDDING_MODEL_ID,
+      });
+      expect(Number(spend?.costUsd)).toBeGreaterThan(0);
+      expect(
+        await getSideCostByMessageId({ messageId, kind: 'rewrite', model: env.REWRITE_MODEL }),
+      ).toBeUndefined();
+      expect(
+        await getSideCostByMessageId({ messageId, kind: 'judge', model: env.JUDGE_MODEL }),
+      ).toBeUndefined();
     }
     for (const messageId of assistantMessageIds) {
       expect(byMessage.get(messageId)?.modelId).toBe(EMBEDDING_MODEL_ID);
@@ -499,10 +515,8 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(mock.embeddings.requestCount()).toBe(afterFirst);
 
     const replayed = await readChain(threadId);
-    expect(replayed.logs.map((log) => log.id)).toEqual(logs.map((log) => log.id));
-    expect(replayed.segments.map((segment) => segment.id)).toEqual(
-      segments.map((segment) => segment.id),
-    );
+    expect(replayed.logs).toEqual(logs);
+    expect(replayed.segments).toEqual(segments);
   });
 
   it('fills forward to a target arrival, then backfills the remainder', async () => {
@@ -518,7 +532,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     const full = await readChain(threadId);
     expect(full.logs.map((log) => log.messageId)).toEqual(userMessageIds);
     // The partial rows kept their identities across the backfill.
-    expect(full.logs.slice(0, 2).map((log) => log.id)).toEqual(partial.logs.map((log) => log.id));
+    expect(full.logs.slice(0, 2)).toEqual(partial.logs);
   });
 
   it('rejects a target the walk does not own', async () => {
@@ -547,6 +561,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(single.messageId).toBe(unanswered.userMessageIds[0]);
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: unanswered.userMessageIds,
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(stored).toHaveLength(1);
   });
@@ -631,17 +646,26 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).toContain(lastUser);
     const storedAfterEdit = await listMessageEmbeddingsByMessageIds({
       messageIds: userMessageIds,
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(new Set(storedAfterEdit.map((row) => row.messageId))).toEqual(new Set(userMessageIds));
     // The forked arrival is not judged yet — it waits for the next pass.
-    expect(await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] })).toEqual([]);
+    expect(
+      await listMessageEmbeddingsByMessageIds({
+        messageIds: [forkedId],
+        modelId: EMBEDDING_MODEL_ID,
+      }),
+    ).toEqual([]);
 
     // Reply again and the refill judges the forked arrival end-to-end.
     await insertMessage({ threadId, role: 'assistant', content: `revised reply${PAD}` });
     assertSuccess(await runLiveGate({ threadId }));
     const { logs: logsAfterRefill } = await readChain(threadId);
     expect(logsAfterRefill.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
-    const forkedRows = await listMessageEmbeddingsByMessageIds({ messageIds: [forkedId] });
+    const forkedRows = await listMessageEmbeddingsByMessageIds({
+      messageIds: [forkedId],
+      modelId: EMBEDDING_MODEL_ID,
+    });
     expect(forkedRows).toHaveLength(1);
 
     const messages = await getMessages({ userId: USER_ID, threadId });
@@ -756,7 +780,7 @@ describe('the analysis surface reads the persisted chain', () => {
     expect(offView.data.pending).toBe(false);
 
     const { logs: logsAfter } = await readChain(threadId);
-    expect(logsAfter.map((log) => log.id)).toEqual(logsBefore.map((log) => log.id));
+    expect(logsAfter).toEqual(logsBefore);
   });
 
   it('getMessages attaches the live verdict to user arrivals only', async () => {

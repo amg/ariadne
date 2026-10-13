@@ -15,6 +15,7 @@ import {
 import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import {
   type ChatStreamHandle,
+  EMBEDDING_MODEL_ID,
   type EmbedTextData,
   type RetryChoice,
   computeCostUsd,
@@ -447,7 +448,10 @@ describe('submitChat', () => {
     // Both arrivals carry arrival rows: the old one replayed, the forked
     // one judged by the retry's gate pass.
     const userIds = rows.filter((row) => row.role === 'user').map((row) => row.id);
-    const arrivals = await listMessageEmbeddingsByMessageIds({ messageIds: userIds });
+    const arrivals = await listMessageEmbeddingsByMessageIds({
+      messageIds: userIds,
+      modelId: EMBEDDING_MODEL_ID,
+    });
     expect(new Set(arrivals.map((row) => row.messageId))).toEqual(new Set(userIds));
 
     // Nothing is owed back: the forked row is not abandoned.

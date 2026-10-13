@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
-import { recordArrivalEmbedding } from '@queries/messageEmbeddings/recordArrivalEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { deleteMessage } from '@queries/messages/deleteMessage';
@@ -104,9 +104,9 @@ describe('getThreadSummary', () => {
       role: 'user',
       content: 'what about that?',
     });
-    // The embedding spend rides the arrival row; the rewrite/judge spends
-    // land as expansion-cost rows.
-    await recordArrivalEmbedding({
+    // The embedding spend lands in the message's `embedding` side-cost
+    // row; the rewrite/judge spends land beside it.
+    await recordMessageEmbedding({
       messageId: userMessage.id,
       embedding: new Array<number>(1024).fill(0),
       modelId: EMBEDDING_MODEL_ID,

@@ -1,21 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { Message, NewSegmentDriftLog } from '@db/types';
-import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import {
   type OpenedSegment,
   appendArrivalVerdict,
 } from '@queries/segmentDriftLogs/appendArrivalVerdict';
 import { type Result, err, ok } from '../../../types/result';
-import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
+import { EMBEDDING_MODEL_ID, computeEmbeddingCostUsd, embedText } from '../../aiService';
 import { cosineDistance } from '../drift';
 import { type Turn, formattedTurn } from '../turns';
 import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from '../types';
 import { type JudgingParams, createVerdictState, evaluateAndRecord, isColdStart } from '../verdict';
 import {
   type LiveChain,
-  currentModelVectorOrNull,
   isArrivalFinished,
   readStoredJudgments,
+  storedVectorOrNull,
   withEmbedding,
   withJudgment,
 } from './liveChain';
@@ -170,10 +170,11 @@ function verdictRowOrNull(
 }
 
 /**
- * Resolves the embedding for a completed turn. Prefers the stored row when
- * it already carries a vector for this embedding model; otherwise embeds
- * the turn text and records it, folding whichever vector is stored first.
- * Returns the vector with the chain that holds it.
+ * Resolves the embedding for a completed turn. Prefers the stored row
+ * when it already carries a vector for this embedding model; otherwise
+ * embeds the turn text and records it — spend included — folding
+ * whichever vector is stored first. Returns the vector with the chain
+ * that holds it.
  */
 async function resolveTurnVector(input: {
   chain: LiveChain;
@@ -181,18 +182,17 @@ async function resolveTurnVector(input: {
   assistantMessage: Message;
 }): Promise<Result<{ vector: number[]; chain: LiveChain }>> {
   const { chain, assistantMessage } = input;
-  const storedVector = currentModelVectorOrNull(chain.embeddings.get(assistantMessage.id));
+  const storedVector = storedVectorOrNull(chain.embeddings.get(assistantMessage.id));
   if (storedVector !== null) return ok({ vector: storedVector, chain });
   const embedded = await embedText(input.text);
   if (embedded.type === 'error') return embedded;
-  const row = await recordTurnEmbedding({
+  const row = await recordMessageEmbedding({
     messageId: assistantMessage.id,
     embedding: embedded.data.embedding,
     modelId: EMBEDDING_MODEL_ID,
+    embeddingCostUsd: await computeEmbeddingCostUsd(embedded.data.promptTokens),
+    promptTokens: embedded.data.promptTokens,
   });
-  if (row.embedding === null) {
-    return err('embed_failed', 'The turn embedding wrote without a vector.');
-  }
   return ok({ vector: row.embedding, chain: withEmbedding(chain, row) });
 }
 
@@ -297,7 +297,7 @@ async function processArrival(input: {
     state.currentSegmentId === null ? segmentStartingAt(chain, userMessageId) : null;
   if (chainOpening !== null) state.currentSegmentId = chainOpening.id;
 
-  const vector = currentModelVectorOrNull(chain.embeddings.get(userMessageId));
+  const vector = storedVectorOrNull(chain.embeddings.get(userMessageId));
   if (vector === null) {
     return err(
       'arrival_signal_missing',
@@ -326,7 +326,12 @@ async function processArrival(input: {
   });
   if (committed === null) return ok({ kind: 'written-by-another-pass' });
 
-  const folded = await completeTurn({ state, chain: committed, row, reseed: judged.fired });
+  const folded = await completeTurn({
+    state,
+    chain: committed,
+    row,
+    reseed: judged.fired,
+  });
   if (folded.type === 'error') return folded;
   return ok({ kind: 'filled', chain: folded.data });
 }

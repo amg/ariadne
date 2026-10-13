@@ -28,7 +28,6 @@ export async function listSegmentDriftLogsByThread({
     .where('msg.threadId', '=', threadId)
     .where('log.modelId', '=', modelId)
     .select([
-      'log.id',
       'log.segmentId',
       'log.messageId',
       'log.modelId',
@@ -42,8 +41,8 @@ export async function listSegmentDriftLogsByThread({
       'log.createdAt',
       'seg.startMessageId as segmentStartMessageId',
     ])
+    .orderBy('msg.createdAt', 'asc')
     .orderBy('log.createdAt', 'asc')
-    .orderBy('log.id', 'asc')
     .execute();
   return rows as unknown as SegmentDriftLogWithStart[];
 }

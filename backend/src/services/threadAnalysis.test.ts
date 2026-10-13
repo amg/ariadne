@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Message } from '@db/types';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -387,6 +387,7 @@ describe('analyzeThread — errors', () => {
     // Nothing was persisted for the aborted run.
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: messages.map((message) => message.id),
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(rows).toEqual([]);
   });
@@ -476,6 +477,7 @@ describe('analyzeThread — report shell and cost profile', () => {
     // keyed to a user message.
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: messages.map((message) => message.id),
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(rows.map((row) => row.messageId).sort()).toEqual([a1.id, a2.id, a3.id].sort());
     for (const row of rows) {
@@ -522,6 +524,7 @@ describe('analyzeThread — report shell and cost profile', () => {
     expect(mock.embeddings.requestCount() - callsBefore).toBe(2);
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: messages.map((message) => message.id),
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(rows.map((row) => row.messageId).sort()).toEqual([a1.id, a2.id].sort());
   });
@@ -591,7 +594,7 @@ describe('analyzeThread — persistence, reuse and provenance', () => {
     // Rows stored under a different embedding model are stale geometry —
     // re-embedded, never compared (provenance identity = model_id, the architectural decision).
     for (const assistant of [a1, a2, a3]) {
-      await recordTurnEmbedding({
+      await recordMessageEmbedding({
         messageId: assistant.id,
         embedding: buildMockEmbedding('stale geometry fixture'),
         modelId: 'stale/embed-model',
@@ -607,6 +610,7 @@ describe('analyzeThread — persistence, reuse and provenance', () => {
     // now carrying the current model and the correct Turn vectors.
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: [a1.id, a2.id, a3.id],
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(rows.map((row) => row.messageId).sort()).toEqual([a1.id, a2.id, a3.id].sort());
     for (const row of rows) {
@@ -633,6 +637,7 @@ describe('analyzeThread — persistence, reuse and provenance', () => {
 
     const partialRows = await listMessageEmbeddingsByMessageIds({
       messageIds: [a1.id, a2.id, a3.id, a4.id],
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(partialRows.map((row) => row.messageId)).toEqual([a1.id]); // progress survives
 
@@ -644,6 +649,7 @@ describe('analyzeThread — persistence, reuse and provenance', () => {
     expect(mock.embeddings.requestCount()).toBe(callsBeforeResume + 3); // only Turns 2, 3, 4
     const rows = await listMessageEmbeddingsByMessageIds({
       messageIds: [a1.id, a2.id, a3.id, a4.id],
+      modelId: EMBEDDING_MODEL_ID,
     });
     expect(rows.map((row) => row.messageId).sort()).toEqual([a1.id, a2.id, a3.id, a4.id].sort());
     expect(report.totals).toMatchObject({ turns: 4, messages: 8 });

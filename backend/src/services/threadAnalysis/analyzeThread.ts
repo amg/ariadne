@@ -1,6 +1,6 @@
 import { env } from '@config/env';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
-import { recordTurnEmbedding } from '@queries/messageEmbeddings/recordTurnEmbedding';
+import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { DEFAULT_USER_ID } from '@services/userService';
@@ -67,7 +67,10 @@ export async function analyzeThread(
 
   // Local single-user app: the analyzer operates under the same
   // placeholder user as every route (REQUEST_USER_ID pattern).
-  const thread = await findThreadByIdAndUser({ userId: DEFAULT_USER_ID, threadId });
+  const thread = await findThreadByIdAndUser({
+    userId: DEFAULT_USER_ID,
+    threadId,
+  });
   if (!thread) return err('thread_not_found');
 
   const messages = await listMessagesByThread({ threadId });
@@ -82,43 +85,42 @@ export async function analyzeThread(
   const blocks = buildTurnBlocks(turns);
   const storedRows = await listMessageEmbeddingsByMessageIds({
     messageIds: blocks.map((block) => block.assistantMessage.id),
+    modelId: EMBEDDING_MODEL_ID,
   });
   const storedByKey = new Map(storedRows.map((row) => [row.messageId, row]));
 
   // Persist-upon-use: embed and record each Turn's row as soon as the
-  // call succeeds so a later failure loses no progress. Provenance
-  // identity is the embedding model alone.
+  // call succeeds so a later failure loses no progress. Spend lands in
+  // the message's `embedding` side-cost row and this run's tally below.
   const onTurnEmbedded = options?.onTurnEmbedded;
   let embeddingCostUsd = 0;
   for (const block of blocks) {
     const stored = storedByKey.get(block.assistantMessage.id);
-    if (stored && stored.modelId === EMBEDDING_MODEL_ID) {
-      continue; // provenance matches: reused with zero embed calls
+    if (stored) {
+      continue; // this model's row exists: reused with zero embed calls
     }
     onTurnEmbedded?.(block.turnNumber, blocks.length);
     const embedded = await embedText(block.text);
     if (embedded.type === 'error') return embedded;
-    await recordTurnEmbedding({
+    const costUsd = await computeEmbeddingCostUsd(embedded.data.promptTokens);
+    await recordMessageEmbedding({
       messageId: block.assistantMessage.id,
       embedding: embedded.data.embedding,
       modelId: EMBEDDING_MODEL_ID,
+      embeddingCostUsd: costUsd,
+      promptTokens: embedded.data.promptTokens,
     });
-    embeddingCostUsd = round10(
-      embeddingCostUsd + (await computeEmbeddingCostUsd(embedded.data.promptTokens)),
-    );
+    embeddingCostUsd = round10(embeddingCostUsd + costUsd);
   }
 
   // Embedding complete: score from the stored rows only. All runs compute
   // over the exact float4-rounded storage values, keeping reports
-  // bit-stable repeat to repeat. Arrival rows born without a vector (live
-  // chain, pre-embed) never belong to a Turn's block — keep the ones
-  // holding a real vector.
+  // bit-stable repeat to repeat.
   const storedTurns = await listMessageEmbeddingsByMessageIds({
     messageIds: blocks.map((block) => block.assistantMessage.id),
+    modelId: EMBEDDING_MODEL_ID,
   });
-  const vectorByMessageId = new Map(
-    storedTurns.flatMap((row) => (row.embedding === null ? [] : [[row.messageId, row.embedding]])),
-  );
+  const vectorByMessageId = new Map(storedTurns.map((row) => [row.messageId, row.embedding]));
   const messageIndexByMessageId = new Map(
     messages.map((message, index) => [message.id, index + 1]),
   );
@@ -158,7 +160,10 @@ export async function analyzeThread(
     },
     costProfile,
     driftSeries: drift.driftSeries,
-    anchor: { builtFromTurns: drift.anchorBuiltFromTurns, counsel: drift.counsel },
+    anchor: {
+      builtFromTurns: drift.anchorBuiltFromTurns,
+      counsel: drift.counsel,
+    },
     segments: drift.segments,
   };
 
