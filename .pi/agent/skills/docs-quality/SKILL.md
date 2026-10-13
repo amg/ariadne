@@ -10,6 +10,7 @@ This skill must be followed during every implementation loop, code modification,
 ## 1. Code Comments
 - **Describe the Interface**: Comments should explain *what* the interface does, not where it is used, why it was built, or who uses it.
 - **Explain Non-Obvious Behavior**: Only write comments for behavior that is truly non-obvious. 
+- **One Idea per Sentence**: Give each idea in a comment its own sentence, ordered cause before effect. Fusing several steps into one clause forces pronoun bridges whose referent shifts mid-sentence and hides the actor of each action, leaving the reader to reconstruct who does what to what. Repeat the noun when two things compete for the same pronoun, and name who acts in every sentence.
 - **NO Implementation Details in JSDocs**: Interface comments (JSDocs, function headers) must focus purely on parameters, return values, and consumer-facing behavior. They must NEVER leak internal mechanics, specific algorithm names, or underlying dependencies (e.g., avoid mentioning `aiService` or `PageHinkley` inside a top-level service comment).
 - **NO Narration or Detective Work**: Do not write comments that narrate the history of the code, how it was written, or where the functionality comes from.
 - **NO External References**: Never mention work tickets, Jira issues, or tracking numbers (e.g., avoid "ticket 42", "JIRA-107").
