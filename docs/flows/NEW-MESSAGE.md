@@ -8,7 +8,7 @@ This page is the map for reading it.
 How the queue, the event bus and push work, and the full list of
 failure answers, is covered in [BACKGROUND-WORK.md](BACKGROUND-WORK.md).
 How the Drift gate judges an arrival is covered in ADR 0006, ADR 0007
-and `docs/ideas/THREAD-DRIFT-MATH.md`. Terms are defined in `CONTEXT.md`.
+and `docs/maths/THREAD-DRIFT-MATH.md`. Terms are defined in `CONTEXT.md`.
 
 ## 1. Submit: store, judge, then answer
 

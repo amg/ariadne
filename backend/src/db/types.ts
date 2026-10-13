@@ -17,6 +17,8 @@ export interface Database {
   'analysis.messageExpansions': MessageExpansionsTable;
   'analysis.threadSegments': ThreadSegmentsTable;
   'analysis.segmentDriftLogs': SegmentDriftLogsTable;
+  'analysis.arrivalJudgmentStates': ArrivalJudgmentStatesTable;
+  'analysis.turnFolds': TurnFoldsTable;
   'memory.userFacts': UserFactsTable;
   'memory.threadSeeds': ThreadSeedsTable;
   'memory.userSettings': UserSettingsTable;
@@ -262,6 +264,65 @@ export interface SegmentDriftLogsTable {
   fireChannel: 'immediate' | 'slow' | null;
   /** When fireChannel === 'slow', the message ID of the turn that anchored the Page-Hinkley low-water mark. */
   slowDriftStartMessageId: string | null;
+  /**
+   * The immediate criterion the reading was judged against — μ +
+   * k·max(σ, σ_floor) once the baseline warms, the flat T_segment while
+   * it bootstraps. Null exactly when `driftP` is: muted arrivals judged
+   * nothing. Stored per row so the chart draws the line each point was
+   * actually judged against, not one recomputed from today's params.
+   */
+  immediateThreshold: number | null;
+  createdAt: Generated<Date>;
+}
+
+/**
+ * One judged arrival's gate state, stored so the next judgment starts
+ * from it instead of rebuilding the whole chain: the segment baseline
+ * (Welford moments) and the slow patrol (Page–Hinkley accumulator) as
+ * they stand AFTER the arrival was judged. Keyed to the arrival's drift
+ * log; the keep-two rule prunes all but the newest two arrivals' rows.
+ */
+export interface ArrivalJudgmentStatesTable {
+  /** The arrival's user Message (PK with `modelId`; the drift log it rides). */
+  messageId: string;
+  /** Provenance of the judged chain — the embedding model. */
+  modelId: string;
+  baselineCount: number;
+  baselineMean: number;
+  baselineM2: number;
+  patrolCount: number;
+  patrolSum: number;
+  patrolCumulative: number;
+  /** The Page–Hinkley low-water mark's level; 0 while the patrol is empty. */
+  patrolLowWater: number;
+  /** The sample that anchors the low-water mark; null while the patrol is empty. */
+  patrolLowWaterMessageId: string | null;
+  createdAt: Generated<Date>;
+}
+
+/**
+ * One folded Turn's gate state, stored so the next judgment measures
+ * against it instead of re-folding the chain: the current segment's
+ * summed geometry (full float64 — the sums accumulate bit-identically to
+ * a rebuild), the segment the conversation sits in, and how many Turns
+ * the live chain has folded. Keyed to the Turn's embedding row; the
+ * keep-two rule prunes all but the newest two Turns' rows.
+ */
+export interface TurnFoldsTable {
+  /** The Turn's assistant Message (PK with `modelId`; the embedding it rides). */
+  messageId: string;
+  /** Provenance of the folded chain — the embedding model. */
+  modelId: string;
+  /** The segment the conversation sits in once this Turn folded. */
+  segmentId: string; // UUID FK -> thread_segments.id (cascade delete)
+  /** Elementwise sum of the segment's folded Turn vectors; its unit vector is the Gravity point. */
+  gravitySum: number[]; // float8[] — full float64, no rounding
+  /** Sum of the segment's first up-to-three folded Turn vectors — the anchor reading's base. */
+  anchorSum: number[];
+  /** How many Turn vectors the anchor sum holds (1–3). */
+  anchorCount: number;
+  /** Complete Turns the live chain has folded through this Turn — the cold-start and staleness counter. */
+  completedTurns: number;
   createdAt: Generated<Date>;
 }
 
@@ -414,6 +475,10 @@ export type NewUserFact = {
 
 export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;
 export type NewSegmentDriftLog = Insertable<SegmentDriftLogsTable>;
+export type ArrivalJudgmentState = Selectable<ArrivalJudgmentStatesTable>;
+export type NewArrivalJudgmentState = Insertable<ArrivalJudgmentStatesTable>;
+export type TurnFold = Selectable<TurnFoldsTable>;
+export type NewTurnFold = Insertable<TurnFoldsTable>;
 /**
  * Synthetic + provider finish states persisted on `message_usage`.
  * `interrupted` = user stop; `timeout` = inter-token idle guard;

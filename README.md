@@ -126,6 +126,7 @@ check, the tests and the frontend build.
 - **[Background work](docs/flows/BACKGROUND-WORK.md)** — The queue, the event bus, push to the browser, and how failures surface
 - **[aws-prod architecture](docs/architecture/AWS-PROD-ARCHITECTURE.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
 - **[aws-prod deployment](docs/architecture/AWS-PROD-DEPLOYMENT.html)** — Raising, running, recovering and the step gates
+- **[Drift maths](docs/maths/)** — How the Drift gate judges a message, how it keeps running totals, and the alternatives considered
 - **[Ideas](docs/ideas/)** — Open explorations
 
 ## Not Done Yet

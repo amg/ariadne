@@ -12,6 +12,7 @@ import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { inTransaction } from '@queries/transaction/inTransaction';
+import { enqueueDriftGateFoldTurn } from '@queue/tasks/driftGateFoldTurnTask';
 import type { ThreadGenerateTitleParams } from '@queue/tasks/threadGenerateTitleTask';
 import { type MemoryFeature, assembledSystemPrompt } from '@services/memory';
 import { validateMessageContent } from '@services/validation';
@@ -384,6 +385,13 @@ async function startExchange(props: StartExchangeProps): Promise<Result<ChatStre
     } catch {
       // Titling must not fail the exchange.
     }
+  });
+
+  // The reply completes a Turn: its fold is queue work, off the next
+  // arrival's judgment path. Best effort on every settle — a lost enqueue
+  // costs the next judgment one inline fold, nothing more.
+  void exchange.outcome.then(() => {
+    enqueueDriftGateFoldTurn({ threadId, messageId: assistantMessage.id }).catch(() => {});
   });
 
   const streamResult = streamText({

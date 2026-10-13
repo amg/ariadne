@@ -27,6 +27,17 @@ export interface PageHinkleyOptions {
   minSamples: number;
 }
 
+/** The patrol's stored accumulator — the judgment-state checkpoint's patrol half. */
+export interface PatrolSnapshot {
+  count: number;
+  /** The samples' raw running total; the detector's mean derives as sum/count. */
+  sum: number;
+  cumulative: number;
+  lowWater: number;
+  /** The sample anchoring the low-water mark; null while the patrol is empty. */
+  lowWaterId: string | null;
+}
+
 export interface PageHinkleyDetector {
   /** Feed one sample; true when this sample fires a detection. */
   update(sample: number, sampleId: string): boolean;
@@ -57,14 +68,19 @@ export interface PageHinkleyDetector {
   readonly lastRise: number | null;
   /** The id of the sample that anchors the low-water mark. */
   readonly lowWaterId: string | null;
+  /** The raw accumulator a checkpoint stores and a restore reads back — no derived round-trip. */
+  readonly snapshot: PatrolSnapshot;
 }
 
-export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetector {
-  let count = 0;
-  let sum = 0;
-  let cumulative = 0;
-  let lowWater = 0;
-  let lowWaterIdValue: string | null = null;
+export function createPageHinkley(
+  options: PageHinkleyOptions,
+  from?: PatrolSnapshot,
+): PageHinkleyDetector {
+  let count = from?.count ?? 0;
+  let sum = from?.sum ?? 0;
+  let cumulative = from?.cumulative ?? 0;
+  let lowWater = from?.lowWater ?? 0;
+  let lowWaterIdValue = from?.lowWaterId ?? null;
   let lastMeanValue: number | null = null;
   let lastRiseValue: number | null = null;
 
@@ -118,6 +134,9 @@ export function createPageHinkley(options: PageHinkleyOptions): PageHinkleyDetec
     },
     get lowWaterId(): string | null {
       return lowWaterIdValue;
+    },
+    get snapshot(): PatrolSnapshot {
+      return { count, sum, cumulative, lowWater, lowWaterId: lowWaterIdValue };
     },
   };
 }

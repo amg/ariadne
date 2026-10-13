@@ -38,15 +38,16 @@ export interface LiveAnalysisPoint {
   fireChannel: 'immediate' | 'slow' | null;
   /** The composite reading judged; null on muted arrivals. */
   driftP: number | null;
-  /** Ledger snapshot at judgment — BEFORE the arrival joined it. */
+  /** Baseline snapshot at judgment — BEFORE the arrival joined it. */
   mu: number | null;
   sigma: number | null;
   zScore: number | null;
   /**
-   * The immediate criterion the reading was judged against: μ +
+   * The immediate criterion the reading was judged against — μ +
    * k·max(σ, σ_floor) once the baseline warms, the flat T_segment while it
-   * bootstraps. The chart's trigger series; derivable only for judged
-   * arrivals.
+   * bootstraps — read from the stored verdict, so a parameter change
+   * redraws no old point's line. The chart's trigger series; null on
+   * muted arrivals.
    */
   immediateThreshold: number | null;
   /** The self-contained rewrite behind the reading, when one landed. */
@@ -174,14 +175,6 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
   const contentById = new Map(messages.map((message) => [message.id, message.content]));
 
   const points: LiveAnalysisPoint[] = logs.map((log) => {
-    const baselineWarm = log.mu !== null && log.sigma !== null;
-    const immediateThreshold =
-      log.driftP === null
-        ? null
-        : baselineWarm
-          ? (log.mu as number) +
-            params.immediateK * Math.max(log.sigma as number, params.sigmaFloor)
-          : params.segmentThreshold;
     const turnNumber = arrivalTurnByMessageId.get(log.messageId) ?? 0;
     return {
       messageId: log.messageId,
@@ -194,7 +187,9 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       mu: log.mu,
       sigma: log.sigma,
       zScore: log.zScore,
-      immediateThreshold,
+      // The line each point was judged on, as stored — not one recomputed
+      // from today's params: a calibration change redraws no history.
+      immediateThreshold: log.immediateThreshold,
       rewrittenText: rewrittenTextById.get(log.messageId) ?? null,
       expandOutcome: expandOutcomeById.get(log.messageId) ?? null,
     };

@@ -19,6 +19,8 @@ truth; nothing here repeats it.
 - **`docs/architecture/`** — HTML reports of deployment shapes (aws-prod
   architecture and deployment).
 - **`docs/ideas/`** — open explorations, high level only.
+- **`docs/maths/`** — how the Drift gate's maths works, told as a story
+  (no implementation detail), plus the alternatives considered.
 - **`docs/project-management/`** — WIP tickets and bugs; deleted when the
   work lands.
 - **`infra/README.md`** — operating aws-prod.

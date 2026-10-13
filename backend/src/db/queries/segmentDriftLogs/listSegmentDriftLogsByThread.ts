@@ -38,6 +38,7 @@ export async function listSegmentDriftLogsByThread({
       'log.verdict',
       'log.fireChannel',
       'log.slowDriftStartMessageId',
+      'log.immediateThreshold',
       'log.createdAt',
       'seg.startMessageId as segmentStartMessageId',
     ])

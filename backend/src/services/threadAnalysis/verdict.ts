@@ -1,5 +1,9 @@
-import { type PageHinkleyDetector, createPageHinkley } from './pageHinkley';
-import { type SegmentRollingStats, createSegmentRollingStats } from './segmentRollingStats';
+import { type PageHinkleyDetector, type PatrolSnapshot, createPageHinkley } from './pageHinkley';
+import {
+  type BaselineSnapshot,
+  type SegmentRollingStats,
+  createSegmentRollingStats,
+} from './segmentRollingStats';
 
 /**
  * The two-channel verdict core shared by both drift flows. The offline
@@ -101,11 +105,30 @@ export interface VerdictState {
   patrol: PageHinkleyDetector;
 }
 
-export function createVerdictState(params: JudgingParams): VerdictState {
+/**
+ * One judged arrival's verdict state as its checkpoint stores it — the
+ * exact baseline and patrol the NEXT arrival is judged from. Restoring
+ * from it replays the same arithmetic a rebuild would: bit-identical
+ * inputs, bit-identical judgments.
+ */
+export interface JudgmentStateSnapshot {
+  baseline: BaselineSnapshot;
+  patrol: PatrolSnapshot;
+}
+
+export function createVerdictState(
+  params: JudgingParams,
+  from?: JudgmentStateSnapshot,
+): VerdictState {
   return {
-    baseline: createSegmentRollingStats(),
-    patrol: createPageHinkley(patrolOptions(params)),
+    baseline: createSegmentRollingStats(from?.baseline),
+    patrol: createPageHinkley(patrolOptions(params), from?.patrol),
   };
+}
+
+/** The verdict state as a checkpoint stores it. */
+export function snapshotOfVerdictState(state: VerdictState): JudgmentStateSnapshot {
+  return { baseline: state.baseline.snapshot, patrol: state.patrol.snapshot };
 }
 
 /**

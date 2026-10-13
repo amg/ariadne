@@ -1,4 +1,5 @@
 import { env } from '@config/env';
+import { db } from '@db/db';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
 import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { getSideCostByMessageId } from '@queries/messageSideCosts/getSideCostByMessageId';
@@ -682,6 +683,98 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     expect(pointIds).not.toContain(lastUser);
     expect(pointIds).toContain(forkedId);
     expect(view.data.pending).toBe(false);
+  });
+});
+
+describe('gate checkpoints — the newest two, kept honest', () => {
+  /** The thread's stored judgment states, by arrival. */
+  async function statesOf(threadId: string) {
+    const rows = await db
+      .selectFrom('analysis.arrivalJudgmentStates as s')
+      .innerJoin('chat.messages as m', 'm.id', 's.messageId')
+      .where('m.threadId', '=', threadId)
+      .orderBy('m.createdAt asc')
+      .select('s.messageId')
+      .execute();
+    return rows.map((row) => row.messageId);
+  }
+
+  /** The thread's stored folds, by the Turn they completed. */
+  async function foldsOf(threadId: string) {
+    return db
+      .selectFrom('analysis.turnFolds as f')
+      .innerJoin('chat.messages as m', 'm.id', 'f.messageId')
+      .where('m.threadId', '=', threadId)
+      .orderBy('f.completedTurns asc')
+      .select(['f.messageId', 'f.completedTurns'])
+      .execute();
+  }
+
+  it('keeps only the newest two checkpoints, however long the Thread grew', async () => {
+    const { threadId, userMessageIds, assistantMessageIds } = await seedThread(
+      'keep two',
+      TOPIC_SPECS,
+    );
+    assertSuccess(await runLiveGate({ threadId }));
+
+    expect(await statesOf(threadId)).toEqual(userMessageIds.slice(-2));
+    expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([4, 5]);
+    const foldOwners = await foldsOf(threadId);
+    expect(foldOwners.map((fold) => fold.messageId)).toEqual(assistantMessageIds.slice(-2));
+  });
+
+  it('rebuilds from scratch when the checkpoints go stale, landing on the same chain verbatim', async () => {
+    const { threadId, userMessageIds } = await seedThread('stale checkpoints', TOPIC_SPECS);
+    assertSuccess(await runLiveGate({ threadId }));
+    const { logs: before } = await readChain(threadId);
+    expect(before).toHaveLength(TOPIC_SPECS.length);
+
+    // The checkpoints and the last two verdicts vanish, as a mid-thread
+    // abandonment or a torn write leaves them: the next judgment cannot
+    // hydrate from what survived and must rebuild honestly.
+    await db
+      .deleteFrom('analysis.segmentDriftLogs')
+      .where('messageId', 'in', userMessageIds.slice(2))
+      .execute();
+    await db.deleteFrom('analysis.arrivalJudgmentStates').execute();
+    await db.deleteFrom('analysis.turnFolds').execute();
+
+    const target = userMessageIds[3];
+    if (!target) throw new Error('seed too short');
+    assertSuccess(await runLiveGate({ threadId }));
+
+    // The rebuilt judgments are the same ones, floats included: the
+    // walk's replayed state and the fast path's hydrated state run the
+    // same math over the same stored vectors. Only the arrival times of
+    // the rewritten rows differ.
+    const judgedOf = (logs: Awaited<ReturnType<typeof readChain>>['logs']) =>
+      logs.map(({ createdAt: _writtenAt, ...judged }) => judged);
+    const { logs: after } = await readChain(threadId);
+    expect(judgedOf(after)).toEqual(judgedOf(before));
+    // The rebuild heals the checkpoints it rebuilt from.
+    expect(await statesOf(threadId)).toEqual(userMessageIds.slice(-2));
+    expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([4, 5]);
+  });
+
+  it('draws the stored criterion, not one recomputed from today’s params', async () => {
+    const { threadId, userMessageIds } = await seedThread('stored criterion', TOPIC_SPECS);
+    assertSuccess(await runLiveGate({ threadId }));
+    const firstArrival = userMessageIds[1];
+    if (!firstArrival) throw new Error('seed too short');
+    // A value no formula would produce: if the chart recomputed the line,
+    // it would draw something else.
+    await db
+      .updateTable('analysis.segmentDriftLogs')
+      .set({ immediateThreshold: 0.47 })
+      .where('messageId', '=', firstArrival)
+      .execute();
+
+    const view = await buildLiveAnalysisView(threadId);
+    if (view.type !== 'success') throw new Error('expected success');
+    const point = view.data.points.find((row) => row.messageId === firstArrival);
+    expect(point?.immediateThreshold).toBe(0.47);
+    // The muted opening arrival carries no line at all.
+    expect(view.data.points[0]?.immediateThreshold).toBeNull();
   });
 });
 

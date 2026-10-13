@@ -241,6 +241,20 @@ an edit invalidated, is rebuilt from where the chain stops. (An edit
 invalidates signals under every model.)
 _Avoid_: verdict history, ledger table, live audit
 
+**Gate checkpoint**:
+One piece of the gate's running state, persisted so the next judgment
+reads it instead of walking the chain: an *arrival judgment state* (the
+baseline and patrol one judged arrival leaves behind) or a *Turn fold*
+(one folded Turn's segment sums, its segment, and the live chain's
+Turn count). Each verdict's commit stores its own and prunes the thread
+to the newest two — the keep-two rule — so a judgment costs a fixed
+handful of queries however long the thread grew. A stale or missing
+checkpoint falls back to the rebuild walk, which replays the stored
+rows and heals the checkpoints as it goes; a fold lagging behind its
+Turn is not stale — the next judgment folds inline what the queue task
+has not written yet.
+_Avoid_: gate cache, working state, ledger
+
 **Rewritten signal / composite verdict signal**:
 The arrival-time verdict signal of the live gate after the
 pipeline: the incoming user Message rewritten into self-contained form against the prior
