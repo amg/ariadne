@@ -9,7 +9,7 @@
     "mock": "tsx mock/server.ts",
     "build": "esbuild app/server.ts app/server.aws.ts app/worker.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outdir=dist",
     "migrate": "tsx src/db/migrate.ts",
-    "migrate:prod": "tsx scripts/migrate-prod.ts",
+    "migrate:prod": "ENV_FILE=.env.prod tsx scripts/migrate-prod.ts",
     "queue:retry-failed": "tsx scripts/queue-retry-failed.ts",
     "smoke": "tsx smoke/e2e.ts",
     "try:analyze": "tsx scripts/try-analyze-thread.ts",
