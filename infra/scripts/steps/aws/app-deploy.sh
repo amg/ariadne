@@ -1,8 +1,9 @@
 # The app stack: network, database, cache, services, origin and bastion.
 
-app_up() { # <step> <image tag>
+app_up() { # <step> <image tag> <seed snapshot, or empty for a step that starts empty>
   step "App: network, database, cache, services, origin (about twenty minutes)"
-  run_cdk deploy "$APP_STACK" --exclusively -c "step=$1" -c "imageTag=$2"
+  [[ -z "$3" ]] || info "the database is restored from $3"
+  run_cdk deploy "$APP_STACK" --exclusively -c "step=$1" -c "imageTag=$2" -c "seedSnapshot=$3"
 }
 
 # A restored database fetches each block from S3 on first read; reading

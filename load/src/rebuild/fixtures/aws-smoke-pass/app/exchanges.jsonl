@@ -1,0 +1,2 @@
+{"userId":"u-0","trigger":"submit","arrivedAt":"2026-10-18T00:00:17.005Z","verdict":"pass","verdictAfterMs":18,"firstTokenAfterMs":130,"endedAfterMs":246,"outcome":"completed","errorCode":null,"assistantMessageId":"m-000"}
+{"userId":"u-4","trigger":"submit","arrivedAt":"2026-10-18T00:00:18.005Z","verdict":"pass","verdictAfterMs":18,"firstTokenAfterMs":57,"endedAfterMs":173,"outcome":"completed","errorCode":null,"assistantMessageId":"m-028"}

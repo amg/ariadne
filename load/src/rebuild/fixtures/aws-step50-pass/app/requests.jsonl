@@ -1,0 +1,3 @@
+{"copy":"api-1","endedAt":"2026-10-18T00:00:17.250Z","method":"POST","route":"/api/threads/:threadId/messages","statusCode":200,"durationMs":246}
+{"copy":"api-1","endedAt":"2026-10-18T00:00:18.180Z","method":"POST","route":"/api/threads/:threadId/messages","statusCode":200,"durationMs":173}
+{"copy":"api-1","endedAt":"2026-10-18T00:00:19.010Z","method":"GET","route":null,"statusCode":404,"durationMs":0.8}

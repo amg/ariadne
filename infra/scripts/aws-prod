@@ -7,9 +7,10 @@ COMMANDS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/commands"
 
 # In the order an operator meets them. Each summary is line 2 of the command's script.
 SECTIONS=(
-  "Once per account|core seed"
-  "Every test run|up load down"
-  "Looking in|status sweep db-tunnel db-password"
+  "Once per account|core seed snapshot"
+  "Every test run|up load-image load down"
+  "Looking in|status sweep db-tunnel db-password ecs-status ecs-stop ecs-start monitor reset-budget"
+  "A run's record|archive rebuild"
 )
 
 usage() {

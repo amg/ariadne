@@ -1,0 +1,2 @@
+{"run":"20261018T000000Z-smoke-load-direct","generator":0,"attempt":1,"user":0,"kind":"signin","startedAt":"2026-10-18T00:00:15.000Z","firstByteMs":140,"totalMs":145,"status":200,"outcome":"ok","errorCode":null}
+{"run":"20261018T000000Z-smoke-load-direct","generator":0,"attempt":1,"user":0,"kind":"chat","startedAt":"2026-10-18T00:00:17.000Z","firstByteMs":136,"totalMs":256,"status":200,"outcome":"streamed","errorCode":null}

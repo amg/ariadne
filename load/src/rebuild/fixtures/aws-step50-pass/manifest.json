@@ -1,0 +1,240 @@
+{
+  "version": 2,
+  "runId": "20261018T000000Z-step50-load-direct",
+  "step": "step50",
+  "config": {
+    "name": "step50",
+    "cache": {
+      "maxStorageGb": 5,
+      "maxEcpuPerSecond": 250000
+    },
+    "load": {
+      "generators": 2,
+      "users": 50000,
+      "rampSeconds": 30,
+      "holdSeconds": 180,
+      "thinkSeconds": 30,
+      "chattingShare": 0.2
+    }
+  },
+  "target": "aws-prod",
+  "loadPath": "direct",
+  "images": {
+    "backend": "20261018000000-abc1234",
+    "load": "20261018000000-abc1234"
+  },
+  "commits": {
+    "app": {
+      "sha": "abc1234",
+      "dirty": false
+    },
+    "harness": {
+      "sha": "abc1234",
+      "dirty": false
+    }
+  },
+  "startedAt": "2026-10-18T00:00:00.000Z",
+  "endedAt": "2026-10-18T00:04:30.000Z",
+  "trailingEndsAt": null,
+  "limits": {
+    "minPushStreams": 49000,
+    "minChatters": 9800,
+    "maxFirstByteP95Ms": 2500,
+    "maxGateWaitAtLimitShare": 0.005,
+    "maxSignInFailureShare": 0.005,
+    "maxGeneratorCpuPercent": 70
+  },
+  "slices": [
+    {
+      "generator": 0,
+      "firstUser": 0,
+      "userCount": 25000,
+      "startedAt": "2026-10-18T00:00:10.000Z",
+      "endedAt": "2026-10-18T00:04:10.000Z",
+      "hold": {
+        "from": "2026-10-18T00:00:45.000Z",
+        "to": "2026-10-18T00:03:45.000Z"
+      },
+      "down": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "task": "task-gen-0",
+          "spot": true,
+          "startedAt": "2026-10-18T00:00:10.000Z",
+          "stoppedAt": "2026-10-18T00:04:10.000Z",
+          "stoppedBecause": "finished",
+          "stopDetail": null,
+          "toldToStopAt": null,
+          "stoppedForRunEnd": false
+        }
+      ]
+    },
+    {
+      "generator": 1,
+      "firstUser": 25000,
+      "userCount": 25000,
+      "startedAt": "2026-10-18T00:00:11.000Z",
+      "endedAt": "2026-10-18T00:04:12.000Z",
+      "hold": {
+        "from": "2026-10-18T00:00:45.000Z",
+        "to": "2026-10-18T00:03:45.000Z"
+      },
+      "down": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "task": "task-gen-1",
+          "spot": true,
+          "startedAt": "2026-10-18T00:00:11.000Z",
+          "stoppedAt": "2026-10-18T00:04:12.000Z",
+          "stoppedBecause": "finished",
+          "stopDetail": null,
+          "toldToStopAt": null,
+          "stoppedForRunEnd": false
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "app/exchanges.jsonl",
+      "size": 445,
+      "sha256": "5990b190b3040dd9dd8fd41964255b97d6dc9bb1121807fd3f9e523a1bb5976a"
+    },
+    {
+      "path": "app/jobs.jsonl",
+      "size": 498,
+      "sha256": "a801a566b68aeadcb61fef3b1cef871a45c5513e1f868efa9ca7d4c7fb97a92f"
+    },
+    {
+      "path": "app/requests.jsonl",
+      "size": 408,
+      "sha256": "b8f42ed29111d5d793932dfda14cce95e43911a97d8319d85ee44a67d691ad7c"
+    },
+    {
+      "path": "app/state.jsonl",
+      "size": 432,
+      "sha256": "4cfcf38c118c0b18c3fc3dad3600f40d89b6ac328dc0ebcbcf21ce8963039f8b"
+    },
+    {
+      "path": "database/performance-insights.jsonl",
+      "size": 412,
+      "sha256": "fc027916dc0b35240295aa8542b593166f7520aec1bd6eb3b6ea58ef99dc05f9"
+    },
+    {
+      "path": "events/aws-events.jsonl",
+      "size": 407,
+      "sha256": "b689f5f4e4b05a5b45d0716db15417a28db85deb76e8bd91aa0cda48db497038"
+    },
+    {
+      "path": "events/events.jsonl",
+      "size": 901,
+      "sha256": "c16ffb8eacbd855229bee304494ca4b26a979605a69f294cf55a603ec2573f54"
+    },
+    {
+      "path": "logs/api.log",
+      "size": 74,
+      "sha256": "72cfd6fd589d114170835d29f1f65451d2fb04914c723119e6650454a30f466e"
+    },
+    {
+      "path": "logs/generator-0-attempt-1.log",
+      "size": 77,
+      "sha256": "536844b982d9c1a9f496dc9a7fdbb075d1260415a2bd2971bdff465a0c0eecdd"
+    },
+    {
+      "path": "logs/generator-1-attempt-1.log",
+      "size": 77,
+      "sha256": "4a6caad5d42845f963c5c3de2dfc26d683c8629bb1383ce44f3e0d515caf79b4"
+    },
+    {
+      "path": "logs/worker.log",
+      "size": 40,
+      "sha256": "0243cfd3331da911ab5093f5ba48f5ee2cbd401b12dd3443c47761c2220391aa"
+    },
+    {
+      "path": "metrics/aws/cache.jsonl",
+      "size": 461,
+      "sha256": "56a1b7f4525342ba2051bd5008ceed1352a429ef5b61cad976cadd218255c1f2"
+    },
+    {
+      "path": "metrics/aws/database.jsonl",
+      "size": 522,
+      "sha256": "6659bf7543553419e5dc422014b906cd4eef535ce616c0641e86e049f420cfc6"
+    },
+    {
+      "path": "metrics/aws/ecs-cluster-app.jsonl",
+      "size": 257,
+      "sha256": "d5c86cb6be1b1f0b937f06d63c39d4073c4c5e39bba2e1ff8b4075705611b8ab"
+    },
+    {
+      "path": "metrics/aws/ecs-cluster-generator.jsonl",
+      "size": 612,
+      "sha256": "0ebe4e91971231c1eb74c4ab264e9ce8cd788df648b1d4c3961b68e051bba322"
+    },
+    {
+      "path": "metrics/aws/ecs-service-api.jsonl",
+      "size": 616,
+      "sha256": "7d0ea904ed00154ca2e2f0a98d5b245ce7848edf1522f509a62fcb933136ac01"
+    },
+    {
+      "path": "metrics/aws/ecs-service-worker.jsonl",
+      "size": 622,
+      "sha256": "2f07e25b2df66a6b9b7ef5478dfcf97195aa15477c6dfd6fcaf8620bb0d0f739"
+    },
+    {
+      "path": "metrics/aws/fargate-usage.jsonl",
+      "size": 290,
+      "sha256": "7a6bfed203dee9611dabe1abb437482e4d54df90e7d3018df5763774d27b0b58"
+    },
+    {
+      "path": "metrics/aws/load-balancer.jsonl",
+      "size": 707,
+      "sha256": "f252a17aa8f68d87d65b0b581827286e7bf41358c4d6ad99cc6c8d338c28b3f1"
+    },
+    {
+      "path": "metrics/aws/target-group-AriAws-Origi-TGAPI.jsonl",
+      "size": 648,
+      "sha256": "74badc234d0bacfb626e1fd034ca5a65dfb680ca92f8fa4bc42d697537de63b4"
+    },
+    {
+      "path": "metrics/aws/target-group-AriAws-Origi-TGWEB.jsonl",
+      "size": 559,
+      "sha256": "c76b64b7102f8c54ff06c89118697d55668b4e7d67b1de2dfe466bc809fef3cc"
+    },
+    {
+      "path": "metrics/generator-0-attempt-1.report.json",
+      "size": 496,
+      "sha256": "9a5bbc4be78ceaf9487130c60fe6fa00712bf721cb0cb251c7b2b66f338921a7"
+    },
+    {
+      "path": "metrics/generator-0.state.jsonl",
+      "size": 3440,
+      "sha256": "997f81ec71d2a453ad7c3277652b7f1b576dc17ea241dae3b99d48161ae7c7ba"
+    },
+    {
+      "path": "metrics/generator-1-attempt-1.report.json",
+      "size": 496,
+      "sha256": "ad372061d19a8df37b64790b7a295a40201fdfaf3e88269ccdc181595d541657"
+    },
+    {
+      "path": "metrics/generator-1.state.jsonl",
+      "size": 3440,
+      "sha256": "43d467fe3e4700e3577049019196b45f44002f5ea024d0752038435a9fa225db"
+    },
+    {
+      "path": "requests/generator-0.jsonl",
+      "size": 430,
+      "sha256": "ffd4976ead11218ffa279e33fdce8b0a0dcbc1b119eb152a4aeb86510e7ccee1"
+    },
+    {
+      "path": "requests/generator-1.jsonl",
+      "size": 437,
+      "sha256": "f0b557dc248d1678f1e3114c7a177bc311e3b7a574d1db31b12a0ebf60eaf619"
+    }
+  ],
+  "seal": {
+    "status": "complete",
+    "sealedAt": "2026-10-18T00:06:00.000Z"
+  }
+}

@@ -9,6 +9,14 @@ export const PRICES = {
     perVcpuHour: 0.05056,
     perGbHour: 0.00553,
   },
+  /**
+   * Fargate Spot, about 70% under On-Demand. The price moves with demand,
+   * so it is rounded up to keep the guard from running low.
+   */
+  fargateSpot: {
+    perVcpuHour: 0.0165,
+    perGbHour: 0.0018,
+  },
   /** Single-AZ PostgreSQL, per instance-hour. */
   rdsInstancePerHour: {
     'm7g.large': 0.22,
@@ -29,6 +37,12 @@ export const PRICES = {
     perGbHour: 0.101,
     perMillionEcpu: 0.0028,
   },
+  /** The load network's way out: per gateway-hour, and per GB it carries in or out. */
+  natGateway: {
+    perHour: 0.059,
+    perGb: 0.059,
+  },
+  publicAddressPerHour: 0.005,
   bastionPerHour: 0.0066,
   egressPerGb: 0.114,
   logsIngestPerGb: 0.7,

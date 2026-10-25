@@ -18,14 +18,6 @@ main() {
   done
   [[ "$found" == 1 ]] || info "nothing left behind in AWS"
 
-  local group
-  if stack_exists "$APP_STACK"; then
-    group="$(origin_security_group)"
-    if [[ -n "$group" && -n "$(direct_path_rules "$group")" ]]; then
-      info "leftover: the direct path is still open on $group (run: aws-prod load --close)"
-    fi
-  fi
-
   local zone record content
   zone="$(cloudflare_zone_id)"
   record="$(cloudflare_api "/zones/$zone/dns_records?name=$HOSTNAME_FQDN" | jq -c '.result[0] // empty')"
@@ -47,6 +39,7 @@ still_there() { # <arn>
   local arn="$1" id="${1##*/}" state path
   case "$arn" in
     *:ecs:*:task-definition/*) return 1 ;; # deregistered, never deleted, free
+    *:logs:*:log-group:*) return 1 ;;      # kept a month after its stack on purpose, then expires
     *:ecs:*:cluster/*)
       state="$(aws ecs describe-clusters --clusters "$arn" --query 'clusters[0].status' --output text 2>/dev/null)"
       [[ "$state" == ACTIVE || "$state" == PROVISIONING ]] ;;
@@ -63,6 +56,11 @@ still_there() { # <arn>
       state="$(aws ec2 describe-vpc-endpoints --vpc-endpoint-ids "$id" \
         --query 'VpcEndpoints[0].State' --output text 2>/dev/null)"
       [[ -n "$state" && "$state" != None && "${state,,}" != deleted ]] ;;
+    *:ec2:*:natgateway/*)
+      state="$(aws ec2 describe-nat-gateways --nat-gateway-ids "$id" \
+        --query 'NatGateways[0].State' --output text 2>/dev/null)"
+      [[ -n "$state" && "$state" != None && "$state" != deleted ]] ;;
+    *:ec2:*:elastic-ip/*) aws ec2 describe-addresses --allocation-ids "$id" >/dev/null 2>&1 ;;
     *:ec2:*:vpc-flow-log/*)
       [[ "$(aws ec2 describe-flow-logs --flow-log-ids "$id" --query 'length(FlowLogs)' --output text 2>/dev/null)" == 1 ]] ;;
     *:ec2:*:subnet/*) aws ec2 describe-subnets --subnet-ids "$id" >/dev/null 2>&1 ;;

@@ -1,0 +1,2 @@
+{"userId":"user-0","trigger":"submit","arrivedAt":"2026-10-15T00:00:06.005Z","verdict":"muted","verdictAfterMs":20,"firstTokenAfterMs":25,"endedAfterMs":40,"outcome":"completed","errorCode":null,"assistantMessageId":"m-0"}
+{"userId":"user-1","trigger":"submit","arrivedAt":"2026-10-15T00:00:16.005Z","verdict":"muted","verdictAfterMs":21,"firstTokenAfterMs":26,"endedAfterMs":41,"outcome":"completed","errorCode":null,"assistantMessageId":"m-1"}

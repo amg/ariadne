@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const FILES = ['Dockerfile.backend', 'Dockerfile.frontend'].filter((f) =>
+const FILES = ['Dockerfile.backend', 'Dockerfile.frontend', 'load/Dockerfile'].filter((f) =>
   existsSync(join(ROOT, f)),
 );
 

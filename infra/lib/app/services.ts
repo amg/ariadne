@@ -9,12 +9,12 @@ import {
   PORTS,
 } from '../../config/names.ts';
 import type { Step } from '../../config/steps.ts';
-import type { CoreResources } from '../core/coreStack.ts';
+import type { CoreResources } from '../types/core.ts';
 import { AppService } from './appService.ts';
 import type { Cache } from './cache.ts';
 import type { Database } from './database.ts';
 
-export type ServicesProps = {
+type ServicesProps = {
   cluster: ecs.ICluster;
   step: Step;
   imageTag: string;
@@ -46,6 +46,7 @@ export class Services extends Construct {
       cluster: props.cluster,
       image: authCoreImage(props.core),
       size: step.services.auth,
+      deploy: step.deploy,
       port: PORTS.auth,
       discoveryName: INTERNAL_NAMES.auth,
       environment: {
@@ -65,6 +66,7 @@ export class Services extends Construct {
       cluster: props.cluster,
       image: image('backend'),
       size: step.services.mock,
+      deploy: step.deploy,
       port: PORTS.mock,
       discoveryName: INTERNAL_NAMES.mock,
       command: ['npx', 'tsx', 'mock/server.ts'],
@@ -77,20 +79,27 @@ export class Services extends Construct {
       cluster: props.cluster,
       image: image('backend'),
       size: step.services.api,
+      deploy: step.deploy,
       port: PORTS.api,
       // Migrations hold a lock, so tasks starting together apply them once.
       command: ['sh', '-c', 'npm run migrate && exec node dist/server.aws.js'],
       environment: backend.environment,
       secrets: backend.secrets,
+      systemControls: [PUSH_STREAM_GIVE_UP],
     });
 
     this.worker = new AppService(this, 'Worker', {
       cluster: props.cluster,
       image: image('backend'),
       size: step.services.worker,
+      deploy: step.deploy,
       // No port: worker processes queue jobs, doesn't accept HTTP connections
       command: ['node', 'dist/worker.js'],
-      environment: { ...backend.environment, PROCESS_ROLE: 'worker' },
+      environment: {
+        ...backend.environment,
+        PROCESS_ROLE: 'worker',
+        ...jobConcurrencySetting(step.services.worker.jobConcurrency),
+      },
       secrets: backend.secrets,
     });
 
@@ -98,6 +107,7 @@ export class Services extends Construct {
       cluster: props.cluster,
       image: image('web'),
       size: step.services.web,
+      deploy: step.deploy,
       port: PORTS.web,
     });
 
@@ -111,9 +121,24 @@ export class Services extends Construct {
   }
 }
 
+function jobConcurrencySetting(jobConcurrency: number | undefined): Record<string, string> {
+  return jobConcurrency === undefined ? {} : { WORKER_JOB_CONCURRENCY: String(jobConcurrency) };
+}
+
 function authCoreImage(core: CoreResources): ecs.ContainerImage {
   return ecs.ContainerImage.fromEcrRepository(core.repositories.auth, AUTH_CORE_TAG);
 }
+
+/**
+ * The API gives up on a connection whose far end has stopped acknowledging
+ * what it sends after about 100 s, instead of the platform's default of
+ * about 15 minutes. A push stream to a tab that is gone then closes, and
+ * stops being counted as open.
+ */
+const PUSH_STREAM_GIVE_UP: ecs.SystemControl = {
+  namespace: 'net.ipv4.tcp_retries2',
+  value: '8',
+};
 
 /** What the API and the worker both read: the same backend, configured once. */
 function backendSettings(props: ServicesProps): {
@@ -142,6 +167,10 @@ function backendSettings(props: ServicesProps): {
       GATE_WAIT_MS: '10000',
       HANDOVER_WAIT_MS: '10000',
       THREAD_ANALYSIS_MODE: 'heuristic',
+      // Each app record also publishes its figures as metrics.
+      PUBLISH_METRICS: 'true',
+      // Often enough for a queue-wait signal with a 250 ms target.
+      STATE_LOG_INTERVAL_SECONDS: '5',
       FEATURE_MEMORY: 'true',
       // High enough never to refuse under mocked inference, while keeping
       // the budget check on the measured path.

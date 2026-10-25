@@ -1,0 +1,6 @@
+{"kind":"run-started","at":"2026-10-18T00:00:00.000Z"}
+{"kind":"generator-launched","at":"2026-10-18T00:00:10.000Z","generator":0,"attempt":1,"firstUser":0,"userCount":4,"task":"task-gen-0","spot":true,"planned":{"rampEndsAt":"2026-10-18T00:00:45.000Z","holdEndsAt":"2026-10-18T00:03:45.000Z"}}
+{"kind":"generator-launched","at":"2026-10-18T00:00:11.000Z","generator":1,"attempt":1,"firstUser":4,"userCount":4,"task":"task-gen-1","spot":true,"planned":{"rampEndsAt":"2026-10-18T00:00:45.000Z","holdEndsAt":"2026-10-18T00:03:45.000Z"}}
+{"kind":"generator-stopped","at":"2026-10-18T00:04:10.000Z","generator":0,"attempt":1,"reason":"finished","detail":null,"replacedByAttempt":null}
+{"kind":"generator-stopped","at":"2026-10-18T00:04:12.000Z","generator":1,"attempt":1,"reason":"finished","detail":null,"replacedByAttempt":null}
+{"kind":"run-ended","at":"2026-10-18T00:04:30.000Z","outcome":"finished"}

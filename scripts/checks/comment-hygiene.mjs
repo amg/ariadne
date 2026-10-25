@@ -29,8 +29,12 @@ const SCAN_DIRS = [
   'backend/smoke',
   'backend/test',
   'frontend/src',
+  'infra/bin',
+  'infra/config',
+  'infra/lib',
   'lib/api',
   'lib/metrics',
+  'load/src',
   'scripts/checks',
 ].map((d) => join(ROOT, d));
 

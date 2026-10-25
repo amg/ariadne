@@ -7,9 +7,11 @@ import { LoadStack } from '../lib/load/loadStack.ts';
 
 /**
  * The aws-prod CDK app: the core, app and load stacks. The app synthesizes
- * nothing without a step (`-c step=<name> -c imageTag=<tag>`); core is
- * step-sized only so the app has a shape to synthesize, and its deploy
- * touches the core stack alone.
+ * nothing without a step (`-c step=<name> -c imageTag=<tag>`), and a step
+ * that restores the seed also needs `-c seedSnapshot=<snapshot id>`. The
+ * generators run the app's tag unless `-c loadImageTag=<tag>` names another.
+ * Core is step-sized only so the app has a shape to synthesize, and its
+ * deploy touches the core stack alone.
  */
 const app = new App();
 
@@ -24,18 +26,36 @@ if (typeof stepName !== 'string') {
 const imageTag: unknown = app.node.tryGetContext('imageTag');
 if (typeof imageTag !== 'string') throw new Error('Pass -c imageTag=<tag> along with the step');
 
-/** Only the load command passes it, for a run on the direct path. */
+const loadImageTagContext: unknown = app.node.tryGetContext('loadImageTag');
+const loadImageTag = typeof loadImageTagContext === 'string' ? loadImageTagContext : imageTag;
+
+const seedSnapshot: unknown = app.node.tryGetContext('seedSnapshot');
+
+/** Only the load command passes these, both together, for a run on the direct path. */
 const originAddress: unknown = app.node.tryGetContext('originAddress');
+const originSecurityGroup: unknown = app.node.tryGetContext('originSecurityGroup');
+if ((typeof originAddress === 'string') !== (typeof originSecurityGroup === 'string')) {
+  throw new Error('Pass -c originAddress and -c originSecurityGroup together, or neither');
+}
 
 const step = stepNamed(stepName);
 const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: REGION };
 
 const core = new CoreStack(app, STACKS.core, { env });
-new AppStack(app, STACKS.app, { env, step, imageTag, core: core.resources });
-new LoadStack(app, STACKS.load, {
+new AppStack(app, STACKS.app, {
   env,
   step,
   imageTag,
+  seedSnapshot: typeof seedSnapshot === 'string' && seedSnapshot !== '' ? seedSnapshot : null,
   core: core.resources,
-  originAddress: typeof originAddress === 'string' ? originAddress : undefined,
+});
+new LoadStack(app, STACKS.load, {
+  env,
+  step,
+  loadImageTag,
+  core: core.resources,
+  direct:
+    typeof originAddress === 'string' && typeof originSecurityGroup === 'string'
+      ? { originAddress, originSecurityGroup }
+      : undefined,
 });

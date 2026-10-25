@@ -2,9 +2,8 @@ import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import type * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
-import { DATABASE, PARAMETERS } from '../../config/names.ts';
+import { DATABASE } from '../../config/names.ts';
 import type { Step } from '../../config/steps.ts';
 import { type Network, SUBNETS } from './network.ts';
 
@@ -21,9 +20,13 @@ export class Database extends Construct {
   readonly secret: secretsmanager.ISecret;
   readonly connections: ec2.Connections;
 
-  constructor(scope: Construct, id: string, props: { network: Network; step: Step }) {
+  constructor(
+    scope: Construct,
+    id: string,
+    props: { network: Network; step: Step; seedSnapshot: string | null },
+  ) {
     super(scope, id);
-    const { network, step } = props;
+    const { network, step, seedSnapshot } = props;
 
     const shape = {
       engine: ENGINE,
@@ -54,10 +57,7 @@ export class Database extends Construct {
           })
         : new rds.DatabaseInstanceFromSnapshot(this, 'Instance', {
             ...shape,
-            snapshotIdentifier: ssm.StringParameter.valueForStringParameter(
-              this,
-              PARAMETERS.seedSnapshotId,
-            ),
+            snapshotIdentifier: requiredSeed(step, seedSnapshot),
             credentials: rds.SnapshotCredentials.fromGeneratedSecret(DATABASE.masterUser),
           });
 
@@ -67,4 +67,11 @@ export class Database extends Construct {
     this.secret = instance.secret;
     this.connections = instance.connections;
   }
+}
+
+function requiredSeed(step: Step, seedSnapshot: string | null) {
+  if (seedSnapshot === null) {
+    throw new Error(`${step.name} restores the seed: pass -c seedSnapshot=<snapshot id>`);
+  }
+  return seedSnapshot;
 }

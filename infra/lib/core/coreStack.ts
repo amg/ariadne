@@ -11,18 +11,9 @@ import {
   vaultBucketName,
 } from '../../config/names.ts';
 import { markLifetime } from '../lifetime.ts';
+import type { CoreResources } from '../types/core.ts';
 import { LoadDashboard } from './loadDashboard.ts';
 import { SafetyNet } from './safetyNet.ts';
-
-/** What the app and load stacks take from core. */
-export type CoreResources = {
-  vault: s3.IBucket;
-  repositories: Record<ImageName, ecr.IRepository>;
-  /** Shared by the backend and the auth core. */
-  authApiKey: secretsmanager.ISecret;
-  /** The one password every synthetic account signs in with. */
-  populationPassword: secretsmanager.ISecret;
-};
 
 /**
  * What aws-prod keeps while it is down: a few dollars a month. Data in the

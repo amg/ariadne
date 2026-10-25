@@ -1,0 +1,2 @@
+{"namespace":"AWS/ElastiCache","name":"TotalCmdsCount","dimensions":{"clusterId":"ari-aws"},"statistic":"Sum","periodSeconds":60,"points":[{"at":"2026-10-18T00:01:00.000Z","value":160},{"at":"2026-10-18T00:02:00.000Z","value":200}]}
+{"namespace":"AWS/ElastiCache","name":"GetTypeCmds","dimensions":{"clusterId":"ari-aws"},"statistic":"Sum","periodSeconds":60,"points":[{"at":"2026-10-18T00:01:00.000Z","value":50},{"at":"2026-10-18T00:02:00.000Z","value":60}]}

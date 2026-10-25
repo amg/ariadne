@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["infra/cdk.out", "infra/node_modules", "infra/.runs", "**/*.generated.ts"]
+    "ignore": [
+      "infra/cdk.out",
+      "infra/node_modules",
+      "infra/.runs",
+      "**/rebuild/fixtures",
+      "**/*.generated.ts"
+    ]
   },
   "organizeImports": {
     "enabled": true

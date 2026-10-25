@@ -1,7 +1,7 @@
 {
   "name": "alex-chat-bot",
   "private": true,
-  "workspaces": ["lib", "frontend", "backend"],
+  "workspaces": ["lib", "frontend", "backend", "load"],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cross-env FORCE_COLOR=1 npm run dev --workspace=backend",
@@ -17,7 +17,7 @@
     "db:types": "npm run db:types --workspace=backend",
     "queue:retry-failed": "npm run queue:retry-failed --workspace=backend",
     "audit:deps": "knip",
-    "audit:boundaries": "depcruise lib/api frontend/src backend/src backend/app backend/queue",
+    "audit:boundaries": "depcruise lib/api frontend/src backend/src backend/app backend/queue load/src",
     "audit:env": "node scripts/checks/env-sync.mjs && npm run validate:env --workspace=backend",
     "audit:docker": "node scripts/checks/docker-lint.mjs",
     "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:comments && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",

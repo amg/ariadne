@@ -1,0 +1,1 @@
+{"namespace":"AWS/Usage","name":"ResourceCount","dimensions":{"Type":"Resource","Resource":"vCPU","Service":"Fargate","Class":"Standard/OnDemand"},"statistic":"Maximum","periodSeconds":60,"points":[{"at":"2026-10-18T00:01:00.000Z","value":99},{"at":"2026-10-18T00:02:00.000Z","value":99}]}

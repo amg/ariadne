@@ -10,18 +10,40 @@ registry() { echo "$(account_id).dkr.ecr.$REGION.amazonaws.com"; }
 
 build_and_push_images() { # <tag>
   local tag="$1"
-  IMAGES_LOG="$INFRA_DIR/.runs/images-$tag.log"
-  mkdir -p "$(dirname "$IMAGES_LOG")"
-  step "Images: $tag"
-  info "build log: tail -f $IMAGES_LOG"
-  aws ecr get-login-password |
-    logged docker login --username AWS --password-stdin "$(registry)"
-
+  open_image_build "$tag"
   build_layered backend "$REPO_DIR/Dockerfile.backend" "$tag"
   build_layered web "$REPO_DIR/Dockerfile.frontend" "$tag"
   build_and_push tools "$INFRA_DIR/images/tools.Dockerfile" "$INFRA_DIR/images" "$tag"
-  build_and_push load "$INFRA_DIR/load/Dockerfile" "$INFRA_DIR/load" "$tag"
+  build_load_image "$tag"
   mirror_auth_core
+}
+
+# Builds and pushes the load generators' image alone, under its own tag, and
+# records it as the one the next run's generators use.
+build_and_push_load_image() { # <tag>
+  open_image_build "$1"
+  build_load_image "$1"
+}
+
+# The load image under the tag, and that tag as the one the generators run.
+build_load_image() { # <tag>
+  build_and_push load "$REPO_DIR/load/Dockerfile" "$REPO_DIR" "$1"
+  put_parameter "$PARAM_LOAD_IMAGE_TAG" String "$1"
+}
+
+# The tag the generators run: the raise's own until a load image replaces it.
+load_image_tag() { # <the raise's image tag>
+  parameter_or "$PARAM_LOAD_IMAGE_TAG" "$1"
+}
+
+# Opens the build log and signs in to the registry, before any image is built.
+open_image_build() { # <tag>
+  IMAGES_LOG="$INFRA_DIR/.runs/images-$1.log"
+  mkdir -p "$(dirname "$IMAGES_LOG")"
+  step "Images: $1"
+  info "build log: tail -f $IMAGES_LOG"
+  aws ecr get-login-password |
+    logged docker login --username AWS --password-stdin "$(registry)"
 }
 
 # Runs a command with its output in the build log; on failure shows the

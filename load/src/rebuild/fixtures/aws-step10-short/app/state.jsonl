@@ -1,0 +1,4 @@
+{"at":"2026-10-18T00:00:05.000Z","pushStreamsOpen":4,"oldestJobWaitMs":null}
+{"at":"2026-10-18T00:00:06.000Z","pushStreamsOpen":null,"oldestJobWaitMs":9}
+{"copy":"worker-1","at":"2026-10-18T00:00:07.000Z","pushStreamsOpen":null,"oldestJobWaitMs":3,"eventLoopDelayP99Ms":42.5,"heapUsedBytes":104857600,"residentBytes":314572800,"dbConnectionsInUse":6,"dbConnectionsWaiting":1,"workerSlotsBusy":4,"workerSlots":4,"pushBusFailures":2}
+{"copy":"7f3a90c2e1","at":"2026-10-18T00:00:08.000Z","pushStreamsOpen":9000,"oldestJobWaitMs":null,"eventLoopDelayP99Ms":12,"heapUsedBytes":52428800,"residentBytes":157286400,"dbConnectionsInUse":3,"dbConnectionsWaiting":159,"workerSlotsBusy":null,"workerSlots":null,"pushBusFailures":0}

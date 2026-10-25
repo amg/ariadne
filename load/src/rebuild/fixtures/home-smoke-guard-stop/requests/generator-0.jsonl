@@ -1,0 +1,2 @@
+{"run":"20261015T010000Z-home-smoke-mock","generator":0,"attempt":1,"user":0,"kind":"signin","startedAt":"2026-10-15T00:00:03.000Z","firstByteMs":150,"totalMs":155,"status":200,"outcome":"ok","errorCode":null}
+{"run":"20261015T010000Z-home-smoke-mock","generator":0,"attempt":1,"user":0,"kind":"chat","startedAt":"2026-10-15T00:00:06.000Z","firstByteMs":30,"totalMs":42,"status":200,"outcome":"streamed","errorCode":null}
