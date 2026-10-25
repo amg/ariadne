@@ -1,5 +1,5 @@
 ---
-description: Thread topic drift is detected on two timescales, offline scoring of stored Turns and a live gate on each arrival.
+description: Thread topic drift is detected on two timescales, completed Turns folding into each segment's topic state and a live gate judging each arrival against it.
 ---
 
 # ADR 0006: Thread topic drift detection
@@ -30,10 +30,10 @@ which restricts the information available at that point:
 Drift detection works on two timescales, both built on the same stored
 embeddings:
 
-### Offline analysis — scoring a stored thread
+### Topic state — folding completed Turns
 
-Finds where the topic changed in a thread that already happened (or so
-far), and scores every turn, for reports and calibration.
+Tracks where the conversation's current topic sits, so every arrival
+has something to be judged against.
 
 - **The Turn is the unit of measurement.** A single message carries no
   topic of its own, so every complete Turn — user Message and assistant
@@ -41,25 +41,18 @@ far), and scores every turn, for reports and calibration.
 - **Embeddings persist per model.** Vectors from different models live
   in different spaces and therefore cannot be compared.
 - **Topic state is a rolling centroid.** Each Topic segment carries a
-  Gravity point: the centroid of its turns so far. A Turn is scored
-  against the Gravity point *before* it joins the segment. A Turn that
-  crosses the threshold is a Boundary turn: it closes the segment and
-  starts the next one from its own embedding. Comparison is never
-  against the single previous turn — it is against the centroid, and
-  that is what tells a continuation from a new topic.
-- **An Anchor records how far the thread has moved from its opening
-  topic.** The Anchor measures distance only; it never classifies a
-  turn. So it can show a return to the opening topic without flagging
-  every turn after the first departure forever.
-- **Slow drift appears as a report signal.** The same sustained-rise
-  accumulator the live lane uses as its second channel runs over the
-  stored series, so a topic that drifts away gradually, turn by turn,
-  shows in the report.
-- **Segment merging is report advice only.** If a topic leaves and
-  comes back, the split correctly produces two segments; the report
-  flags a possible revisit for the reader. Segments are never joined
-  automatically: deciding that two segments are "the same topic again"
-  is beyond what embedding distances can do.
+  Gravity point: the centroid of its folded Turns. A Turn folds in only
+  after its arrival has been judged, and an arrival that fired starts
+  the next segment from its own Turn. Comparison is never against the
+  single previous turn — it is against the centroid, and that is what
+  tells a continuation from a new topic.
+- **Each segment keeps an Anchor where it started.** The Gravity point
+  follows a topic that wanders slowly, so it cannot see that wander.
+  The Anchor stays at the segment's opening Turns, and the slow channel
+  measures against it.
+- **Segments are never merged.** If a topic leaves and comes back, the
+  split correctly produces two segments. Deciding that two segments are
+  "the same topic again" is beyond what embedding distances can do.
 
 ### Live detection — the arriving user message
 
@@ -95,8 +88,8 @@ to offer a choice.
   topic.
 - **The live gate is advisory, never blocking.** The detection is
   fallible, so it must not silently decide for the user, and its
-  mistakes stay visible: disagreements between the live verdict and
-  the offline record are kept as calibration material.
+  mistakes stay visible: every verdict is stored with its reading and
+  the criterion it was judged against, and the Analysis tab shows them.
 - **The live lane persists as it runs and never recomputes stored
   results.** Refill always moves forward: a thread that predates the
   feature, or the tail an edit invalidated, is rebuilt from where the
@@ -138,15 +131,18 @@ The math — formulas, parameters, numerical guardrails — lives in
 - **Prospective gate without rewrites** — context-dependent messages
   produced an unreadable drift signal regardless of topic; hence the
   expansion step.
-- **Automatic segment merging (offline reports)** — the analyzer
-  stitching revisited segments back together; "the same topic again"
-  is beyond what embedding distances can decide, so merging stays
-  flag-only, even offline.
+- **Automatic segment merging** — stitching revisited segments back
+  together; "the same topic again" is beyond what embedding distances
+  can decide, so segments stay split.
+- **An offline analyzer beside the live gate** — a script re-scored
+  stored threads into HTML reports for calibration. It copied the live
+  judgment, and the copy drifted until the reports no longer matched
+  what users saw. The Analysis tab now reads the live chain instead.
 - **Waiting for confirmation as *the* live verdict** — a trend
   detector alone would decide one turn late by construction, since a
   single message can flip the topic. The accumulator survives as the
   secondary slow-drift channel (it fires only when the immediate
-  channel stays silent) and as the offline signal.
+  channel stays silent).
 - **Rebuilding the gate's state from the first arrival on every
   judgment** — correct, but worker time per arrival grew with the
   thread's length, as the load runs measured; hence the checkpoints.
@@ -155,17 +151,17 @@ The math — formulas, parameters, numerical guardrails — lives in
 
 - No global drift threshold to maintain: the live verdict is judged
   against the thread's own state, message by message; a silent
-  accumulator behind it covers gradual drift; the offline analysis
-  keeps a segment threshold, taken from calibration data.
+  accumulator behind it covers gradual drift.
 - The live gate costs one embed per arriving message — a small-model
   rewrite only for follow-ups — and its signals persist alongside it,
   so arrival readings can never leak into the fold's data.
-- Re-runs with different numbers reclassify threads for free — all
-  embeddings are stored.
+- Calibration works from the live chain's stored readings, because
+  nothing re-scores a thread after the fact.
 - A judgment costs the same whatever the thread's length. The price is
   checkpoint upkeep: the old ones are pruned, and a rebuild runs
   whenever the kept ones go stale.
 - Limits, each with a noted repair path (FUTURE-IMPROVEMENTS): a
-  slowly drifting topic may never cross the threshold, because the
-  centroid follows it (the Anchor chart is the compensating signal);
-  and one-liner turns embed close to generic chatter.
+  slowly drifting topic may never cross the immediate criterion,
+  because the centroid follows it (the slow channel against the
+  segment's Anchor is the compensating signal); and one-liner turns
+  embed close to generic chatter.

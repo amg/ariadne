@@ -1,4 +1,4 @@
-import type { DbExecutor, Message } from '@db/types';
+import type { DbExecutor } from '@db/types';
 
 /**
  * Opens a Thread's running Exchange: an empty assistant row marked
@@ -10,7 +10,7 @@ import type { DbExecutor, Message } from '@db/types';
 export async function insertPendingReplyOrNull(
   { threadId }: { threadId: string },
   executor: DbExecutor,
-): Promise<Message | null> {
+) {
   const row = await executor
     .insertInto('chat.messages')
     .values({ threadId, role: 'assistant', content: '', exchangeStatus: 'pending' })

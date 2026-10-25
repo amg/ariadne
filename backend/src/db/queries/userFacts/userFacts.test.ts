@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import type { FactCategory } from '@db/types';
 import { deleteUserFact } from '@queries/userFacts/deleteUserFact';
-import { findCurrentUserFactOrNull } from '@queries/userFacts/findCurrentUserFact';
+import { findCurrentUserFact } from '@queries/userFacts/findCurrentUserFact';
 import { insertUserFact } from '@queries/userFacts/insertUserFact';
 import { listAllUserFacts } from '@queries/userFacts/listAllUserFacts';
 import { updateUserFact } from '@queries/userFacts/updateUserFact';
@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 useTestDb();
 
-async function createUser(userId: string): Promise<void> {
+async function createUser(userId: string) {
   await insertUserIfNotExists({ id: userId });
 }
 
@@ -116,7 +116,7 @@ describe('listAllUserFacts', () => {
     const userId = randomUUID();
     await createUser(userId);
 
-    const fact1 = await createFact({ userId, content: 'Visible fact', suppressed: false });
+    await createFact({ userId, content: 'Visible fact', suppressed: false });
     const fact2 = await createFact({ userId, content: 'Suppressed fact', suppressed: true });
 
     // Manually set suppressed since insertUserFact doesn't support it
@@ -135,7 +135,7 @@ describe('listAllUserFacts', () => {
     const userId = randomUUID();
     await createUser(userId);
 
-    const fact = await createFact({ userId, content: 'Valid fact' });
+    await createFact({ userId, content: 'Valid fact' });
     const invalidFact = await createFact({ userId, content: 'Invalidated fact' });
     await db
       .updateTable('memory.userFacts')
@@ -236,7 +236,7 @@ describe('updateUserFact - replacement', () => {
   });
 });
 
-describe('findCurrentUserFactOrNull', () => {
+describe('findCurrentUserFact', () => {
   it("finds only the user's own current Fact", async () => {
     const userId = randomUUID();
     const otherUserId = randomUUID();
@@ -244,15 +244,15 @@ describe('findCurrentUserFactOrNull', () => {
     await createUser(otherUserId);
     const fact = await createFact({ userId, content: 'Current' });
 
-    expect((await findCurrentUserFactOrNull({ factId: fact.id, userId }))?.content).toBe('Current');
-    expect(await findCurrentUserFactOrNull({ factId: fact.id, userId: otherUserId })).toBeNull();
+    expect((await findCurrentUserFact({ factId: fact.id, userId }))?.content).toBe('Current');
+    expect(await findCurrentUserFact({ factId: fact.id, userId: otherUserId })).toBeNull();
 
     await db
       .updateTable('memory.userFacts')
       .set({ invalidAt: new Date() })
       .where('id', '=', fact.id)
       .execute();
-    expect(await findCurrentUserFactOrNull({ factId: fact.id, userId })).toBeNull();
+    expect(await findCurrentUserFact({ factId: fact.id, userId })).toBeNull();
   });
 });
 

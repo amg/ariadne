@@ -29,7 +29,7 @@ const CATEGORY_DISPLAYS: Record<FactCategory, CategoryDisplay> = {
 };
 
 /** Icon and readable name for a Fact category; unknown categories get a generic tag. */
-export function categoryDisplay(category: string): CategoryDisplay {
+export function categoryDisplay(category: string) {
   return isFactCategory(category) ? CATEGORY_DISPLAYS[category] : { Icon: Tag, label: category };
 }
 

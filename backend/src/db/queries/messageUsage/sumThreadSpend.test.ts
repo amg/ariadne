@@ -19,14 +19,14 @@ const ZERO = {
   memory: '0.0000000000',
 };
 
-async function createThread(): Promise<{ threadId: string }> {
+async function createThread() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ userId, title: 'Spend thread' });
   return { threadId: thread.id };
 }
 
-async function seedFullSpend(threadId: string): Promise<void> {
+async function seedFullSpend(threadId: string) {
   const user = await insertMessage({ threadId, role: 'user', content: 'hello' });
   const assistant = await insertMessage({ threadId, role: 'assistant', content: 'hi' });
 

@@ -1,0 +1,1 @@
+{"namespace":"ECS/ContainerInsights","name":"CpuUtilized","dimensions":{"ClusterName":"AriAwsApp-Cluster-APP1"},"statistic":"Average","periodSeconds":60,"points":[{"at":"2026-10-18T00:01:00.000Z","value":320},{"at":"2026-10-18T00:02:00.000Z","value":340}]}

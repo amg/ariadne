@@ -14,7 +14,7 @@ import { type Kysely, sql } from 'kysely';
  * cost columns drop from `message_embeddings`. The embedding step's
  * spend keeps riding the arrival row as `embedding_cost_usd`.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('message_usage')
     .addColumn('estimated', 'boolean', (col) => col.notNull().defaultTo(false))
@@ -67,7 +67,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema
     .alterTable('message_embeddings')
     .addColumn('rewrite_cost_usd', sql`numeric(14,10)`)

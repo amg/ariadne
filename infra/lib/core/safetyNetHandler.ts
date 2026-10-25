@@ -2,7 +2,6 @@ import {
   CloudFormationClient,
   DeleteStackCommand,
   DescribeStacksCommand,
-  type Stack,
 } from '@aws-sdk/client-cloudformation';
 
 /** A stack the safety net watches, and how long it may live after it was created. */
@@ -11,7 +10,7 @@ export type StackLimit = { stackName: string; maxAgeMinutes: number };
 const cloudFormation = new CloudFormationClient({});
 
 /** Deletes every watched stack that has outlived its limit; stacks already gone are skipped. */
-export async function handler(): Promise<void> {
+export async function handler() {
   // Written by the construct that deploys this function, from typed values.
   const limits = JSON.parse(process.env.STACK_LIMITS ?? '[]') as StackLimit[];
   for (const limit of limits) {
@@ -19,7 +18,7 @@ export async function handler(): Promise<void> {
   }
 }
 
-async function deleteIfExpired(limit: StackLimit, now: Date): Promise<void> {
+async function deleteIfExpired(limit: StackLimit, now: Date) {
   const stack = await liveStackOrNull(limit.stackName);
   if (stack?.CreationTime === undefined) return;
 
@@ -30,7 +29,7 @@ async function deleteIfExpired(limit: StackLimit, now: Date): Promise<void> {
   await cloudFormation.send(new DeleteStackCommand({ StackName: limit.stackName }));
 }
 
-async function liveStackOrNull(stackName: string): Promise<Stack | null> {
+async function liveStackOrNull(stackName: string) {
   try {
     const { Stacks } = await cloudFormation.send(
       new DescribeStacksCommand({ StackName: stackName }),

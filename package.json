@@ -1,7 +1,7 @@
 {
   "name": "alex-chat-bot",
   "private": true,
-  "workspaces": ["frontend", "backend"],
+  "workspaces": ["lib", "frontend", "backend", "load"],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cross-env FORCE_COLOR=1 npm run dev --workspace=backend",
@@ -11,17 +11,19 @@
     "lint:fix": "biome check --write .",
     "enforce-cn": "node scripts/enforce-cn-rule.mjs",
     "test": "npm run test --workspaces --if-present",
-    "analyze:thread": "npm run analyze:thread --workspace=backend --",
     "build:frontend": "npm run build --workspace=frontend",
     "migrate": "npm run migrate --workspace=backend",
     "migrate:prod": "npm run migrate:prod --workspace=backend",
+    "db:types": "npm run db:types --workspace=backend",
     "queue:retry-failed": "npm run queue:retry-failed --workspace=backend",
     "audit:deps": "knip",
-    "audit:boundaries": "depcruise frontend/src backend/src backend/app backend/queue",
+    "audit:boundaries": "depcruise lib/api frontend/src backend/src backend/app backend/queue load/src",
     "audit:env": "node scripts/checks/env-sync.mjs && npm run validate:env --workspace=backend",
     "audit:docker": "node scripts/checks/docker-lint.mjs",
-    "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:comments && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",
+    "checks": "npm run typecheck && npm run lint && npm run enforce-cn && npm run audit:comments && npm run audit:types && npm run audit:params && npm run audit:deps && npm run audit:boundaries && npm run audit:env && npm run audit:docker",
     "audit:comments": "node scripts/checks/comment-hygiene.mjs",
+    "audit:types": "node scripts/checks/type-exports.mjs",
+    "audit:params": "node scripts/checks/param-fields.mjs",
     "gate": "npm run checks && npm run test && npm run build:frontend",
     "prepare": "lefthook install"
   },
@@ -31,7 +33,9 @@
     "cross-env": "^10.1.0",
     "dependency-cruiser": "^18.3.1",
     "knip": "^6.35.1",
-    "lefthook": "^2.1.14"
+    "kysely-codegen": "^0.20.0",
+    "lefthook": "^2.1.14",
+    "typescript": "~6.0.2"
   },
   "dependencies": {
     "lucide-react": "^1.4.50"

@@ -10,7 +10,7 @@ type DeleteThreadProps = {
  * `ON DELETE CASCADE`. Returns true only when a row actually vanished;
  * unknown ids and foreign threads both yield false (no existence leakage).
  */
-export async function deleteThread({ userId, threadId }: DeleteThreadProps): Promise<boolean> {
+export async function deleteThread({ userId, threadId }: DeleteThreadProps) {
   const result = await db
     .deleteFrom('chat.threads')
     .where('id', '=', threadId)

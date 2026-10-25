@@ -1,0 +1,11 @@
+{"kind":"run-started","at":"2026-10-15T00:00:00.000Z"}
+{"kind":"process-started","at":"2026-10-15T00:00:01.600Z","name":"mock","task":"pid-200"}
+{"kind":"process-started","at":"2026-10-15T00:00:01.700Z","name":"backend","task":"pid-201"}
+{"kind":"generator-launched","at":"2026-10-15T00:00:02.000Z","generator":0,"attempt":1,"firstUser":0,"userCount":3,"task":"pid-202","spot":false,"planned":{"rampEndsAt":"2026-10-15T00:00:06.000Z","holdEndsAt":"2026-10-15T00:00:46.000Z"}}
+{"kind":"generator-stopped","at":"2026-10-15T00:00:47.000Z","generator":0,"attempt":1,"reason":"finished","detail":null,"replacedByAttempt":null}
+{"kind":"generator-launched","at":"2026-10-15T00:00:50.000Z","generator":1,"attempt":1,"firstUser":0,"userCount":6,"task":"pid-203","spot":false,"planned":{"rampEndsAt":"2026-10-15T00:00:54.000Z","holdEndsAt":"2026-10-15T00:01:54.000Z"}}
+{"kind":"guard-tripped","at":"2026-10-15T00:01:22.000Z","line":"first-byte-p95","observed":2750,"limit":2500,"message":"chat first byte p95 was 2750 ms, over the 2500 ms line"}
+{"kind":"generator-stopped","at":"2026-10-15T00:01:22.500Z","generator":1,"attempt":1,"reason":"guard","detail":"Stopped by the guard: chat first byte p95 was 2750 ms, over the 2500 ms line","replacedByAttempt":null}
+{"kind":"process-stopped","at":"2026-10-15T00:01:23.000Z","name":"mock"}
+{"kind":"process-stopped","at":"2026-10-15T00:01:23.000Z","name":"backend"}
+{"kind":"run-ended","at":"2026-10-15T00:01:23.000Z","outcome":"guard"}

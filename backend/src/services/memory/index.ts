@@ -14,7 +14,6 @@
  * the app should reach them.
  */
 export { readFacts } from './readFacts';
-export type { MemoryFeature, SegmentToCapture } from './memoryFeature';
 export {
   captureSegment,
   captureUnreadTurns,
@@ -27,5 +26,6 @@ export {
   renderedSeedOrNull,
   seedThread,
 } from './seed';
+
 export { editFactContent } from './editFact';
 export { factsNamedIn, namesInFact } from './factsNamedIn';

@@ -7,14 +7,13 @@
  * the arrivals already sit in.
  */
 export {
-  type StopTarget,
-  type Subscription,
   carryAcross,
   onStopRequested,
   publish,
   requestStop,
   subscribe,
 } from './bus';
+
 export { currentArrivalEvents } from './currentArrivalEvents';
-export type { ServerEvent } from './serverEvent';
 export { redisCarrier } from './redisCarrier';
+export { takeCarrierFailures } from './carrierFailures';

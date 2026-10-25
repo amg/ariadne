@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
+import { findJobByKey } from '@queries/queue/findJobByKey';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { THREAD_GENERATE_TITLE } from '@queue/tasks/threadGenerateTitleTask';
@@ -24,7 +24,7 @@ let app: FastifyInstance;
 
 beforeAll(async () => {
   app = Fastify({ logger: false });
-  await setupThreadsGenerateTitleRoute(app);
+  setupThreadsGenerateTitleRoute(app);
   await app.ready();
 });
 
@@ -46,8 +46,8 @@ function generateTitle(userId: string, threadId: string) {
   });
 }
 
-async function titlingQueuedFor(threadId: string): Promise<boolean> {
-  return (await findJobByKeyOrNull({ task: THREAD_GENERATE_TITLE, key: threadId })) !== null;
+async function titlingQueuedFor(threadId: string) {
+  return (await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId })) !== null;
 }
 
 describe('POST /api/threads/:id/generate-title', () => {
@@ -59,6 +59,15 @@ describe('POST /api/threads/:id/generate-title', () => {
 
     expect(response.statusCode).toBe(202);
     expect(await titlingQueuedFor(threadId)).toBe(true);
+  });
+
+  it('answers 400 for a malformed Thread id', async () => {
+    const userId = await freshUser();
+
+    const response = await generateTitle(userId, 'not-a-uuid');
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Invalid thread id' });
   });
 
   it('answers 404 and queues nothing for an unknown Thread', async () => {

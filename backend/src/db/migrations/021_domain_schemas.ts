@@ -17,7 +17,7 @@ const DOMAIN_TABLES = {
 
 const DOMAIN_SCHEMAS = Object.keys(DOMAIN_TABLES);
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   for (const schema of DOMAIN_SCHEMAS) {
     await db.schema.createSchema(schema).ifNotExists().execute();
   }
@@ -28,7 +28,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   for (const [schema, tables] of Object.entries(DOMAIN_TABLES)) {
     for (const table of tables) {
       await db.schema.alterTable(`${schema}.${table}`).setSchema('public').execute();

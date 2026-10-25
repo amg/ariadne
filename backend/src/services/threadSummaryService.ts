@@ -1,19 +1,20 @@
 import { env } from '@config/env';
 import { sumThreadSpend } from '@queries/messageUsage/sumThreadSpend';
-import type { MessageWithUsageRow } from '@queries/messages/listMessagesWithUsageByThread';
-import { listMessagesWithUsageByThread } from '@queries/messages/listMessagesWithUsageByThread';
+import { listMessageSpendByThread } from '@queries/messages/listMessageSpendByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { EMBEDDING_MODEL_ID } from './aiService/config';
-import { type ModelConfigRow, getModelConfig } from './modelConfigService';
+import { round10 } from './aiService/cost';
+import { getModelConfig } from './modelConfigService';
 
-/** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
-const round10 = (value: number): number => Number(value.toFixed(10));
+type MessageSpendRow = Awaited<ReturnType<typeof listMessageSpendByThread>>[number];
+
+type ModelConfigRow = NonNullable<Awaited<ReturnType<typeof getModelConfig>>>;
 
 /** A pipeline role a model serves in a thread's spend. */
-export type ThreadModelRole = 'chat' | 'embedding' | 'rewrite' | 'judge' | 'memory';
+type ThreadModelRole = 'chat' | 'embedding' | 'rewrite' | 'judge' | 'memory';
 
 /** Pricing for one model; null when the model has no known pricing. */
-export type ModelPricing = {
+type ModelPricing = {
   inputPricePerMillion: number | null;
   outputPricePerMillion: number | null;
   cachedPricePerMillion: number | null;
@@ -21,57 +22,10 @@ export type ModelPricing = {
 } | null;
 
 /** One model used by a thread, with every role it serves grouped together. */
-export interface ThreadModelInfo {
+interface ThreadModelInfo {
   modelId: string;
   roles: ThreadModelRole[];
   pricing: ModelPricing;
-}
-
-/** Aggregated thread statistics computed on-the-fly from message_usage. */
-export interface ThreadSummary {
-  threadId: string;
-  /** Live messages only: rows abandoned by Retry, Edit or Handover are left out. */
-  totalMessages: number;
-  userMessages: number;
-  assistantMessages: number;
-  totalCostUsd: string;
-  cachedCostUsd: string;
-  /**
-   * Composition of `totalCostUsd`: the chat exchanges' spend plus the
-   * analyzer pipeline's embedding, rewrite, and judge spend, plus the Fact
-   * capture spend.
-   */
-  costBreakdown: {
-    chat: string;
-    embedding: string;
-    rewrite: string;
-    judge: string;
-    memory: string;
-  };
-  totalTokens: {
-    prompt: number;
-    completion: number;
-    cached: number;
-    reasoning: number;
-    total: number;
-  };
-  primaryModel: string | null;
-  /**
-   * Every model the thread spent on, grouped by model id. The chat role
-   * carries the primary model; analyzer roles carry the current pipeline
-   * models and appear only when that category spent something.
-   */
-  models: ThreadModelInfo[];
-  /**
-   * The context the latest live Exchange filled, measured against that
-   * Exchange's model window; zero with no limit before any reply.
-   */
-  contextUsage: {
-    used: number;
-    limit: number | null;
-    percentage: number | null;
-  };
-  createdAt: string;
 }
 
 interface AggregatedStats {
@@ -90,7 +44,7 @@ interface AggregatedStats {
  * only the live rows the chat shows; spend and token totals cover every
  * row, abandoned ones included, since they report what the thread burned.
  */
-function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
+function aggregateStats(messages: MessageSpendRow[]) {
   const stats: AggregatedStats = {
     totalCost: 0,
     totalCached: 0,
@@ -121,18 +75,13 @@ function aggregateStats(messages: MessageWithUsageRow[]): AggregatedStats {
   return stats;
 }
 
-interface LatestReply {
-  model: string;
-  contextTokens: number;
-}
-
 /**
  * The newest live reply that carries usage, with the context it filled:
  * its prompt already holds the whole thread before it, so prompt plus
  * completion approximates what the next Exchange sends. Null when no
  * live reply has usage.
  */
-function latestLiveReplyOrNull(messages: MessageWithUsageRow[]): LatestReply | null {
+function latestLiveReplyOrNull(messages: MessageSpendRow[]) {
   const reply = messages.findLast(
     (msg) => msg.role === 'assistant' && !msg.abandoned && msg.model !== null,
   );
@@ -146,7 +95,7 @@ function latestLiveReplyOrNull(messages: MessageWithUsageRow[]): LatestReply | n
 /**
  * Finds the most frequently used model from counts.
  */
-function findPrimaryModel(modelCounts: Record<string, number>): string | null {
+function findPrimaryModel(modelCounts: Record<string, number>) {
   let primaryModel: string | null = null;
   let maxCount = 0;
   for (const [model, count] of Object.entries(modelCounts)) {
@@ -189,7 +138,7 @@ interface ModelSlot {
 async function listThreadModels(
   slots: ModelSlot[],
   loadConfig: (modelId: string) => Promise<ModelConfigRow | null>,
-): Promise<ThreadModelInfo[]> {
+) {
   const models: ThreadModelInfo[] = [];
   for (const { role, modelId } of slots) {
     if (modelId === null) continue;
@@ -214,7 +163,7 @@ async function listThreadModels(
 export async function getThreadSummary(args: {
   userId: string;
   threadId: string;
-}): Promise<ThreadSummary | null> {
+}) {
   const { userId, threadId } = args;
 
   // Verify thread exists and belongs to user
@@ -223,7 +172,7 @@ export async function getThreadSummary(args: {
   if (!thread) return null;
 
   // Get all messages with their usage
-  const messages = await listMessagesWithUsageByThread({ threadId });
+  const messages = await listMessageSpendByThread({ threadId });
 
   // Handle empty thread
   if (messages.length === 0) {

@@ -7,7 +7,7 @@ import { type Kysely, sql } from 'kysely';
  * and reasoning tokens depend on the model/provider). Columns we always
  * control — prompt/completion counts, cost, finish state — stay NOT NULL.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .createTable('message_usage')
     .addColumn('message_id', 'uuid', (col) =>
@@ -28,6 +28,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.dropTable('message_usage').execute();
 }

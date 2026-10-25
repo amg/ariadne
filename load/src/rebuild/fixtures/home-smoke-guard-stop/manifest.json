@@ -1,0 +1,165 @@
+{
+  "version": 2,
+  "runId": "20261015T010000Z-home-smoke-mock",
+  "step": "home-smoke",
+  "config": {
+    "inference": "mock",
+    "users": 9,
+    "generators": 2,
+    "rampSeconds": 5,
+    "holdSeconds": 30,
+    "thinkSeconds": 5
+  },
+  "target": "cubi-dev",
+  "loadPath": "direct",
+  "images": {},
+  "commits": {
+    "app": {
+      "sha": "f1xture",
+      "dirty": false
+    },
+    "harness": {
+      "sha": "f1xture",
+      "dirty": false
+    }
+  },
+  "startedAt": "2026-10-15T00:00:00.000Z",
+  "endedAt": "2026-10-15T00:01:23.000Z",
+  "trailingEndsAt": null,
+  "limits": {
+    "maxHostCpuPercent": 70,
+    "maxMemoryUsedPercent": 80,
+    "maxFirstByteP95Ms": 2500,
+    "maxErrorShare": 0.01
+  },
+  "slices": [
+    {
+      "generator": 0,
+      "firstUser": 0,
+      "userCount": 3,
+      "startedAt": "2026-10-15T00:00:02.000Z",
+      "endedAt": "2026-10-15T00:00:47.000Z",
+      "hold": {
+        "from": "2026-10-15T00:00:06.300Z",
+        "to": "2026-10-15T00:00:46.000Z"
+      },
+      "down": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "task": "pid-202",
+          "spot": false,
+          "startedAt": "2026-10-15T00:00:02.000Z",
+          "stoppedAt": "2026-10-15T00:00:47.000Z",
+          "stoppedBecause": "finished",
+          "stopDetail": null,
+          "toldToStopAt": null,
+          "stoppedForRunEnd": false
+        }
+      ]
+    },
+    {
+      "generator": 1,
+      "firstUser": 0,
+      "userCount": 6,
+      "startedAt": "2026-10-15T00:00:50.000Z",
+      "endedAt": "2026-10-15T00:01:22.500Z",
+      "hold": {
+        "from": "2026-10-15T00:00:54.000Z",
+        "to": "2026-10-15T00:01:54.000Z"
+      },
+      "down": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "task": "pid-203",
+          "spot": false,
+          "startedAt": "2026-10-15T00:00:50.000Z",
+          "stoppedAt": "2026-10-15T00:01:22.500Z",
+          "stoppedBecause": "guard",
+          "stopDetail": "Stopped by the guard: chat first byte p95 was 2750 ms, over the 2500 ms line",
+          "toldToStopAt": null,
+          "stoppedForRunEnd": false
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "app/exchanges.jsonl",
+      "size": 446,
+      "sha256": "4e8e4b3daf571dcd1f55bb704073d48b1c44f697846e7f461ed3a0c262222a5d"
+    },
+    {
+      "path": "app/state.jsonl",
+      "size": 148,
+      "sha256": "48452986852ceec1608ba399946275682a41e89d11caca3d317236ee5de77233"
+    },
+    {
+      "path": "events/events.jsonl",
+      "size": 1474,
+      "sha256": "84e781b18bd270dd3d3c9aa582e39bb9da364ec3f8c45f379eaa27f666ee4177"
+    },
+    {
+      "path": "logs/backend.log",
+      "size": 16,
+      "sha256": "97bdd82ea365116f854b6c5aa30ad036874240e9f36eaf6412d9795cb2ee56be"
+    },
+    {
+      "path": "logs/generator-0-attempt-1.log",
+      "size": 18,
+      "sha256": "baf2de07d37327a119f645810be4d485e697112f126991ba4295e74ffb2fd499"
+    },
+    {
+      "path": "logs/generator-1-attempt-1.log",
+      "size": 18,
+      "sha256": "baf2de07d37327a119f645810be4d485e697112f126991ba4295e74ffb2fd499"
+    },
+    {
+      "path": "logs/mock.log",
+      "size": 13,
+      "sha256": "f1dd5c8928d9ec80f26e0503d9e88ed97dbc0541e8ee5c96d60c40bf98381f20"
+    },
+    {
+      "path": "metrics/generator-0-attempt-1.report.json",
+      "size": 511,
+      "sha256": "db6182e0fd7e0d34e2e1c4126f71c2a21dca8f5abd865ed4a2a0eff6345f8b16"
+    },
+    {
+      "path": "metrics/generator-0.state.jsonl",
+      "size": 316,
+      "sha256": "1fcd759d200e0e8a14c40b6a998bde2d4a7a53bcef375ac22f5f8223b7900147"
+    },
+    {
+      "path": "metrics/generator-1.state.jsonl",
+      "size": 316,
+      "sha256": "dc059ede91c7301a76ba1d75b8ecc67c8abf734e93cdef91083a1bf1eba2a79d"
+    },
+    {
+      "path": "metrics/host.jsonl",
+      "size": 464,
+      "sha256": "63711bf59f723efdebcd84fa949065ac253df569f0f0ac9447adbf1161f6db7e"
+    },
+    {
+      "path": "requests/generator-0.jsonl",
+      "size": 422,
+      "sha256": "b5b88d3ce4d989d0d960b3194e8181bc3132de68abb24600e794a661d75031da"
+    },
+    {
+      "path": "requests/generator-1.jsonl",
+      "size": 422,
+      "sha256": "a3986299cb9cb75df09c59e2c9774d647a75d03e4ef5e4d77ef94dbd8116b59d"
+    }
+  ],
+  "seal": {
+    "status": "incomplete",
+    "sealedAt": "2026-10-15T00:01:24.000Z",
+    "reasons": [
+      {
+        "check": "app-records",
+        "detail": "the backend's job lines are missing (app/jobs.jsonl)",
+        "path": "app/jobs.jsonl"
+      }
+    ]
+  }
+}

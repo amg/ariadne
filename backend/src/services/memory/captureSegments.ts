@@ -3,15 +3,16 @@ import { capturePointersOf } from '@queries/memoryCaptureProgress/capturePointer
 import { recordSegmentCapture } from '@queries/memoryCaptureProgress/recordSegmentCapture';
 import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import {
-  type SegmentNeedingCapture,
-  listSegmentsNeedingCapture,
-} from '@queries/threadSegments/listSegmentsNeedingCapture';
+import { listSegmentsNeedingCapture } from '@queries/threadSegments/listSegmentsNeedingCapture';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
-import type { SegmentToCapture } from './memoryFeature';
-import { type CaptureTurn, readFacts } from './readFacts';
+import type { SegmentToCapture } from '../../types/memory';
+import { readFacts } from './readFacts';
+
+type SegmentNeedingCapture = Awaited<ReturnType<typeof listSegmentsNeedingCapture>>[number];
+
+type CaptureTurn = Parameters<typeof readFacts>[0]['turns'][number];
 
 /**
  * The live Turns of a segment up to the row that settles it: from its first
@@ -23,7 +24,7 @@ export function segmentTurns(
   rows: Message[],
   startMessageId: string,
   settleMessageId: string | null,
-): CaptureTurn[] {
+) {
   const start = rows.findIndex((row) => row.id === startMessageId);
   const end =
     settleMessageId === null ? rows.length : rows.findIndex((row) => row.id === settleMessageId);
@@ -46,13 +47,13 @@ export function segmentTurns(
  * Turn still without its reply (one streaming, or a Paused arrival): that
  * exchange is not over, so reading it would move the pointer past it.
  */
-function unsettledTurns(rows: Message[], startMessageId: string): CaptureTurn[] {
+function unsettledTurns(rows: Message[], startMessageId: string) {
   const turns = segmentTurns(rows, startMessageId, null);
   return turns.at(-1)?.assistantReply === null ? turns.slice(0, -1) : turns;
 }
 
 /** What one capture pass did, for a caller that reports it to the user. */
-export interface CapturePassReport {
+interface CapturePassReport {
   /** False when the user switched memory off: nothing was read. */
   memoryEnabled: boolean;
   /**
@@ -86,29 +87,42 @@ type SegmentRead = {
 
 type Settings = Awaited<ReturnType<typeof getUserSettings>>;
 
+/** One capture pass over a thread: who it is for, their settings, and the report it adds to. */
+type CapturePass = {
+  userId: string;
+  threadId: string;
+  settings: Settings;
+  report: CapturePassReport;
+};
+
 /** The read a settled segment owes: its Turns past the pointer, up to its settle row. */
-function settledRead(rows: Message[], segment: SegmentNeedingCapture): SegmentRead {
+function settledRead(rows: Message[], segment: SegmentNeedingCapture) {
   return {
     segmentId: segment.segmentId,
-    turns: segmentTurns(rows, segment.startMessageId, segment.anchorMessageId),
+    turns: segmentTurns(rows, segment.startMessageId, segment.settleMessageId),
     capturedThroughAt: segment.capturedThroughAt,
-    spendMessageId: segment.anchorMessageId,
-    throughAt: segment.anchorAt,
+    spendMessageId: segment.settleMessageId,
+    throughAt: segment.settleMessageAt,
   };
 }
 
 /**
- * Reads one segment past its pointer, then stores the Facts and moves the
+ * Reads one segment past its pointer, then stores its Facts and moves the
  * pointer together, unless another pass moved it first: that pass
  * captured these Turns, so this one owed nothing. Adds the outcome to the
  * report. False when the read failed.
  */
-async function readSegment(
-  userId: string,
-  settings: Settings,
-  read: SegmentRead,
-  report: CapturePassReport,
-): Promise<boolean> {
+async function captureSegmentTurns({
+  userId,
+  settings,
+  read,
+  report,
+}: {
+  userId: string;
+  settings: Settings;
+  read: SegmentRead;
+  report: CapturePassReport;
+}) {
   const captured = await readFacts({
     userId,
     turns: read.turns,
@@ -170,12 +184,12 @@ export async function captureSegment({
   if (!segment) return report;
 
   if (!settings.memoryEnabled) {
-    await upsertCaptureProgress({ segmentId, throughAt: segment.anchorAt });
+    await upsertCaptureProgress({ segmentId, throughAt: segment.settleMessageAt });
     return report;
   }
 
   const rows = await listMessagesByThread({ threadId });
-  await readSegment(userId, settings, settledRead(rows, segment), report);
+  await captureSegmentTurns({ userId, settings, read: settledRead(rows, segment), report });
   return report;
 }
 
@@ -184,17 +198,13 @@ export async function captureSegment({
  * stopping at the first failure: a later segment is read with what the
  * earlier ones taught the Memory.
  */
-async function captureOwedSegments(
-  userId: string,
-  threadId: string,
-  settings: Settings,
-  report: CapturePassReport,
-): Promise<void> {
+async function captureOwedSegments({ userId, threadId, settings, report }: CapturePass) {
   const owed = await listSegmentsNeedingCapture({ threadId, modelId: EMBEDDING_MODEL_ID });
   if (owed.length === 0) return;
   const rows = await listMessagesByThread({ threadId });
   for (const segment of owed) {
-    if (!(await readSegment(userId, settings, settledRead(rows, segment), report))) return;
+    const read = settledRead(rows, segment);
+    if (!(await captureSegmentTurns({ userId, settings, read, report }))) return;
   }
 }
 
@@ -204,12 +214,7 @@ async function captureOwedSegments(
  * Turn read, so when the segment does settle its pass reads only what
  * came after, the rest riding along as context.
  */
-async function captureNewestSegment(
-  userId: string,
-  threadId: string,
-  settings: Settings,
-  report: CapturePassReport,
-): Promise<void> {
+async function captureNewestSegment({ userId, threadId, settings, report }: CapturePass) {
   const segments = await listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
   const newest = segments.at(-1);
   if (!newest) return;
@@ -221,10 +226,10 @@ async function captureNewestSegment(
   const pointer = (await capturePointersOf([newest.id])).get(newest.id) ?? null;
   if (pointer !== null && through.createdAt.getTime() <= pointer.getTime()) return;
 
-  await readSegment(
+  await captureSegmentTurns({
     userId,
     settings,
-    {
+    read: {
       segmentId: newest.id,
       turns,
       capturedThroughAt: pointer,
@@ -232,7 +237,7 @@ async function captureNewestSegment(
       throughAt: through.createdAt,
     },
     report,
-  );
+  });
 }
 
 /**
@@ -251,8 +256,8 @@ export async function captureUnreadTurns({
   const settings = await getUserSettings({ userId });
   const report = emptyReport(settings.memoryEnabled);
   if (!settings.memoryEnabled) return report;
-  await captureOwedSegments(userId, threadId, settings, report);
+  await captureOwedSegments({ userId, threadId, settings, report });
   if (report.failed > 0) return report;
-  await captureNewestSegment(userId, threadId, settings, report);
+  await captureNewestSegment({ userId, threadId, settings, report });
   return report;
 }

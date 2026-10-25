@@ -1,8 +1,8 @@
-import { RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { AVAILABILITY_ZONES } from '../../config/names.ts';
+import { KEPT_LOGS } from '../keptLogs.ts';
 import { INTERFACE_ENDPOINT_COUNT } from '../worstCase.ts';
 
 /**
@@ -55,10 +55,7 @@ export class Network extends Construct {
         Rejected: {
           trafficType: ec2.FlowLogTrafficType.REJECT,
           destination: ec2.FlowLogDestination.toCloudWatchLogs(
-            new logs.LogGroup(this, 'FlowLogs', {
-              retention: logs.RetentionDays.ONE_WEEK,
-              removalPolicy: RemovalPolicy.DESTROY,
-            }),
+            new logs.LogGroup(this, 'FlowLogs', KEPT_LOGS),
           ),
         },
       },

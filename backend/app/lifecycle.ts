@@ -4,7 +4,7 @@ import { logger } from '../src/logger';
  * On SIGINT or SIGTERM, runs `stop` once (letting running background jobs
  * finish), then exits.
  */
-export function stopOnSignals(stop: () => Promise<void>): void {
+export function stopOnSignals(stop: () => Promise<void>) {
   let stopping = false;
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {

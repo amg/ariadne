@@ -1,30 +1,23 @@
+import { deleteThread as deleteThreadEndpoint } from '@ari/lib/api/schemas/threads/thread';
 import { deleteThread } from '@services/threadService';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
+import type { RouteOf } from '../contract';
+import { threadIdOrReject, userIdOf } from '../request';
 
-type ThreadParams = {
-  id: string;
-};
+export function setupThreadsDeleteRoute(fastify: FastifyInstance) {
+  fastify.route<RouteOf<typeof deleteThreadEndpoint>>({
+    method: deleteThreadEndpoint.method,
+    url: deleteThreadEndpoint.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const threadId = threadIdOrReject({ request, reply });
+      if (threadId === null) return reply;
 
-export async function setupThreadsDeleteRoute(fastify: FastifyInstance) {
-  fastify.delete(
-    '/api/threads/:id',
-    { preHandler: verifySession() },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id } = request.params as ThreadParams;
-
-      if (!isValidUuid(id)) {
-        return reply.code(400).send({ error: 'Invalid thread id' });
-      }
-
-      const deleted = await deleteThread({ userId: userId, threadId: id });
-      if (!deleted) {
-        return reply.code(404).send({ error: 'Thread not found' });
-      }
+      const deleted = await deleteThread({ userId, threadId });
+      if (!deleted) return reply.code(404).send({ error: 'Thread not found' });
       return reply.code(204).send();
     },
-  );
+  });
 }

@@ -9,7 +9,7 @@ import { type Kysely, sql } from 'kysely';
  * marked captured on the spot: capture starts with segments that close
  * from now on, never backfills.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .createTable('user_facts')
     .addColumn('id', 'uuid', (col) => col.primaryKey().defaultTo(sql`uuid_generate_v4()`))
@@ -83,7 +83,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`
     delete from message_expansion_costs
       where kind in ('fact_extraction', 'fact_dedupe', 'fact_embedding')

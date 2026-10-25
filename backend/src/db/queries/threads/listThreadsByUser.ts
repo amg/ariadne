@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { Thread } from '@db/types';
 
 type ListThreadsByUserProps = {
   userId: string;
@@ -9,7 +8,7 @@ type ListThreadsByUserProps = {
  * Threads owned by a user, newest first. `id` desc is a deterministic
  * tie-breaker for rows sharing the same `created_at`.
  */
-export async function listThreadsByUser({ userId }: ListThreadsByUserProps): Promise<Thread[]> {
+export async function listThreadsByUser({ userId }: ListThreadsByUserProps) {
   return db
     .selectFrom('chat.threads')
     .selectAll()

@@ -1,0 +1,123 @@
+{
+  "version": 2,
+  "runId": "20261015T000000Z-home-smoke-mock",
+  "step": "home-smoke",
+  "config": {
+    "inference": "mock",
+    "users": 4,
+    "generators": 1,
+    "rampSeconds": 5,
+    "holdSeconds": 60,
+    "thinkSeconds": 10
+  },
+  "target": "cubi-dev",
+  "loadPath": "direct",
+  "images": {},
+  "commits": {
+    "app": {
+      "sha": "f1xture",
+      "dirty": false
+    },
+    "harness": {
+      "sha": "f1xture",
+      "dirty": false
+    }
+  },
+  "startedAt": "2026-10-15T00:00:00.000Z",
+  "endedAt": "2026-10-15T00:01:30.000Z",
+  "trailingEndsAt": null,
+  "limits": {
+    "maxHostCpuPercent": 70,
+    "maxMemoryUsedPercent": 80,
+    "maxFirstByteP95Ms": 2500,
+    "maxErrorShare": 0.01
+  },
+  "slices": [
+    {
+      "generator": 0,
+      "firstUser": 0,
+      "userCount": 4,
+      "startedAt": "2026-10-15T00:00:02.000Z",
+      "endedAt": "2026-10-15T00:01:08.000Z",
+      "hold": {
+        "from": "2026-10-15T00:00:07.300Z",
+        "to": "2026-10-15T00:01:07.000Z"
+      },
+      "down": [],
+      "attempts": [
+        {
+          "attempt": 1,
+          "task": "pid-102",
+          "spot": false,
+          "startedAt": "2026-10-15T00:00:02.000Z",
+          "stoppedAt": "2026-10-15T00:01:08.000Z",
+          "stoppedBecause": "finished",
+          "stopDetail": null,
+          "toldToStopAt": null,
+          "stoppedForRunEnd": false
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "app/exchanges.jsonl",
+      "size": 223,
+      "sha256": "e2ddaaafe648a09af8bd8c6958121580689f4200ce24c97aabb8163195e9f917"
+    },
+    {
+      "path": "app/jobs.jsonl",
+      "size": 496,
+      "sha256": "c477ba392775b988305119154ea1cc89bda72a91caf44469dc5679fcf7434ad0"
+    },
+    {
+      "path": "app/state.jsonl",
+      "size": 150,
+      "sha256": "ce1d2d27fb959d3335a31735bd41fe646a5bea60b8646a99d72d49a2c3ea147e"
+    },
+    {
+      "path": "events/events.jsonl",
+      "size": 845,
+      "sha256": "25f4d881cbcd0efcec402f492dee68e28676a75d80fa3d42e0406d9eb38f03a1"
+    },
+    {
+      "path": "logs/backend.log",
+      "size": 16,
+      "sha256": "97bdd82ea365116f854b6c5aa30ad036874240e9f36eaf6412d9795cb2ee56be"
+    },
+    {
+      "path": "logs/generator-0-attempt-1.log",
+      "size": 18,
+      "sha256": "baf2de07d37327a119f645810be4d485e697112f126991ba4295e74ffb2fd499"
+    },
+    {
+      "path": "logs/mock.log",
+      "size": 13,
+      "sha256": "f1dd5c8928d9ec80f26e0503d9e88ed97dbc0541e8ee5c96d60c40bf98381f20"
+    },
+    {
+      "path": "metrics/generator-0-attempt-1.report.json",
+      "size": 511,
+      "sha256": "bbce2a9f649d439ad5a5d91cc565f962e512ad6d0b1723bad9c28f6bd37e8ec1"
+    },
+    {
+      "path": "metrics/generator-0.state.jsonl",
+      "size": 316,
+      "sha256": "133faa86910371c83a888ea127ba636612737bbf197751e7707cc060f92dfc97"
+    },
+    {
+      "path": "metrics/host.jsonl",
+      "size": 464,
+      "sha256": "6cfff1e0ff5309d84c5320cab9d06f221d6bce674177f9a4abcd9c7f26be1a19"
+    },
+    {
+      "path": "requests/generator-0.jsonl",
+      "size": 422,
+      "sha256": "48818691306eec12c10512efeca818401c126cd746c209353a1f961cc726cc41"
+    }
+  ],
+  "seal": {
+    "status": "complete",
+    "sealedAt": "2026-10-15T00:01:31.000Z"
+  }
+}

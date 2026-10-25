@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { User } from '@db/types';
 
 type InsertUserIfNotExistsProps = {
   id: string;
@@ -10,9 +9,7 @@ type InsertUserIfNotExistsProps = {
  * with the given id already existed (single statement, race-proof via
  * ON CONFLICT DO NOTHING instead of select-then-insert).
  */
-export async function insertUserIfNotExists({
-  id,
-}: InsertUserIfNotExistsProps): Promise<User | undefined> {
+export async function insertUserIfNotExists({ id }: InsertUserIfNotExistsProps) {
   return db
     .insertInto('chat.users')
     .values({ id })

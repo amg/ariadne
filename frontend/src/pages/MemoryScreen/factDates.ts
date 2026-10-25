@@ -8,18 +8,18 @@ const DATE_OPTIONS: Record<DateDetail, Intl.DateTimeFormatOptions> = {
 };
 
 /** A stated date is a calendar day, so it reads in UTC and never shifts by a day. */
-export function formattedStatedDate(validAt: string, detail: DateDetail): string {
+export function formattedStatedDate(validAt: string, detail: DateDetail) {
   return new Date(validAt).toLocaleDateString('en-US', {
     ...DATE_OPTIONS[detail],
     timeZone: 'UTC',
   });
 }
 
-export function formattedNotedDate(createdAt: string, detail: DateDetail): string {
+export function formattedNotedDate(createdAt: string, detail: DateDetail) {
   return new Date(createdAt).toLocaleDateString('en-US', DATE_OPTIONS[detail]);
 }
 
 /** When a Fact became true if stated, else when it was noted, in epoch milliseconds. */
-export function factRecencyMs(fact: UserFact): number {
+export function factRecencyMs(fact: UserFact) {
   return new Date(fact.validAt ?? fact.createdAt).getTime();
 }

@@ -5,7 +5,7 @@ import { db } from '@db/db';
  * included. A job running right now is left alone. Resolves to the ids it
  * re-queued.
  */
-export async function requeueJobs(ids: string[]): Promise<string[]> {
+export async function requeueJobs(ids: string[]) {
   if (ids.length === 0) return [];
   const rows = await db
     .selectFrom((eb) =>

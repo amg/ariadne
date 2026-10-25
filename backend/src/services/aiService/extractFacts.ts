@@ -1,8 +1,9 @@
 import { env } from '@config/env';
 import type { FactCategory } from '@db/types';
 import { generateText } from 'ai';
-import { type Result, err, ok } from '../../types/result';
+import { err, ok } from '../../types/result';
 import {
+  type InferenceConfig,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
@@ -10,13 +11,14 @@ import {
 } from './config';
 import {
   FACT_FIELD_RULES,
-  type FactFields,
   factFieldsOf,
   isoDay,
   jsonObjectOrNull,
   trimmedOrNull,
 } from './factFields';
 import { withOnDemandBackoff } from './onDemandRetry';
+
+type FactFields = NonNullable<ReturnType<typeof factFieldsOf>>;
 
 /**
  * The Fact extraction call of the provider boundary: an ordered run of
@@ -33,11 +35,11 @@ import { withOnDemandBackoff } from './onDemandRetry';
 // sentence names the task, and stays stable so replies can be matched
 // to it. Blocked categories join as a rule just before the last one.
 const NOTHING_QUALIFIES_RULE = '- If nothing qualifies, output {"facts":[]}.';
-export const FACT_EXTRACTION_SYSTEM_PROMPT = `You extract durable facts about the user from a conversation; you never answer it. Read the numbered turns and output JSON only, in this shape:
+const FACT_EXTRACTION_SYSTEM_PROMPT = `You extract durable facts about the user from a conversation; you never answer it. Read the numbered turns and output JSON only, in this shape:
 {"facts":[{"turn":1,"content":"The user ...","category":"preference","subject":"user","predicate":"likes","object":"dogs","validAt":null}]}
 Rules:
 - A fact is one self-contained sentence about the user: who they are, what they like or avoid, their circumstances, people, work, places, or a correction they gave. It must still be useful in a future conversation with no other context. Write it in the third person, starting with "The user".
-- Extract only what the user states or clearly confirms about themselves. Take every detail, dates included, from the user's own words; assistant replies only help you follow the conversation. Never extract the assistant's suggestions, general knowledge, or the topic under discussion.
+- Extract only what the user states or clearly confirms about themselves, their family, or people and pets they mention. Take every detail, dates included, from the user's own words; assistant replies only help you follow the conversation. Never extract the assistant's suggestions or general knowledge.
 - Skip ephemeral details: one-off task requests, passing moods, anything true only for this conversation.
 - turn is the number of the turn the fact comes from.
 - Resolve relative time ("last week", "two years ago") into absolute dates using that turn's date. validAt is the date the fact became true as YYYY-MM-DD, only when the user states or directly implies it; otherwise null. A fact's own date (someone's birth, a move, a start) is its validAt.
@@ -51,7 +53,7 @@ ${NOTHING_QUALIFIES_RULE}`;
  * "Never extract facts in these categories: credentials." made the memory
  * model return no facts at all for whole conversations.
  */
-export function factExtractionSystemPrompt(blockedCategories: readonly FactCategory[]): string {
+export function factExtractionSystemPrompt(blockedCategories: readonly FactCategory[]) {
   if (blockedCategories.length === 0) return FACT_EXTRACTION_SYSTEM_PROMPT;
   return FACT_EXTRACTION_SYSTEM_PROMPT.replace(
     NOTHING_QUALIFIES_RULE,
@@ -68,7 +70,7 @@ const EXTRACTION_TIMEOUT_MS = 60000;
 const EXTRACTION_MAX_OUTPUT_TOKENS = 800;
 const MAX_FACT_CHARS = 300;
 
-export interface FactExtractionTurn {
+interface FactExtractionTurn {
   /** When the Turn's user Message arrived; anchors relative dates. */
   date: Date;
   userText: string;
@@ -76,7 +78,7 @@ export interface FactExtractionTurn {
   assistantText: string | null;
 }
 
-export interface FactExtractionInput {
+interface FactExtractionInput {
   turns: FactExtractionTurn[];
   /**
    * Turns already captured on an earlier pass: they are sent as context
@@ -93,21 +95,15 @@ export interface FactExtractionInput {
   blockedCategories: readonly FactCategory[];
 }
 
-export interface FactCandidate extends FactFields {
+interface FactCandidate extends FactFields {
   /** Index into the input turns. */
   turnIndex: number;
   content: string;
 }
 
-export interface FactExtractionData {
-  /** Null when the reply carried no readable JSON. */
-  candidates: FactCandidate[] | null;
-  usage: { promptTokens: number; completionTokens: number };
-}
-
 // Ahead of the turns: placed after them, the memory model dropped facts
 // it extracts from the same turns without the section.
-function knownFactsSection(knownFacts: readonly string[]): string {
+function knownFactsSection(knownFacts: readonly string[]) {
   if (knownFacts.length === 0) return '';
   const lines = knownFacts.map((fact) => `- ${fact}`).join('\n');
   return `Already known about the user from earlier conversations, as background for who and what the turns mention:\n${lines}\n\n`;
@@ -115,7 +111,7 @@ function knownFactsSection(knownFacts: readonly string[]): string {
 
 export function buildFactExtractionPrompt(
   input: Pick<FactExtractionInput, 'turns' | 'contextCount' | 'knownFacts'>,
-): string {
+) {
   const contextCount = input.contextCount ?? 0;
   const contextNote =
     contextCount > 0
@@ -131,14 +127,14 @@ export function buildFactExtractionPrompt(
   return `${knownFactsSection(input.knownFacts ?? [])}${contextNote}${turns}`;
 }
 
-function turnIndexOrLast(value: unknown, turnCount: number): number {
+function turnIndexOrLast(value: unknown, turnCount: number) {
   if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= turnCount) {
     return value - 1;
   }
   return turnCount - 1;
 }
 
-function candidateOrNull(entry: unknown, turnCount: number): FactCandidate | null {
+function candidateOrNull(entry: unknown, turnCount: number) {
   if (entry === null || typeof entry !== 'object') return null;
   // Narrowed to an object above; fields are validated one by one below.
   const raw = entry as Record<string, unknown>;
@@ -156,7 +152,7 @@ function candidateOrNull(entry: unknown, turnCount: number): FactCandidate | nul
  * can be found. Tolerates code fences and prose around the object, and
  * drops malformed entries one by one.
  */
-export function parseFactCandidates(raw: string, turnCount: number): FactCandidate[] | null {
+export function parseFactCandidates(raw: string, turnCount: number) {
   const facts = jsonObjectOrNull(raw)?.facts;
   if (!Array.isArray(facts)) return null;
   return facts
@@ -164,10 +160,7 @@ export function parseFactCandidates(raw: string, turnCount: number): FactCandida
     .filter((candidate): candidate is FactCandidate => candidate !== null);
 }
 
-async function extractOnce(
-  config: ReturnType<typeof resolveInferenceConfig>,
-  input: FactExtractionInput,
-): Promise<Result<FactExtractionData>> {
+async function extractOnce(config: InferenceConfig, input: FactExtractionInput) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS);
   try {
@@ -195,9 +188,7 @@ async function extractOnce(
   }
 }
 
-export async function extractFacts(
-  input: FactExtractionInput,
-): Promise<Result<FactExtractionData>> {
+export async function extractFacts(input: FactExtractionInput) {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);

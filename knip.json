@@ -1,15 +1,28 @@
 {
   "$schema": "https://unpkg.com/knip/schema.json",
-  "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["hadolint"],
-  "ignore": [".pi/agent/extensions/**"],
+  "ignoreExportsUsedInFile": false,
+  "ignoreBinaries": ["hadolint", "openssl"],
+  "ignore": [".pi/extensions/**"],
   "workspaces": {
+    "lib": {
+      "project": ["api/**/*.ts", "metrics/**/*.ts"]
+    },
     "backend": {
       "entry": ["app/server.aws.ts"],
-      "ignore": ["src/db/migrations/**"]
+      "ignore": ["src/db/migrations/**", "src/db/*.generated.ts"]
+    },
+    "load": {
+      "entry": [
+        "src/generator/main.ts",
+        "src/rebuild/main.ts",
+        "src/home/commands/run.ts",
+        "src/home/commands/accounts.ts",
+        "src/home/commands/clean.ts"
+      ],
+      "project": ["src/**/*.ts"]
     },
     "infra": {
-      "entry": ["bin/*.ts", "lib/core/safetyNetHandler.ts", "load/main.ts", "load/summarize.ts"],
+      "entry": ["bin/*.ts", "lib/core/safetyNetHandler.ts"],
       "project": ["**/*.ts"],
       "ignoreDependencies": ["esbuild", "tsx"]
     }

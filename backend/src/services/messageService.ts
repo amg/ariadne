@@ -1,38 +1,36 @@
-import { env } from '@config/env';
-import type { Message, MessageFinishReason, MessageUsage } from '@db/types';
+import type { MessageDriftVerdict } from '@ari/lib/api/schemas/common/driftGate';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
+import type { Message, MessageUsage } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import type { MessageWithUsageRow } from '@queries/messages/listMessagesByThread';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { inTransaction } from '@queries/transaction/inTransaction';
 import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
+import type { ArrivalJudging } from '../types/aiService';
 import { type Result, err, ok } from '../types/result';
-import { type ArrivalJudging, judgmentFailed } from './aiService/arrivalGate';
+import { judgmentFailed } from './aiService/arrivalGate';
 import { EMBEDDING_MODEL_ID, SYSTEM_PROMPT } from './aiService/config';
 import { newestLiveUserIndex } from './aiService/newestLiveUser';
 import { validateMessageContent } from './validation';
 
+/** A message as `listMessagesByThread` returns it, with its usage columns flattened in. */
+type ThreadMessage = Awaited<ReturnType<typeof listMessagesByThread>>[number];
+
 /** Usage as served on the GET payload (identity columns implied by the row). */
-export type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
+type UsagePayload = Omit<MessageUsage, 'messageId' | 'createdAt'>;
 
-/**
- * The live gate's two-channel verdict on a user arrival — the Conversation
- * tab's purple bubble. null on non-user rows, on threads with no persisted
- * verdict row yet, and while the feature flag is off (stored signals
- * survive the off period; the surface just stops wearing them).
- */
-export type DriftVerdictPayload = {
-  verdict: 'muted' | 'pass' | 'fire';
-  fireChannel: 'immediate' | 'slow' | null;
-} | null;
-
-export type MessageWithUsage = Message & {
+type MessageWithUsage = Message & {
   /** Inference telemetry for assistant messages; null until available. */
   usage: UsagePayload | null;
-  driftVerdict: DriftVerdictPayload;
+  /**
+   * The live gate's two-channel verdict on a user arrival. null on non-user
+   * rows, on threads with no persisted verdict row yet, and while the
+   * feature flag is off (stored signals survive the off period).
+   */
+  driftVerdict: MessageDriftVerdict | null;
   /**
    * True on the Thread's Unanswered arrival when the Drift gate could not
    * judge it and gave up for good; false everywhere else.
@@ -41,11 +39,11 @@ export type MessageWithUsage = Message & {
 };
 
 /** Flattens the join aliases from `listMessagesByThread` into a nested row. */
-export function messageRowToMessageWithUsage(
-  row: MessageWithUsageRow,
-  driftVerdict: DriftVerdictPayload = null,
+function messageRowToMessageWithUsage(
+  row: ThreadMessage,
+  driftVerdict: MessageDriftVerdict | null = null,
   gateFailed = false,
-): MessageWithUsage {
+) {
   const {
     usageModel: model,
     usageProviderId: providerId,
@@ -79,7 +77,7 @@ export function messageRowToMessageWithUsage(
       reasoningTokens,
       estimatedReasoningTokens,
       costUsd,
-      finishReason: finishReason as MessageFinishReason,
+      finishReason,
       latencyMs,
       estimated: estimated === true,
     },
@@ -97,20 +95,17 @@ type UpdateMessageProps = {
 };
 
 /**
- * The edit fork — prompts only. The thread's last live user message is
+ * The edit fork, for prompts only. The Thread's last live user message is
  * editable; an abandoned arrival after it (one handed over to another
- * Thread, say) never counts. An edit ABANDONS its arrival rather than
- * rewriting it:
- * the old row keeps its text and its arrival analysis (still correct for
- * the untouched reading), so its spend keeps tracking the pre-edit costs;
- * every reply grown from the old text is abandoned with it. The edited
- * text lands as a NEW user row after them — a fresh arrival, its Drift
- * gate judgment queued with it; the retry then exchanges or pauses it. Abandoned rows are never rewritten
- * and never deleted; inference memory, listing, drafting and the analysis
- * surface simply skip them. Assistant replies themselves are never edited
- * — retry (chat regenerate) is their recovery path. "not_last" (409) and
- * "thread_not_found" (404) keep foreign/unknown ids indistinguishable
- * from permission failures.
+ * Thread, say) never counts. An edit abandons its arrival rather than
+ * rewriting it. The old row keeps its text and its arrival analysis, so
+ * its spend keeps tracking the pre-edit costs, and every reply grown from
+ * the old text is abandoned with it. The edited text lands as a new user
+ * row after them: a fresh arrival, with its Drift gate judgment queued
+ * alongside. Assistant replies are never edited; a retry replaces them.
+ * An unknown or foreign Thread, or a message not in it, fails with
+ * `thread_not_found`; a message that is not the last live one fails with
+ * `not_last`.
  */
 export async function editMessage({
   userId,
@@ -118,7 +113,7 @@ export async function editMessage({
   messageId,
   content,
   judging,
-}: UpdateMessageProps): Promise<Result<MessageWithUsage>> {
+}: UpdateMessageProps) {
   const contentResult = validateMessageContent(content);
   if (contentResult.type === 'error') return contentResult;
   const normalized = contentResult.data;
@@ -185,7 +180,7 @@ export async function editMessage({
  * judged after all.
  */
 async function gateFailedArrivalIdOrNull(
-  rows: MessageWithUsageRow[],
+  rows: ThreadMessage[],
   verdictByMessageId: ReadonlyMap<string, unknown>,
 ): Promise<string | null> {
   const newestLive = rows.filter((row) => !row.abandoned).at(-1);
@@ -197,12 +192,11 @@ async function gateFailedArrivalIdOrNull(
 type GetMessagesProps = {
   userId: string;
   threadId: string;
+  /** With the gate off, no verdict is shown and none can have failed. */
+  threadAnalysisMode: ThreadAnalysisMode;
 };
 
-export async function getMessages({
-  userId,
-  threadId,
-}: GetMessagesProps): Promise<MessageWithUsage[] | null> {
+export async function getMessages({ userId, threadId, threadAnalysisMode }: GetMessagesProps) {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return null;
   const rows = await listMessagesByThread({ threadId });
@@ -210,24 +204,19 @@ export async function getMessages({
   // Per-arrival verdict straight from the persisted live chain (no
   // computation here). The flag suppresses the surface, never the store.
   const driftLogs =
-    env.THREAD_ANALYSIS_MODE === 'off'
+    threadAnalysisMode === 'off'
       ? []
       : await listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
   const verdictByMessageId = new Map(
-    driftLogs.map((log): [string, NonNullable<DriftVerdictPayload>] => [
+    driftLogs.map((log): [string, MessageDriftVerdict] => [
       log.messageId,
-      {
-        verdict: log.verdict as NonNullable<DriftVerdictPayload>['verdict'],
-        fireChannel: log.fireChannel as NonNullable<DriftVerdictPayload>['fireChannel'],
-      },
+      { verdict: log.verdict, fireChannel: log.fireChannel },
     ]),
   );
 
   // With the gate switched off nothing is judged, so nothing can fail.
   const gateFailedId =
-    env.THREAD_ANALYSIS_MODE === 'off'
-      ? null
-      : await gateFailedArrivalIdOrNull(rows, verdictByMessageId);
+    threadAnalysisMode === 'off' ? null : await gateFailedArrivalIdOrNull(rows, verdictByMessageId);
 
   const messages = rows.map((row) =>
     messageRowToMessageWithUsage(

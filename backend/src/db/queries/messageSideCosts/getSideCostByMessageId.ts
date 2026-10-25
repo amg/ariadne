@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { MessageSideCost, SideCostKind } from '@db/types';
+import type { SideCostKind } from '@db/types';
 
 type GetSideCostByMessageIdProps = {
   messageId: string;
@@ -13,7 +13,7 @@ export async function getSideCostByMessageId({
   messageId,
   kind,
   model,
-}: GetSideCostByMessageIdProps): Promise<MessageSideCost | undefined> {
+}: GetSideCostByMessageIdProps) {
   return db
     .selectFrom('billing.messageSideCosts')
     .selectAll()

@@ -1,4 +1,4 @@
-import { type JobErrorClass, taggedJobError } from '@queries/queue/jobError';
+import { taggedJobError } from '@queries/queue/jobError';
 
 /**
  * A task's own failure, carrying the stable code of the service failure
@@ -14,6 +14,9 @@ export class TaskFailure extends Error {
   }
 }
 
+/** How many attempts a job gets before the queue gives up on it. */
+export const MAX_ATTEMPTS = 3;
+
 /** Codes that no retry can fix: the deployment or the job itself is wrong. */
 const FATAL_CODES: ReadonlySet<string> = new Set(['provider_not_configured']);
 
@@ -23,7 +26,7 @@ const FATAL_CODES: ReadonlySet<string> = new Set(['provider_not_configured']);
  */
 const FATAL_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 404, 422]);
 
-function statusCodeOrNull(error: unknown): number | null {
+function statusCodeOrNull(error: unknown) {
   if (typeof error !== 'object' || error === null || !('statusCode' in error)) return null;
   return typeof error.statusCode === 'number' ? error.statusCode : null;
 }
@@ -35,14 +38,14 @@ function statusCodeOrNull(error: unknown): number | null {
  * credentials, malformed input). Anything unrecognised is recoverable, so
  * it gets its remaining attempts.
  */
-export function classifyTaskError(error: unknown): JobErrorClass {
+export function classifyTaskError(error: unknown) {
   if (error instanceof TaskFailure) return FATAL_CODES.has(error.code) ? 'fatal' : 'recoverable';
   const status = statusCodeOrNull(error);
   return status !== null && FATAL_STATUSES.has(status) ? 'fatal' : 'recoverable';
 }
 
 /** The error a failed attempt is recorded with: its class first, then the reason. */
-export function classifiedTaskError(error: unknown): Error {
+export function classifiedTaskError(error: unknown) {
   const reason = error instanceof Error ? error.message : String(error);
   return new Error(taggedJobError(classifyTaskError(error), reason));
 }

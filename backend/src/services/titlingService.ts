@@ -1,17 +1,14 @@
 import { env } from '@config/env';
-import {
-  type MessageWithUsageRow,
-  listMessagesByThread,
-} from '@queries/messages/listMessagesByThread';
+import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 import {
   errorReason,
-  logExchangeError,
-  logExchangeRequest,
-  logExchangeResponse,
+  logProviderError,
+  logProviderRequest,
+  logProviderResponse,
   logger,
 } from '../logger';
 import { ErrorCodes, type TitlingErrorCode } from '../types/errorCodes';
@@ -21,7 +18,10 @@ import {
   isInferenceConfigured,
   resolveInferenceConfig,
 } from './aiService/config';
-import { renameThread } from './threadService';
+import { MAX_TITLE_LENGTH, renameThread } from './threadService';
+
+/** A message as `listMessagesByThread` returns it, with its usage columns flattened in. */
+type ThreadMessage = Awaited<ReturnType<typeof listMessagesByThread>>[number];
 
 /**
  * Titling must never hang the UI: it owns its own time budget, independent
@@ -29,7 +29,7 @@ import { renameThread } from './threadService';
  * 5s gives the uncapped final shape room for long thinking (~4s) plus the
  * ~1s spent on the cheap first attempt.
  */
-function resolveTitlingTimeoutMs(): number {
+function resolveTitlingTimeoutMs() {
   return env.AI_TITLING_TIMEOUT_MS ?? 5000;
 }
 
@@ -40,22 +40,21 @@ const TITLING_CONTEXT_CHARS = 300;
 const TITLING_MAX_OUTPUT_TOKENS = 40;
 
 /**
- * Terminal outcomes, mapped to HTTP responses by the route. `message` is the
- * server-side detail (logged only) — the client receives just the contract
- * `code` (see `../types/errorCodes`).
+ * How one titling run ended. A failure's `message` is server-side detail
+ * for the logs; its `code` is the contract code.
  */
-export type TitlingOutcome =
+type TitlingOutcome =
   | { type: 'titled'; title: string }
-  /** No usable title; the sentinel (if present) was settled to the fallback. */
+  /** Nothing to title yet: the Thread has fewer than two messages. */
   | { type: 'settled' }
-  /** Generation blew up; the sentinel (if present) was still settled. */
+  /** Titling failed; the Thread keeps its current title. */
   | { type: 'failed'; code: TitlingErrorCode; message: string };
 
 type GenerationResult =
   | { ok: true; text: string; attempt: number }
   | { ok: false; code: TitlingErrorCode; message: string };
 
-function clipped(value?: string): string {
+function clipped(value?: string) {
   return (value ?? '').slice(0, TITLING_CONTEXT_CHARS);
 }
 
@@ -106,9 +105,9 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
       attemptNo += 1;
       const label = `generate-title ${attemptNo}/${attempts.length}`;
       try {
-        logExchangeRequest(label, prompt);
+        logProviderRequest({ label, request: prompt });
         const { text } = await generateText(attempt);
-        logExchangeResponse(label, text);
+        logProviderResponse({ label, response: text });
         if (!text.trim()) {
           // Call succeeded but nothing usable came back (an output cap got
           // consumed by a thinking phase, or a bare empty reply). Treat it
@@ -128,7 +127,7 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
         lastError = error;
         lastWasEmpty = false;
         const reason = errorReason(error);
-        logExchangeError(label, reason);
+        logProviderError({ label, error: reason });
         logger.warn(`Auto-titling attempt ${attemptNo}/${attempts.length} failed: ${reason}`);
       }
     }
@@ -152,17 +151,21 @@ async function generateTitleText(model: LanguageModel, prompt: string): Promise<
   }
 }
 
+/** The messages a title can be learned from: not edited away, and not an empty reply row. */
+function withText(messages: ThreadMessage[]) {
+  return messages.filter((row) => !row.abandoned && row.content.trim() !== '');
+}
+
 /**
  * Message window for a forced (user-triggered) regeneration: the thread's
- * first full segment — the anchor. Segments chain the thread's topic drift:
+ * first full segment. Segments chain the thread's topic drift:
  * everything before the second segment's start message belongs to the first
  * segment. If drift has not split the thread yet (or the analysis chain is
- * absent), the whole thread *is* that one segment and is used as is.
+ * absent), the whole thread *is* that one segment and is used as is. The
+ * boundary is found among every message, so a segment that starts at a
+ * message since edited away still ends the window.
  */
-async function firstSegmentMessages(
-  threadId: string,
-  messages: MessageWithUsageRow[],
-): Promise<MessageWithUsageRow[]> {
+async function firstSegmentMessages(threadId: string, messages: ThreadMessage[]) {
   const segments = await listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
   if (segments.length < 2) {
     return messages;
@@ -178,7 +181,7 @@ async function firstSegmentMessages(
  *   from just that exchange — one turn, cheap. Used asynchronously so it
  *   never blocks the main chat stream.
  * - Forced (`forced` true): user-triggered regeneration; names the thread
- *   from its first full segment (the anchor), so topic drift further down
+ *   from its first full segment, so topic drift further down
  *   the thread never leaks into the title.
  */
 export async function autoTitleThread(
@@ -205,13 +208,13 @@ export async function autoTitleThread(
   }
 
   const messages = await listMessagesByThread({ threadId });
-  if (messages.length < 2) {
+  if (withText(messages).length < 2) {
     return { type: 'settled' };
   }
 
-  const messagesToUse = forced
-    ? await firstSegmentMessages(threadId, messages)
-    : messages.slice(0, 2);
+  const messagesToUse = withText(
+    forced ? await firstSegmentMessages(threadId, messages) : withText(messages).slice(0, 2),
+  );
 
   const conversationText = messagesToUse
     .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${clipped(m.content)}`)
@@ -230,9 +233,20 @@ ${conversationText}`;
       return { type: 'failed', code: generation.code, message: generation.message };
     }
 
-    const generatedTitle = generation.text.trim().replace(/^["']|["']$/g, '');
+    const generatedTitle = generation.text
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .slice(0, MAX_TITLE_LENGTH)
+      .trim();
 
-    await renameThread({ userId, threadId, title: generatedTitle });
+    const renamed = await renameThread({ userId, threadId, title: generatedTitle });
+    if (!renamed) {
+      return {
+        type: 'failed',
+        code: ErrorCodes.THREAD_NOT_FOUND,
+        message: `thread ${threadId} was deleted while its title was generated`,
+      };
+    }
     return { type: 'titled', title: generatedTitle };
   } catch (error) {
     logger.error({ err: error }, `Auto-titling failed for thread ${threadId}`);

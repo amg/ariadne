@@ -1,8 +1,7 @@
-import type { UserFact } from '@db/types';
-import { findCurrentUserFactOrNull } from '@queries/userFacts/findCurrentUserFact';
+import { findCurrentUserFact } from '@queries/userFacts/findCurrentUserFact';
 import { replaceCurrentUserFactOrNull } from '@queries/userFacts/replaceCurrentUserFactOrNull';
 import { EMBEDDING_MODEL_ID, classifyFact, embedText } from '@services/aiService';
-import { type Result, err, ok } from '../../types/result';
+import { err, ok } from '../../types/result';
 
 type EditFactContentProps = {
   factId: string;
@@ -19,12 +18,8 @@ type EditFactContentProps = {
  * superseded while the edit was being filed, and leaves the Fact
  * untouched when classification or embedding fails.
  */
-export async function editFactContent({
-  factId,
-  userId,
-  newContent,
-}: EditFactContentProps): Promise<Result<UserFact>> {
-  const current = await findCurrentUserFactOrNull({ factId, userId });
+export async function editFactContent({ factId, userId, newContent }: EditFactContentProps) {
+  const current = await findCurrentUserFact({ factId, userId });
   if (current === null) return err('fact_not_found', 'Fact not found');
 
   const content = newContent.trim();

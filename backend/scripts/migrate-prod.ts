@@ -16,7 +16,7 @@ import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import type { Database } from '../src/db/types';
 
-function createDbFromPool(pool: Pool): Kysely<Database> {
+function createDbFromPool(pool: Pool) {
   return new Kysely<Database>({
     dialect: new PostgresDialect({ pool }),
     plugins: [new CamelCasePlugin()],
@@ -26,7 +26,7 @@ function createDbFromPool(pool: Pool): Kysely<Database> {
 /**
  * The DB_NAME declared in the repo's `.env.prod`.
  */
-async function prodDatabaseName(): Promise<string> {
+async function prodDatabaseName() {
   const envProdPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../.env.prod');
   const envProd = await fs.readFile(envProdPath, 'utf8');
   const match = envProd.match(/^DB_NAME=(.*)$/m);

@@ -5,16 +5,16 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { onStopRequested } from '@services/events';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
+import type { ChatStreamHandle } from '../../types/aiService';
 import {
   clearActiveExchange,
   registerActiveExchange,
   stopThreadExchange,
 } from './exchangeRegistry';
-import type { ChatStreamHandle } from './submitChat';
 
 useTestDb();
 
-function fakeHandle(): { handle: ChatStreamHandle; aborts: number } {
+function fakeHandle() {
   const counters = { aborts: 0 };
   const handle = {
     abort: () => {

@@ -9,13 +9,13 @@ const ACCESS_TOKEN_COOKIE = 'sAccessToken';
  * reaches the backend through the same proxy, so without a session all
  * callers share one bucket.
  */
-export async function rateLimitKey(request: FastifyRequest): Promise<string> {
+export async function rateLimitKey(request: FastifyRequest) {
   const userId = await signedInUserId(request);
   return userId === undefined ? `ip:${request.ip}` : `user:${userId}`;
 }
 
 /** The user a valid access token names; expired, forged or absent tokens name nobody. */
-async function signedInUserId(request: FastifyRequest): Promise<string | undefined> {
+async function signedInUserId(request: FastifyRequest) {
   const accessToken = accessTokenOf(request);
   if (accessToken === undefined) return undefined;
   try {
@@ -28,13 +28,13 @@ async function signedInUserId(request: FastifyRequest): Promise<string | undefin
   }
 }
 
-function accessTokenOf(request: FastifyRequest): string | undefined {
+function accessTokenOf(request: FastifyRequest) {
   const bearer = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
   if (bearer !== undefined) return bearer;
   return cookieValue(request.headers.cookie, ACCESS_TOKEN_COOKIE);
 }
 
-function cookieValue(header: string | undefined, name: string): string | undefined {
+function cookieValue(header: string | undefined, name: string) {
   if (header === undefined) return undefined;
   for (const pair of header.split(';')) {
     const [key, ...rest] = pair.trim().split('=');

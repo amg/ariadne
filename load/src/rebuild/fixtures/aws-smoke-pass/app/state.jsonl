@@ -1,0 +1,3 @@
+{"at":"2026-10-18T00:00:05.000Z","pushStreamsOpen":4,"oldestJobWaitMs":null}
+{"at":"2026-10-18T00:00:06.000Z","pushStreamsOpen":null,"oldestJobWaitMs":9}
+{"copy":"worker-1","at":"2026-10-18T00:00:07.000Z","pushStreamsOpen":null,"oldestJobWaitMs":3,"eventLoopDelayP99Ms":42.5,"heapUsedBytes":104857600,"residentBytes":314572800,"dbConnectionsInUse":6,"dbConnectionsWaiting":1,"workerSlotsBusy":4,"workerSlots":4,"pushBusFailures":2}

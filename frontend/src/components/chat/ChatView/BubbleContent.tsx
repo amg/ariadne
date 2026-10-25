@@ -12,7 +12,7 @@ export function BubbleContent({
   onRetryLast,
   reasoning,
 }: {
-  message: Message;
+  message: Pick<Message, 'role' | 'content'>;
   streaming: boolean;
   busy: boolean;
   onRetryLast: () => void;

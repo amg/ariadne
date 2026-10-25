@@ -1,0 +1,39 @@
+{
+  "name": "load",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "rebuild": "tsx src/rebuild/main.ts",
+    "limits": "tsx src/criteria/main.ts",
+    "home:run": "tsx src/home/commands/run.ts",
+    "home:accounts": "tsx src/home/commands/accounts.ts",
+    "home:clean": "tsx src/home/commands/clean.ts",
+    "home:archive": "tsx src/home/commands/archive.ts",
+    "archive": "tsx src/archive/main.ts",
+    "monitor": "tsx src/monitor/main.ts",
+    "aws:run": "tsx src/ecs/commands/run.ts",
+    "test": "vitest run",
+    "test:integration": "LOAD_INTEGRATION=1 vitest run src/home/endToEnd.integration.test.ts",
+    "test:scale": "LOAD_SCALE=1 vitest run src/scale",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ari/lib": "*",
+    "undici": "^7.30.0",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-application-auto-scaling": "^3.1152.0",
+    "@aws-sdk/client-cloudformation": "^3.1152.0",
+    "@aws-sdk/client-cloudwatch": "^3.1152.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1152.0",
+    "@aws-sdk/client-ecs": "^3.1152.0",
+    "@aws-sdk/client-pi": "^3.1152.0",
+    "@aws-sdk/client-rds": "^3.1152.0",
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

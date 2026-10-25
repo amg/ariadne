@@ -1,7 +1,7 @@
 import { db } from '@db/db';
-import type { ExpandOutcome, MessageExpansion } from '@db/types';
+import type { ExpandOutcome } from '@db/types';
 
-export interface RecordMessageExpansionProps {
+interface RecordMessageExpansionProps {
   messageId: string;
   /** The recorded end of the arrival's try at a rewrite. */
   expandOutcome: ExpandOutcome;
@@ -16,9 +16,7 @@ export interface RecordMessageExpansionProps {
  * is. Returns the stored row, whichever pass wrote it. The rewrite's
  * spend lands in `message_side_costs`.
  */
-export async function recordMessageExpansion(
-  props: RecordMessageExpansionProps,
-): Promise<MessageExpansion> {
+export async function recordMessageExpansion(props: RecordMessageExpansionProps) {
   const inserted = await db
     .insertInto('analysis.messageExpansions')
     .values({

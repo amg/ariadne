@@ -1,7 +1,7 @@
+import type { HandoverProgress } from '@/components/chat/types';
 import { Button } from '@/components/ui/button';
 import { MessageSquarePlus, MoveDown } from 'lucide-react';
 import ThinkingIndicator from '../ThinkingIndicator';
-import type { HandoverProgress } from './types';
 
 function HandoverNotice({ children }: { children: React.ReactNode }) {
   return (

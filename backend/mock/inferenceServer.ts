@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import Fastify from 'fastify';
 
 /**
- * Mock inference server (real MVP deliverable —).
+ * Mock inference server.
  *
  * Emulates DeepInfra's OpenAI-compatible surface:
  * `POST /v1/openai/chat/completions` — with `stream: true`, SSE
@@ -15,8 +15,8 @@ import Fastify from 'fastify';
  * content-hash-seeded 1024-dim L2-normalized vector (identical text →
  * identical vector, different texts land far apart, unless a
  * `TOPIC:<name>` marker puts them on one topic), OpenAI-compatible
- * shape incl. `usage.prompt_tokens` — the test seam the thread-health
- * analyzer runs against.
+ * shape incl. `usage.prompt_tokens` — the test seam the Drift gate runs
+ * against.
  *
  * `createDeepInfra({ baseURL })` appends `/openai` to the base, so the
  * `MOCK_AI_BASE_URL` switch-in value is this server's `/v1` root.
@@ -24,7 +24,8 @@ import Fastify from 'fastify';
  * Deterministic: reply text is derived from the last user message, token
  * counts from message shapes. A `PAUSE:<ms>` marker in the user content
  * suspends the stream between the first and second token — that is the hook
- * the inter-token idle-guard tests use. The embeddings endpoint exposes
+ * the inter-token idle-guard tests use. A `THINK:` marker streams reasoning
+ * ahead of the reply (`MOCK_REASONING_PARTS`). The embeddings endpoint exposes
  * request accounting and error injection via the returned `embeddings`
  * control (abort-and-resume tests). Embedding, rewrite and extraction
  * requests can be held until released, so tests can interleave two
@@ -47,20 +48,20 @@ export type MockInferenceServer = {
   chats: MockChatsControl;
 };
 
-export type MockChatsControl = {
+type MockChatsControl = {
   /** Raw body of the latest streamed chat-completion request; null before any. */
   lastRequest: () => Record<string, unknown> | null;
 };
 
 /** A request the mock keeps waiting until the test lets it go. */
-export type HeldRequest = {
+type HeldRequest = {
   /** Resolves once the held request has reached the mock. */
   arrived: Promise<void>;
   /** Lets the held request go on to its reply. */
   release: () => void;
 };
 
-export type MockEmbeddingsControl = {
+type MockEmbeddingsControl = {
   /** Total `/embeddings` requests received (failed ones included). */
   requestCount: () => number;
   /** Fail every `/embeddings` request from the 1-based request number onward with a 500. */
@@ -76,7 +77,7 @@ export type MockEmbeddingsControl = {
   varyByRequest: (on: boolean) => void;
 };
 
-export type MockRewritesControl = {
+type MockRewritesControl = {
   /** Fail every rewrite chat-completion request with a 500. */
   failAll: () => void;
   /** Stop failing rewrite requests. */
@@ -98,14 +99,14 @@ export type MockRewritesControl = {
   holdNext: () => HeldRequest;
 };
 
-export type MockJudgesControl = {
+type MockJudgesControl = {
   /** Fail every judge chat-completion request with a 500. */
   failAll: () => void;
   /** Stop failing judge requests. */
   clearFailures: () => void;
 };
 
-export type MockMemoryControl = {
+type MockMemoryControl = {
   /** Total extraction requests received (failed ones included). */
   extractionCount: () => number;
   /** The turns prompt of the latest extraction request; null before any. */
@@ -149,18 +150,24 @@ export const MOCK_CACHE = {
   basePromptTokens: 4,
 } as const;
 
+/**
+ * The reasoning a streamed reply thinks first when its user content carries
+ * `THINK:`. It streams in these pieces, ahead of the reply text.
+ */
+export const MOCK_REASONING_PARTS = ['Weighing the ', 'question first.'] as const;
+
 export const MOCK_EMBEDDINGS = {
   /** Prompt-token base per embedded value (mirrors the MOCK_CACHE convention). */
   basePromptTokens: 4,
 } as const;
 
 /** Deterministic prompt-token count for an embedded text. */
-export function countMockEmbeddingPromptTokens(text: string): number {
+function countMockEmbeddingPromptTokens(text: string) {
   return MOCK_EMBEDDINGS.basePromptTokens + Math.ceil(text.length / 4);
 }
 
 /** FNV-1a 32-bit — stable seed per content string. */
-function hashString32(text: string): number {
+function hashString32(text: string) {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) {
     hash ^= text.charCodeAt(i);
@@ -170,7 +177,7 @@ function hashString32(text: string): number {
 }
 
 /** Small deterministic PRNG (mulberry32). */
-function mulberry32(seed: number): () => number {
+function mulberry32(seed: number) {
   let state = seed >>> 0;
   return () => {
     state = (state + 0x6d2b79f5) | 0;
@@ -201,7 +208,7 @@ const TOPIC_SHARE = 0.85;
  * gate. Exported so tests can compute expected vectors without a network
  * round trip.
  */
-export function buildMockEmbedding(text: string): number[] {
+export function buildMockEmbedding(text: string) {
   const own = seededUnitVector(text);
   const topic = text.match(TOPIC_HOOK)?.[1];
   if (topic === undefined) return own;
@@ -213,12 +220,12 @@ export function buildMockEmbedding(text: string): number[] {
   );
 }
 
-function seededUnitVector(seed: string): number[] {
+function seededUnitVector(seed: string) {
   const next = mulberry32(hashString32(seed));
   return normalized(Array.from({ length: 1024 }, () => next() * 2 - 1));
 }
 
-function normalized(vector: number[]): number[] {
+function normalized(vector: number[]) {
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   return vector.map((value) => value / norm);
 }
@@ -229,7 +236,7 @@ let counter = 0;
 type HoldQueue = { arrive: () => void; released: Promise<void> }[];
 
 /** Arms a hold on the next request to reach `queue`. */
-function armHold(queue: HoldQueue): HeldRequest {
+function armHold(queue: HoldQueue) {
   let arrive: () => void = () => {};
   let release: () => void = () => {};
   const arrived = new Promise<void>((resolve) => {
@@ -243,7 +250,7 @@ function armHold(queue: HoldQueue): HeldRequest {
 }
 
 /** Waits out the oldest armed hold, if any. */
-async function waitIfHeld(queue: HoldQueue): Promise<void> {
+async function waitIfHeld(queue: HoldQueue) {
   const hold = queue.shift();
   if (!hold) return;
   hold.arrive();
@@ -270,12 +277,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function detectPauseMs(content: string): number {
+function detectPauseMs(content: string) {
   const match = content.match(/PAUSE:(\d+)/);
   return match ? Number(match[1]) : 0;
 }
 
-function buildReply(content: string): string {
+function buildReply(content: string) {
   // Strip the test hook so canned replies stay deterministic text.
   const cleaned = content.replace(/PAUSE:\d+\s*/g, '').trim();
   return `Mock reply to: ${cleaned || '(empty)'}`;
@@ -286,7 +293,7 @@ async function streamReply(args: {
   end: () => void;
   finish: () => void;
   body: ChatCompletionsBody;
-}): Promise<void> {
+}) {
   const { write, end, finish, body } = args;
   const messages = body.messages ?? [];
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -302,9 +309,20 @@ async function streamReply(args: {
 
   const promptTokens = MOCK_CACHE.basePromptTokens + messages.length;
   const completionTokens = tokens.length;
-  const totalTokens = promptTokens + completionTokens;
 
   const send = (data: unknown) => write(`data: ${JSON.stringify(data)}\n\n`);
+
+  if (lastUser.includes('THINK:')) {
+    for (const part of MOCK_REASONING_PARTS) {
+      send({
+        id,
+        object: 'chat.completion.chunk',
+        created,
+        model,
+        choices: [{ index: 0, delta: { reasoning_content: part }, finish_reason: null }],
+      });
+    }
+  }
 
   for (let i = 0; i < tokens.length; i += 1) {
     // Suspends between the first and second token (idle-guard test hook).
@@ -423,7 +441,7 @@ function titlingReply(body: ChatCompletionsBody): string | null {
  * follow-up, which the expansion tier's echo guard rejects. Null when the
  * request is not a rewrite call.
  */
-function rewriteReply(body: ChatCompletionsBody): string | null {
+function rewriteReply(body: ChatCompletionsBody) {
   const system = body.messages?.[0]?.content ?? '';
   if (!system.startsWith(REWRITER_MARKER)) return null;
   const lastUser =
@@ -475,7 +493,7 @@ const MOCK_FACT_VERBS: Record<string, { verb: string; category: string }> = {
  * an "I love/like/live/work/am …" clause, rephrased in the third person.
  * Null when the request is not an extraction call.
  */
-function extractionReply(body: ChatCompletionsBody): string | null {
+function extractionReply(body: ChatCompletionsBody) {
   const system = body.messages?.[0]?.content ?? '';
   if (!system.startsWith(EXTRACTION_MARKER)) return null;
   const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -506,7 +524,7 @@ const DUPLICATE_MARKER = 'You compare facts about the user';
  * matches the candidate text exactly (case-insensitive), NEW otherwise.
  * Null when the request is not a duplicate check.
  */
-function duplicateReply(body: ChatCompletionsBody): string | null {
+function duplicateReply(body: ChatCompletionsBody) {
   const system = body.messages?.[0]?.content ?? '';
   if (!system.startsWith(DUPLICATE_MARKER)) return null;
   const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -522,7 +540,7 @@ function duplicateReply(body: ChatCompletionsBody): string | null {
 const CLASSIFICATION_MARKER = 'You classify one fact about the user';
 
 /** The newest user message of a request; null when it has none. */
-function lastUserContentOrNull(body: ChatCompletionsBody): string | null {
+function lastUserContentOrNull(body: ChatCompletionsBody) {
   return [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? null;
 }
 
@@ -532,7 +550,7 @@ function lastUserContentOrNull(body: ChatCompletionsBody): string | null {
  * current category; the subject is kept; an ISO date in the sentence
  * becomes validAt. Null when the request is not a classification call.
  */
-function classificationReply(body: ChatCompletionsBody): string | null {
+function classificationReply(body: ChatCompletionsBody) {
   const system = body.messages?.[0]?.content ?? '';
   if (!system.startsWith(CLASSIFICATION_MARKER)) return null;
   const prompt = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.content ?? '';
@@ -668,7 +686,7 @@ export async function startMockInferenceServer(options?: {
     }
 
     // Expansion-tier injection hook: rewrite calls fail while armed, so
-    // the analyzer's graceful-skip path is testable. Streamed chat calls
+    // the Drift gate's raw-reading fallback is testable. Streamed chat calls
     // are never rewrites and are untouched.
     if (body.stream !== true && rewritesState.failAll && isRewriteCall) {
       return reply.code(500).send({

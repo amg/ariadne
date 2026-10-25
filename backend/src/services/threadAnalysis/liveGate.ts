@@ -1,8 +1,9 @@
-import { env } from '@config/env';
+import type { FireChannel, GateVerdict } from '@ari/lib/api/schemas/common/driftGate';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import { type Result, err, ok } from '../../types/result';
-import { type LiveChain, isArrivalFinished, readLiveChain } from './messageTransformer/liveChain';
+import { isArrivalFinished, readLiveChain } from './messageTransformer/liveChain';
 import { transformMessage } from './messageTransformer/transformMessage';
-import type { FireChannel, GateVerdict } from './types';
+import type { JudgingMode, LiveChain } from './types';
 
 /**
  * The live lane of the thread-health gate. Every arriving user message
@@ -15,7 +16,7 @@ import type { FireChannel, GateVerdict } from './types';
  * re-judged.
  */
 
-export interface LiveArrivalOutcome {
+interface LiveArrivalOutcome {
   /** Verdict on the last processed arrival; null when nothing arrived. */
   verdict: GateVerdict | null;
   fireChannel: FireChannel | null;
@@ -26,6 +27,8 @@ export interface LiveArrivalOutcome {
 
 type RunLiveGateProps = {
   threadId: string;
+  /** The deployment's mode; `off` runs no pass. */
+  mode: ThreadAnalysisMode;
   /**
    * Judge arrivals up to and including this user Message. Absent =
    * process every arrival in the thread (backfill / analysis-view fill).
@@ -51,13 +54,10 @@ const EMPTY_OUTCOME: LiveArrivalOutcome = {
  * so overlapping passes agree on every verdict; the loser only pays for a
  * duplicate round of inference.
  */
-export async function runLiveGate({
-  threadId,
-  upToMessageId,
-}: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
-  if (env.THREAD_ANALYSIS_MODE === 'off') return ok(EMPTY_OUTCOME);
+export async function runLiveGate({ threadId, upToMessageId, mode }: RunLiveGateProps) {
+  if (mode === 'off') return ok(EMPTY_OUTCOME);
   return transformArrivals(
-    upToMessageId === undefined ? { threadId } : { threadId, upToMessageId },
+    upToMessageId === undefined ? { threadId, mode } : { threadId, upToMessageId, mode },
   );
 }
 
@@ -67,7 +67,7 @@ export async function runLiveGate({
  * judgment, which folds it in the same rebuild, unless it is the last
  * arrival this pass judges.
  */
-function owesWork(chain: LiveChain, index: number, targetIndex: number): boolean {
+function owesWork(chain: LiveChain, index: number, targetIndex: number) {
   const arrival = chain.arrivals[index];
   if (!arrival || isArrivalFinished(chain, arrival)) return false;
   return index === targetIndex || !chain.verdicts.has(arrival.userMessage.id);
@@ -88,7 +88,8 @@ function owesWork(chain: LiveChain, index: number, targetIndex: number): boolean
 async function transformArrivals({
   threadId,
   upToMessageId,
-}: RunLiveGateProps): Promise<Result<LiveArrivalOutcome>> {
+  mode,
+}: Omit<RunLiveGateProps, 'mode'> & { mode: JudgingMode }): Promise<Result<LiveArrivalOutcome>> {
   // Only the live conversation is gated; abandoned rows keep what they had.
   const chain = await readLiveChain(threadId);
   if (chain.arrivals.length === 0) return ok(EMPTY_OUTCOME);
@@ -103,7 +104,11 @@ async function transformArrivals({
   let current = chain;
   for (let i = 0; i <= targetIndex; i += 1) {
     if (!owesWork(current, i, targetIndex)) continue;
-    const transformed = await transformMessage({ chain: current, arrivalIndex: i });
+    const transformed = await transformMessage({
+      chain: current,
+      arrivalIndex: i,
+      mode,
+    });
     if (transformed.type === 'error') return transformed;
     current = transformed.data;
   }

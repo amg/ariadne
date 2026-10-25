@@ -1,7 +1,7 @@
-import { type Result, ok } from '../../../types/result';
+import { ok } from '../../../types/result';
+import type { JudgingMode } from '../types';
 import { embedMessageStep } from './embedMessageStep';
-import type { LiveChain } from './liveChain';
-import type { MessageStep, MessageStepInput } from './messageStep';
+import type { MessageStepInput } from './messageStep';
 import { rewriteMessageStep } from './rewriteMessageStep';
 import { verdictAndFoldStep } from './verdictAndFoldStep';
 
@@ -14,18 +14,17 @@ import { verdictAndFoldStep } from './verdictAndFoldStep';
  */
 
 /** Ordered steps; adding or removing a step happens here and nowhere else. */
-const MESSAGE_STEPS: readonly MessageStep[] = [
-  rewriteMessageStep,
-  embedMessageStep,
-  verdictAndFoldStep,
-];
+function messageSteps(mode: JudgingMode) {
+  return [rewriteMessageStep(mode), embedMessageStep, verdictAndFoldStep];
+}
 
 export async function transformMessage({
   chain,
   arrivalIndex,
-}: MessageStepInput): Promise<Result<LiveChain>> {
+  mode,
+}: MessageStepInput & { mode: JudgingMode }) {
   let current = chain;
-  for (const step of MESSAGE_STEPS) {
+  for (const step of messageSteps(mode)) {
     const ran = await step.run({ chain: current, arrivalIndex });
     if (ran.type === 'error') return ran;
     current = ran.data;

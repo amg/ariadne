@@ -12,19 +12,12 @@ All environment variables and their defaults are defined in a single location: `
 ## Usage
 
 ```typescript
-import { env, isInferenceConfigured, getCorsOrigins } from '@config/env';
+import { env } from '@config/env';
 
 // Access any environment variable - everything goes through env
 const port = env.PORT;
 const debug = env.DEBUG;
 const model = env.DEFAULT_MODEL; // Default model ID accessed through env
-
-// Use helper functions
-if (isInferenceConfigured()) {
-  // ...
-}
-
-const origins = getCorsOrigins();
 ```
 
 ## Available Configuration
@@ -52,6 +45,11 @@ const origins = getCorsOrigins();
 - `AI_STREAM_IDLE_TIMEOUT_MS` - Idle timeout in ms (default: 5000)
 - `ENABLE_REASONING` - Enable reasoning output (default: true)
 
+### Spend budget
+- `DAILY_SPEND_BUDGET_USD` - Daily spend budget in USD across every metered
+  call; unset or empty means no budget. A value that is not a number of at
+  least 0 is refused rather than read as "no budget".
+
 ### Titling Service
 - `AI_TITLING_TIMEOUT_MS` - Titling timeout in ms (default: 5000)
 - `TITLING_MODEL` - Override model for titling (optional)
@@ -71,6 +69,20 @@ const origins = getCorsOrigins();
 - `HANDOVER_WAIT_MS` - How long a handover request holds for the closed
   segment's capture before answering "still saving" (default: 10000)
 
+### Background worker
+- `WORKER_JOB_CONCURRENCY` - Queue jobs one process runs side by side; a
+  whole number of at least 1, otherwise the process refuses to start
+  (default: 4)
+
+### Monitoring
+- `STATE_LOG_INTERVAL_SECONDS` - Seconds between the state records a process
+  logs of what it carries (push streams open, how long the oldest job has
+  waited); a whole number of at least 1, otherwise the process refuses to
+  start (default: 20)
+- `ECS_CONTAINER_METADATA_URI_V4` - Set by ECS, never by hand. Each app
+  record names the ECS task it came from; without it, a record names the
+  host and process instead
+
 ### Feature toggles
 - `FEATURE_MEMORY` - User memory: Fact capture, Thread Seeds, the Memory
   screen and settings (default: false). Toggles say whether a feature exists
@@ -78,7 +90,8 @@ const origins = getCorsOrigins();
   changing one takes a backend restart.
 
 ### CORS
-- `CORS_ORIGINS` - Comma-separated allowed origins (optional, defaults to localhost)
+- `CORS_ORIGINS` - Comma-separated allowed origins (optional; unset names none — the home
+  server falls back to its localhost defaults, and AWS refuses to start)
 
 ### Logger
 - `FORCE_COLOR` - Force color output

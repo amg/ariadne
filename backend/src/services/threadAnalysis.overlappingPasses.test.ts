@@ -60,7 +60,7 @@ async function threadAwaitingFollowUpVerdict(title: string) {
   await insertUserIfNotExists({ id: DEFAULT_USER_ID });
   const { id: threadId } = await insertThread({ userId: DEFAULT_USER_ID, title });
   const opening = await insertMessage({ threadId, role: 'user', content: OPENING });
-  const judged = await runLiveGate({ threadId, upToMessageId: opening.id });
+  const judged = await runLiveGate({ threadId, upToMessageId: opening.id, mode: 'heuristic' });
   expect(judged.type).toBe('success');
   const openingReply = await insertMessage({
     threadId,
@@ -88,7 +88,7 @@ async function followUpSpend(followUpId: string) {
   };
 }
 
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: number[], b: number[]) {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -105,7 +105,9 @@ describe('two Drift gate passes over one Thread', () => {
     // What a single pass spends on the follow-up, as the yardstick.
     mock.rewrites.replySequence([REWRITE_A]);
     const alone = await threadAwaitingFollowUpVerdict('one pass');
-    expect((await runLiveGate({ threadId: alone.threadId })).type).toBe('success');
+    expect((await runLiveGate({ threadId: alone.threadId, mode: 'heuristic' })).type).toBe(
+      'success',
+    );
     const onePass = await followUpSpend(alone.followUpId);
 
     const { threadId, openingId, openingReplyId, followUpId } =
@@ -115,10 +117,10 @@ describe('two Drift gate passes over one Thread', () => {
 
     // Both passes ask for a rewrite of the follow-up before either stores one.
     const rewriteOfA = mock.rewrites.holdNext();
-    const passA = runLiveGate({ threadId });
+    const passA = runLiveGate({ threadId, mode: 'heuristic' });
     await rewriteOfA.arrived;
     const rewriteOfB = mock.rewrites.holdNext();
-    const passB = runLiveGate({ threadId, upToMessageId: followUpId });
+    const passB = runLiveGate({ threadId, upToMessageId: followUpId, mode: 'heuristic' });
     await rewriteOfB.arrived;
 
     // A stores its rewrite and asks for an embedding. B's rewrite comes

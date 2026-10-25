@@ -8,7 +8,7 @@ interface Props {
   onClose: (saved: boolean) => void;
 }
 
-function dateHint(validAt: string | null): string {
+function dateHint(validAt: string | null) {
   if (validAt === null) {
     return 'To date this fact, say when it became true, e.g. "since March 2024".';
   }

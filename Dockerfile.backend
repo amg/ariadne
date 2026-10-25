@@ -4,6 +4,7 @@ WORKDIR /app
 
 # Copy all package files (workspace setup)
 COPY package*.json ./
+COPY lib/package.json ./lib/
 COPY backend/package*.json ./backend/
 
 # Install dependencies (workspace-aware, skip scripts for CI/CD)
@@ -11,6 +12,7 @@ ENV LEFTHOOK=0
 RUN npm ci --ignore-scripts
 
 # Copy backend source
+COPY lib ./lib
 COPY backend ./backend
 
 # Typecheck must pass for the image to build (defense in depth: the

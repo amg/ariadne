@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { SegmentDriftLog } from '@db/types';
 
 type FindSegmentDriftLogByMessageIdProps = {
   messageId: string;
@@ -14,7 +13,7 @@ type FindSegmentDriftLogByMessageIdProps = {
 export async function findSegmentDriftLogByMessageId({
   messageId,
   modelId,
-}: FindSegmentDriftLogByMessageIdProps): Promise<SegmentDriftLog | null> {
+}: FindSegmentDriftLogByMessageIdProps) {
   const row = await db
     .selectFrom('analysis.segmentDriftLogs')
     .selectAll()

@@ -1,0 +1,8 @@
+{"kind":"run-started","at":"2026-10-15T00:00:00.000Z"}
+{"kind":"process-started","at":"2026-10-15T00:00:01.600Z","name":"mock","task":"pid-100"}
+{"kind":"process-started","at":"2026-10-15T00:00:01.700Z","name":"backend","task":"pid-101"}
+{"kind":"generator-launched","at":"2026-10-15T00:00:02.000Z","generator":0,"attempt":1,"firstUser":0,"userCount":4,"task":"pid-102","spot":false,"planned":{"rampEndsAt":"2026-10-15T00:00:07.000Z","holdEndsAt":"2026-10-15T00:01:07.000Z"}}
+{"kind":"generator-stopped","at":"2026-10-15T00:01:08.000Z","generator":0,"attempt":1,"reason":"finished","detail":null,"replacedByAttempt":null}
+{"kind":"process-stopped","at":"2026-10-15T00:01:30.000Z","name":"mock"}
+{"kind":"process-stopped","at":"2026-10-15T00:01:30.000Z","name":"backend"}
+{"kind":"run-ended","at":"2026-10-15T00:01:30.000Z","outcome":"finished"}

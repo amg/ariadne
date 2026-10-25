@@ -1,6 +1,6 @@
 # Topic Drift Detection: The Math
 
-Think of a conversation as a hiker navigating a vast forest. They start at a clear trailhead—Topic A: "Review my resume"—but ten minutes later, they’re somehow deep in the bushes talking about "registering a motorcycle" (Topic B). To map this journey, we need a tracker that can yell "they’re leaving the path!" while the hike is happening, and later draw a perfect map of everywhere they went. Here is how the math builds that tracker, step by step.
+Think of a conversation as a hiker navigating a vast forest. They start at a clear trailhead—Topic A: "Review my resume"—but ten minutes later, they’re somehow deep in the bushes talking about "registering a motorcycle" (Topic B). To map this journey, we need a tracker that can yell "they’re leaving the path!" while the hike is happening. Here is how the math builds that tracker, step by step.
 
 ## 1. Casting the Footprint (The Turn)
 
@@ -20,7 +20,7 @@ How do we know if two footprints belong to the same path? We measure the angle b
 
 To track the hiker, we need two reference points, both calculated by finding the Centroid (the exact middle coordinate of a group of footprints).
 
-**Basecamp (The Anchor):** The Anchor is the centroid of the opening topic. It is frozen when the first segment closes. It defines the pure opening topic, and it never moves after that. It tells us how far the conversation has strayed from the opening prompt, but it doesn't get a vote on when the topic shifted.
+**Basecamp (The Anchor):** The Anchor is the centroid of the segment's opening footprints. Once those first steps are folded in, it never moves again, until a new segment starts and pitches a new basecamp. The Gravity Point walks along with the hiker, so it can't notice a slow wander; the Anchor stays put, so it can.
 
 **Current Location (The Gravity Point):** This is the center of the current topic. As the hiker takes new steps that belong to the same topic, we add those vectors together and normalize them back to a length of 1: $G = \frac{\sum v_i}{\Vert{}\sum v_i\Vert{}}$. The Gravity Point moves with the hiker.
 
@@ -44,22 +44,10 @@ $$z = \frac{d(v_n, G) - \mu}{\max(\sigma, \sigma_{floor})}$$
 
 If $z$ departs the pack by enough standard deviations, the verdict fires, the segment closes and its ledger is shredded, and the next segment seeds from this very footprint.
 
-**The slow patrol:** Conversations still wobble in ways too gradual for a one-arrival verdict, so alongside it rides a quiet second listener, the Page–Hinkley detector, watching for sustained wander. It tracks accumulated drift over multiple steps to prevent the tracker from falsely cutting the segment just because the hiker stepped around a puddle.
+**The slow patrol:** Conversations still wobble in ways too gradual for a one-arrival verdict, so alongside it rides a quiet second listener, the Page–Hinkley detector, watching for sustained wander. It reads each arrival's distance from the segment's basecamp and adds up the steps that keep heading away, so a slow walk off the trail still trips it, while stepping around a puddle does not.
 
-## 6. Drawing the Map & Looping Back
+## 6. The Paper Trail
 
-Once the hike is over, we look at our map of cut-up segments. What if Segment 1 was about motorcycles, Segment 2 was about resumes, and Segment 3 went back to motorcycles? We need the math to recognize the overlap.
-
-We treat each topic segment as a point cloud—a pile of dirt. To compare them, we use the Wasserstein-1 distance (Earth-Mover's distance).
-
-Instead of blindly hauling the whole pile, the math calculates the minimum effort required to reshape the Segment 3 pile so it perfectly matches the layout of Segment 1. If the segments are the same topic, their footprints are basically already sitting on top of each other. Moving dirt zero inches requires zero work, so overlapping parts are effectively free. The final "effort" score is generated purely by the footprints that don't line up, giving us a precise measurement of the difference between the two camps.
-
-Because different threads have different noise floors, no hardcoded stick serves them all. The thread calibrates itself by taking a single topic, chopping it in half, and measuring the Earth-Mover difference between its own two halves. This cost becomes the hike's own measuring stick: $\tau_{merge}$, the thread's personal standard for a match.
-
-With the stick in hand, the math runs every pair of segments and collects all the scores into the **Revisit Matrix**. Wherever the score falls below the stick, the system throws a flag and the map draws a bridge between them: a Merge Suggestion, the hiker looping back to an old camp.
-
-## 7. The Paper Trail
-
-To ensure our tracker's map is trustworthy, we leave a complete paper trail. Every threshold, noise allowance, and rewrite decision is logged in the final report. This means any topic cut made during the live hike can be flawlessly reproduced from the data alone.
+To ensure our tracker's map is trustworthy, we leave a complete paper trail. Every reading, the criterion it was judged against, and every rewrite decision is stored with its verdict. Retuning the numbers later never changes what an earlier verdict was judged by.
 
 How the live tracker keeps all of this up to date without re-reading the whole hike at every step is told in [DRIFT-GATE-RUNNING-TOTALS.md](DRIFT-GATE-RUNNING-TOTALS.md).

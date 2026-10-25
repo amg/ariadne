@@ -5,7 +5,6 @@ import {
   getUserSettings,
   resolvedUserSettings,
   updateUserSettings,
-  validatedSettingsPatch,
 } from '@services/settingsService';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
@@ -31,18 +30,6 @@ describe('settingsService', () => {
     expect(resolvedUserSettings({ memoryBlockedCategories: ['nonsense'] })).toEqual(
       DEFAULT_USER_SETTINGS,
     );
-  });
-
-  it('accepts known keys only, each with a valid value', () => {
-    expect(validatedSettingsPatch({ memoryEnabled: false })).toEqual({
-      type: 'success',
-      data: { memoryEnabled: false },
-    });
-    expect(validatedSettingsPatch({ memoryEnabled: 'no' })).toMatchObject({ type: 'error' });
-    expect(validatedSettingsPatch({ memoryBlockedCategories: ['bogus'] })).toMatchObject({
-      type: 'error',
-    });
-    expect(validatedSettingsPatch({ theme: 'dark' })).toMatchObject({ type: 'error' });
   });
 
   it('merges a patch over the stored settings', async () => {

@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { MessageEmbedding } from '@db/types';
 import { toMessageEmbedding } from './embeddingMapping';
 
 type ListMessageEmbeddingsByMessageIdsProps = {
@@ -15,7 +14,7 @@ type ListMessageEmbeddingsByMessageIdsProps = {
 export async function listMessageEmbeddingsByMessageIds({
   messageIds,
   modelId,
-}: ListMessageEmbeddingsByMessageIdsProps): Promise<MessageEmbedding[]> {
+}: ListMessageEmbeddingsByMessageIdsProps) {
   if (messageIds.length === 0) return [];
   const rows = await db
     .selectFrom('analysis.messageEmbeddings')

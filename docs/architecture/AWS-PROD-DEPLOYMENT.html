@@ -113,7 +113,7 @@ carry the values one side needs from the other, and check what neither can.</p>
   <rect x="0" y="208" width="940" height="62" fill="#e2f2ea"/><text x="8" y="242" class="lane">AWS app</text>
 
   <rect x="84" y="20" width="100" height="44" rx="6" fill="#fff" stroke="#6b7280"/><text x="92" y="38" class="t">1 before-raise</text><text x="92" y="54" class="ts">refuses early</text>
-  <rect x="190" y="152" width="92" height="44" rx="6" fill="#fff" stroke="#2563a8"/><text x="198" y="170" class="t">2 spend limit</text><text x="198" y="186" class="ts">ledger ≤ $50</text>
+  <rect x="190" y="152" width="92" height="44" rx="6" fill="#fff" stroke="#2563a8"/><text x="198" y="170" class="t">2 spend limit</text><text x="198" y="186" class="ts">ledger ≤ $100</text>
   <rect x="296" y="152" width="92" height="44" rx="6" fill="#fff" stroke="#2563a8"/><text x="304" y="170" class="t">3 Images</text><text x="304" y="186" class="ts">build, push</text>
   <rect x="402" y="152" width="92" height="44" rx="6" fill="#fff" stroke="#2563a8"/><text x="410" y="170" class="t">4 Run key</text><text x="410" y="186" class="ts">new per raise</text>
   <rect x="508" y="218" width="92" height="44" rx="6" fill="#fff" stroke="#2e7d5b"/><text x="516" y="236" class="t">5 App stack</text><text x="516" y="252" class="ts">~20 min</text>
@@ -133,7 +133,7 @@ carry the values one side needs from the other, and check what neither can.</p>
 <table>
   <tr><th>Step</th><th>What stands up or changes</th><th>What it checks, and how it fails</th></tr>
   <tr><td>1 before-raise</td><td>nothing</td><td>Tools present, signed in, core up, origin certificate imported, Cloudflare's ranges unchanged, the zone's rule phases not owned by anything else, a seed snapshot exists. Any failure stops the raise before anything is spent.</td></tr>
-  <tr><td>2 spend limit</td><td>a ledger entry in the vault</td><td>Today's recorded worst cases plus this raise must stay within $50. <code>npx tsx bin/worstCase.ts &lt;step&gt; raise</code> prints a step's worst case: a few dollars at smoke, about half the limit at step100.</td></tr>
+  <tr><td>2 spend limit</td><td>a ledger entry in the vault</td><td>Today's recorded worst cases plus this raise must stay within $100. <code>npx tsx bin/worstCase.ts &lt;step&gt; raise</code> prints a step's worst case: a few dollars at smoke, about $9 at step10 and about $63 at step100, over half of it reserved load balancer capacity.</td></tr>
   <tr><td>3 images</td><td>backend, web, tools and load images under one immutable tag (time + commit)</td><td>The backend image's own typecheck runs during the build. The auth core is mirrored once per release, since nothing inside can reach Docker Hub.</td></tr>
   <tr><td>4 run key</td><td>a new secret parameter</td><td>Old generators and old allow-list rules stop working with the old key.</td></tr>
   <tr><td>5 app stack</td><td>network, endpoints, database (from the snapshot), Valkey, cluster, five services, origin, bastion</td><td>About twenty minutes, mostly the database. CloudFormation waits for every service to turn healthy; a service that never does rolls itself back. API tasks run migrations first.</td></tr>
@@ -230,7 +230,7 @@ carry the values one side needs from the other, and check what neither can.</p>
       <td>deletes the app stack 3 hours after it was created, and the load stack after 1 hour. A resumed raise keeps its first creation time</td>
       <td>touch Cloudflare: a record left behind serves errors until the next <code>down</code> or <code>up</code></td></tr>
   <tr><td>Daily worst-case ledger</td>
-      <td>every raise and load run records the most it could cost before the safety net deletes it; past $50 in a day, the next is refused</td>
+      <td>every raise and load run records the most it could cost before the safety net deletes it; past $100 in a day, the next is refused</td>
       <td>read the AWS bill, which lags by hours</td></tr>
   <tr><td><code>sweep</code></td><td>lists anything tagged app or load still there, and any leftover DNS record</td><td>delete: what to do with a leftover is the operator's call</td></tr>
 </table>
@@ -265,7 +265,7 @@ Security drills, each a pass or a stop:
 Teardown and sweep clean, then check billing the next day against the ledger.</div>
 <div class="gate"><b>G4, step10.</b> Everything in G3 at 10,000 users, plus a push from the worker reaches a tab on a different API copy, and no job ever runs twice (queue failed count 0). Readings: per-task CPU and connections, Postgres commit latency under the queue's notifies, Valkey requests per second. Re-size step50 from them.</div>
 <div class="gate"><b>G5, step50.</b> Same criteria at 50,000. Add: the database's connection count against its limit, and the load balancer's capacity units.</div>
-<div class="gate"><b>G6, step100.</b> The target: 100,000 users holding tabs open, 20,000 chatting. Pass: p95 time to first byte held from step50, no push drops, error rate under 0.1%, and the day stays within the $50 ledger.</div>
+<div class="gate"><b>G6, step100.</b> The target: 100,000 users holding tabs open, 20,000 chatting. Pass: p95 time to first byte held from step50, no push drops, error rate under 0.1%, and the day stays within the $100 ledger.</div>
 
 </main>
 </body>

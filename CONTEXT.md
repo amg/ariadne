@@ -91,47 +91,41 @@ Message carries the state of the conversation ending at it.
 _Avoid_: window embedding, message embedding (misleading — isolated Messages are not embedded)
 
 **Anchor**:
-The centroid of the opening segment's Turn embeddings, frozen when that
-segment closes — pure opening topic. A flip at Turn 2 locks it on Turn 1
-alone; a Thread that never leaves its opening theme gives it the whole
-segment. Anchor distance shows how far the Thread has moved from its
-start; the Anchor only measures that distance and never classifies a
-Turn.
+Where a Topic segment started: the centroid of its opening Turn
+embeddings, fixed once those Turns have folded. Unlike the Gravity
+point it does not follow the conversation, so a slowly wandering topic
+keeps moving away from it.
 _Avoid_: baseline, origin vector, first-K anchor
 
 **Anchor distance**:
-Cosine distance between the current Turn embedding and the Anchor.
-Measures cumulative drift — how far the Thread has moved from its
-opening topic; it falls again when the Thread returns to that topic.
+Cosine distance between an arrival's reading and the current segment's
+Anchor. The slow channel watches it for a sustained rise, which is how
+gradual drift fires even when no single message crosses the immediate
+criterion.
 _Avoid_: total drift, global drift
 
 **Gravity point**:
 The equal-weight centroid of the member Turn embeddings of the current
-Topic segment. Rolls forward as Turns join; reseeded by the Boundary turn
-that opens the next segment.
+Topic segment. Rolls forward as Turns join; reseeded by the Turn of the
+arrival that fired, which opens the next segment.
 _Avoid_: running mean, segment vector, centroid
 
 **Segment drift**:
-Cosine distance between a Turn embedding and the current Gravity point.
-Measures whether the Turn belongs to the current Topic segment, in whatever
-direction the topic moved.
-_Avoid_: local delta, jump, step distance, velocity
-
-**Drift score**:
-The clamped Segment drift — the single signal the Drift gate acts on.
-Range 0–1.
-_Avoid_: similarity score (inverted scale causes sign-flip bugs)
+Cosine distance between an arrival's reading and the current Gravity
+point, which the immediate criterion judges. It measures whether the
+arrival belongs to the current Topic segment, whichever way the topic
+moved.
+_Avoid_: local delta, jump, step distance, velocity, similarity score
+(inverted scale causes sign-flip bugs)
 
 **Boundary turn**:
-A Turn whose Segment drift crosses threshold: it closes the current Topic
-segment and seeds the next. A candidate point where the topic changed,
+The Turn of an arrival the Drift gate fired on: it closes the current
+Topic segment and seeds the next. A point where the topic changed,
 including a change back to a previous one.
 _Avoid_: breakpoint, pivot, drift point
 
 **Topic segment**:
 The consecutive Turns between two Boundary turns, sharing one topic.
-The report carries every Turn's messages inside its segment — the user
-message always, the assistant reply when present.
 _Avoid_: phase, chapter, cluster
 
 **Baggage**:
@@ -213,12 +207,6 @@ becomes the fresh Thread's first message, never in both and never in
 neither.
 _Avoid_: split, fork, transfer
 
-**Replay**:
-Offline re-scoring of an existing Thread's Turns through the same Drift
-gate logic used live. Backs the standalone analyzer, threshold
-calibration, and the retrospective view.
-_Avoid_: retrospective, backfill, reanalysis, audit
-
 **Prospective Turn**:
 An incoming user Message scored as a Turn *before* inference — its text
 embedded as a user-only Turn block and fed through the Drift gate exactly
@@ -260,11 +248,10 @@ The arrival-time verdict signal of the live gate after the
 pipeline: the incoming user Message rewritten into self-contained form against the prior
 Turn by a small cheap model — the *rewrite* decides the verdict when
 it lands, and the raw message stays the fallback when it is refused or
-unusable (`driftP`; see Expansion outcome). It restores
+unusable (see Expansion outcome). It restores
 what the Prospective Turn loses by withholding the assistant reply:
-concrete referents that anchor it to the real topic. Both readings are
-charted (`driftPGated` = verdict signal, `driftP` = raw audit), and every
-fallback carries a `rewriteNote`.
+concrete referents that tie it to the real topic. Every fallback records
+why in its Expansion outcome.
 _Avoid_: expansion signal, paraphrase signal, topic expansion
 
 **Rewrite trigger judge**:
@@ -275,8 +262,7 @@ dangle a referent into the prior Turn (`CONTEXT_DEPENDENT`) or stand on
 its own (`SELF_CONTAINED`)? A dependent verdict adds the message to the
 rewrite list — the judge only ever adds rewrite candidates, never vetoes
 the heuristic's picks — and every other outcome (`SELF_CONTAINED`,
-failed or unreadable verdict) keeps the raw fast path and explains
-itself in the Turn's `rewriteNote`. Exists because the regex misses
+failed or unreadable verdict) keeps the raw fast path. Exists because the regex misses
 quirks it cannot anticipate ("Is there a silver bullet for this?").
 _Avoid_: anaphora detector, context classifier, expansion gate
 
@@ -313,6 +299,14 @@ reading landed, or why it did not — a refusal, a quality reject, a
 provider failure, or unusable output. Only the end is recorded; attempts
 that led to it are not.
 _Avoid_: stage report, pipeline state
+
+### Running the app
+
+**Copy**:
+One running instance of the backend. aws-prod runs several side by side,
+each an ECS task; a home deployment runs one. Every app record names the
+copy that wrote it.
+_Avoid_: instance, replica, node, task (that is ECS's word, and the queue's)
 
 ### Cost
 

@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '@config/env';
 import type { FactCategory, Message } from '@db/types';
-import type { CapturedFact } from '@queries/memoryCaptureProgress/recordSegmentCapture';
+import type { recordSegmentCapture } from '@queries/memoryCaptureProgress/recordSegmentCapture';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
-import { type NearUserFact, listNearestUserFacts } from '@queries/userFacts/listNearestUserFacts';
+import { listNearestUserFacts } from '@queries/userFacts/listNearestUserFacts';
 import { listSeedableUserFacts } from '@queries/userFacts/listSeedableUserFacts';
 import {
   EMBEDDING_MODEL_ID,
-  type FactCandidate,
   computeEmbeddingCostUsd,
   computeInferenceCostUsd,
   embedText,
@@ -15,10 +14,17 @@ import {
   judgeFactDuplicate,
 } from '@services/aiService';
 import { type Result, err, ok } from '../../types/result';
+import type { parseFactCandidates } from '../aiService/extractFacts';
 import { factsNamedIn } from './factsNamedIn';
 
+type FactCandidate = NonNullable<ReturnType<typeof parseFactCandidates>>[number];
+
+type NearUserFact = Awaited<ReturnType<typeof listNearestUserFacts>>[number];
+
+type CapturedFact = Parameters<typeof recordSegmentCapture>[0]['facts'][number];
+
 /** One Turn of the scope Facts are captured from. */
-export interface CaptureTurn {
+interface CaptureTurn {
   userMessage: Message;
   assistantReply: Message | null;
 }
@@ -63,7 +69,7 @@ interface ReadSpend {
   embedding: CallSpend;
 }
 
-function emptySpend(): ReadSpend {
+function emptySpend() {
   return {
     extraction: { costUsd: 0, promptTokens: 0, completionTokens: 0 },
     duplicateCheck: { costUsd: 0, promptTokens: 0, completionTokens: 0 },
@@ -77,7 +83,7 @@ function emptySpend(): ReadSpend {
  * skipped: failing the read over it would only re-run the extraction
  * and spend again.
  */
-async function recordSpend(spendMessageId: string, spend: ReadSpend): Promise<void> {
+async function recordSpend(spendMessageId: string, spend: ReadSpend) {
   const lines = [
     { kind: 'fact_extraction', model: env.MEMORY_MODEL, spent: spend.extraction },
     { kind: 'fact_duplicate_check', model: env.MEMORY_MODEL, spent: spend.duplicateCheck },
@@ -101,7 +107,7 @@ async function recordSpend(spendMessageId: string, spend: ReadSpend): Promise<vo
 }
 
 /** Cosine distance between two vectors, 0 = identical direction. */
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: number[], b: number[]) {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -121,11 +127,7 @@ function cosineDistance(a: number[], b: number[]): number {
  * stand once the Facts read so far are stored: those read so far count as
  * known, and the stored Facts they replace no longer do.
  */
-async function nearestKnownFacts(
-  userId: string,
-  embedding: number[],
-  readSoFar: CapturedFact[],
-): Promise<NearUserFact[]> {
+async function nearestKnownFacts(userId: string, embedding: number[], readSoFar: CapturedFact[]) {
   const replacedIds = new Set(
     readSoFar.flatMap((fact) => (fact.replacesFactId === null ? [] : [fact.replacesFactId])),
   );
@@ -151,13 +153,18 @@ async function nearestKnownFacts(
 /**
  * The known Fact a candidate restates or corrects, or null when it is
  * about something new. Identical sentences and far-away ones need no
- * model call; only near neighbours are checked.
+ * model call. Only near neighbours are checked, and that check adds its
+ * cost to the read spend.
  */
-async function factReplacedByOrNull(
-  candidate: string,
-  neighbours: NearUserFact[],
-  spend: ReadSpend,
-): Promise<Result<NearUserFact | null>> {
+async function judgeFactReplacement({
+  candidate,
+  neighbours,
+  spend,
+}: {
+  candidate: string;
+  neighbours: NearUserFact[];
+  spend: ReadSpend;
+}): Promise<Result<NearUserFact | null>> {
   const near = neighbours.filter((fact) => fact.distance < NEAR_DUPLICATE_DISTANCE);
   const nearest = near[0];
   if (nearest === undefined) return ok(null);
@@ -200,7 +207,7 @@ async function readCandidate(input: {
   spend.embedding.costUsd += await computeEmbeddingCostUsd(embedded.data.promptTokens);
 
   const neighbours = await nearestKnownFacts(userId, embedded.data.embedding, readSoFar);
-  const replaced = await factReplacedByOrNull(candidate.content, neighbours, spend);
+  const replaced = await judgeFactReplacement({ candidate: candidate.content, neighbours, spend });
   if (replaced.type === 'error') return replaced;
 
   const sourceTurn = turns[candidate.turnIndex] ?? turns[turns.length - 1];
@@ -232,7 +239,7 @@ async function knownFactsFor(
   userId: string,
   blockedCategories: readonly FactCategory[],
   turns: { userText: string; assistantText: string | null }[],
-): Promise<string[]> {
+) {
   const facts = await listSeedableUserFacts({ userId, blockedCategories });
   const text = turns.map((turn) => `${turn.userText}\n${turn.assistantText ?? ''}`).join('\n');
   return factsNamedIn(
@@ -256,7 +263,7 @@ export async function readFacts({
   blockedCategories,
   spendMessageId,
   capturedThroughAt,
-}: ReadFactsProps): Promise<Result<CapturedFact[]>> {
+}: ReadFactsProps) {
   if (turns.length === 0) return ok([]);
 
   // Scope Turns through the pointer are context; anything after is new.

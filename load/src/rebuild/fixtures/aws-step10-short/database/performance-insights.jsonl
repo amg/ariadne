@@ -1,0 +1,4 @@
+{"group":"wait","dimensions":{"db.wait_event.name":"IO:WALSync","db.wait_event.type":"IO"},"at":"2026-10-17T23:59:00.000Z","averageActiveSessions":0.09}
+{"group":"query","dimensions":{"db.sql_tokenized.db_id":"pi-A1","db.sql_tokenized.id":"A1","db.sql_tokenized.statement":"insert into \"chat\".\"messages\" (\"id\", \"thread_id\") values ($1, $2)"},"at":"2026-10-17T23:59:00.000Z","averageActiveSessions":0.03}
+{"group":"wait","dimensions":{"db.wait_event.name":"Lock:object","db.wait_event.type":"Lock"},"at":"2026-10-18T00:01:00.000Z","averageActiveSessions":0.95}
+{"group":"query-in-wait","dimensions":{"db.sql_tokenized.id":"B7","db.sql_tokenized.statement":"insert into \"billing\".\"daily_spend\" (\"day\", \"slot\") values ($1, $2)","db.wait_event.name":"Lock:object"},"at":"2026-10-18T00:01:00.000Z","averageActiveSessions":0.9}

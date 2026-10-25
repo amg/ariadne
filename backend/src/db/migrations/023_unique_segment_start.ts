@@ -24,7 +24,7 @@ const DUPLICATES = sql`
   )
 `;
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   // The migrator wraps this in one READ COMMITTED transaction, so each
   // statement below sees a fresh snapshot. Without this lock, an older
   // backend still running while the migration applies could write a
@@ -80,7 +80,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema
     .withSchema('analysis')
     .dropIndex('thread_segments_thread_start_model_uq')

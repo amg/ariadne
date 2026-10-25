@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { insertThread } from '@queries/threads/insertThread';
-import { moveArrivalToFreshThreadOrNull } from '@queries/threads/moveArrivalToFreshThread';
+import { moveArrivalToFreshThread } from '@queries/threads/moveArrivalToFreshThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { useTestDb } from '@test/test-db';
@@ -18,14 +18,14 @@ async function threadWithArrival(content: string) {
   return { userId, threadId, arrival };
 }
 
-describe('moveArrivalToFreshThreadOrNull', () => {
+describe('moveArrivalToFreshThread', () => {
   useTestDb();
   const openTransaction = useHeldTransactions();
 
   it('abandons the arrival and opens the fresh Thread with its copy', async () => {
     const { userId, threadId, arrival } = await threadWithArrival('Start over elsewhere');
 
-    const moved = await moveArrivalToFreshThreadOrNull({
+    const moved = await moveArrivalToFreshThread({
       userId,
       fromThreadId: threadId,
       messageId: arrival.id,
@@ -51,7 +51,7 @@ describe('moveArrivalToFreshThreadOrNull', () => {
       claim.trx,
     );
 
-    const moving = moveArrivalToFreshThreadOrNull({
+    const moving = moveArrivalToFreshThread({
       userId,
       fromThreadId: threadId,
       messageId: arrival.id,

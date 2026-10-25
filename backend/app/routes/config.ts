@@ -1,6 +1,7 @@
-import { env } from '@config/env';
-import type { FeatureFlags } from '@config/features';
+import { getConfig } from '@ari/lib/api/schemas/config/config';
 import type { FastifyInstance } from 'fastify';
+import type { FeatureFlags } from '../types';
+import type { RouteOf } from './contract';
 
 /**
  * Deployment surfaces the frontend drives its chrome from: the
@@ -8,11 +9,14 @@ import type { FastifyInstance } from 'fastify';
  * bubble signal; the stored signals survive the off period) and which
  * features this deployment runs.
  */
-export async function setupConfigRoute(fastify: FastifyInstance, features: FeatureFlags) {
-  fastify.get('/api/config', async (_request, reply) => {
-    return reply.send({
-      threadAnalysisMode: env.THREAD_ANALYSIS_MODE,
-      features,
-    });
+export function setupConfigRoute(
+  fastify: FastifyInstance,
+  { memory, threadAnalysisMode }: FeatureFlags,
+) {
+  fastify.route<RouteOf<typeof getConfig>>({
+    method: getConfig.method,
+    url: getConfig.path,
+    handler: async (_request, reply) =>
+      reply.code(200).send({ threadAnalysisMode, features: { memory } }),
   });
 }

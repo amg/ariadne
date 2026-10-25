@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { testRedisUrlOrNull } from '@test/redis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type RedisConnection, connectRedis } from '../../redis/connection';
-import { type EventBus, createEventBus } from './bus';
+import { connectRedis } from '../../redis/connection';
+import type { ServerEvent } from '../../types/events';
+import { createEventBus } from './bus';
 import { redisCarrier } from './redisCarrier';
-import type { ServerEvent } from './serverEvent';
+import type { RedisConnection } from './types';
 
 const redisUrl = testRedisUrlOrNull();
 
 /** One backend copy: its own bus on its own connections to the shared Redis. */
 interface Copy {
-  bus: EventBus;
+  bus: ReturnType<typeof createEventBus>;
   redis: RedisConnection;
 }
 

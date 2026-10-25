@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import type { ServerEvent } from '../../types/events';
 import { createEventBus } from './bus';
 import type { CarriedMessage, Carrier } from './carrier';
-import type { ServerEvent } from './serverEvent';
 
 function titled(userId: string, title = 'Tides'): ServerEvent {
   return { kind: 'thread-titled', userId, threadId: randomUUID(), title };

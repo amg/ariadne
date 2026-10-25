@@ -13,7 +13,7 @@ import { type Kysely, sql } from 'kysely';
  * Idempotent (`if not exists`): test provisioning replays all migrations on
  * a fresh schema.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await sql`
     create table if not exists message_embeddings (
       message_id uuid primary key references messages(id) on delete cascade,
@@ -25,6 +25,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`drop table if exists message_embeddings`.execute(db);
 }

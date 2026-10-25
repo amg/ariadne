@@ -16,11 +16,6 @@ interface RefusalMarker {
   source: string;
 }
 
-/**
- * Normalize case, contractions, and stray punctuation so "can't" and
- * "cannot", and "**this request**" and "this request", all match the
- * same marker.
- */
 const CONTRACTIONS: ReadonlyMap<string, string> = new Map([
   // The negation suffix 't expands to " not" while keeping the verb's
   // trailing letter ("can't" -> "can not", not "ca not").
@@ -36,7 +31,12 @@ const CONTRACTIONS: ReadonlyMap<string, string> = new Map([
   ['’ve', ' have'],
 ]);
 
-function normalizeForRefusalMatch(text: string): string {
+/**
+ * Normalize case, contractions, and stray punctuation so "can't" and
+ * "cannot", and "**this request**" and "this request", all match the
+ * same marker.
+ */
+function normalizeForRefusalMatch(text: string) {
   let normalized = text.toLowerCase();
   for (const [contraction, expanded] of CONTRACTIONS) {
     normalized = normalized.split(contraction).join(expanded);
@@ -71,7 +71,7 @@ const REFUSAL_MARKERS: readonly RefusalMarker[] = [
 ];
 
 /** True when the rewrite output reads as a provider refusal rather than a rewrite. */
-export function naiveRefusalDetector(rawText: string): boolean {
+export function naiveRefusalDetector(rawText: string) {
   const normalized = normalizeForRefusalMatch(rawText);
   return REFUSAL_MARKERS.some(({ marker }) => normalized.includes(marker));
 }

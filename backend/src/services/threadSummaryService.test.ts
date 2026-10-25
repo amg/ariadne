@@ -28,7 +28,7 @@ async function addChatExchange(
     reported: null,
     estimated: null,
   },
-): Promise<void> {
+) {
   await insertMessage({ threadId, role: 'user', content: 'hello' });
   const assistantMessage = await insertMessage({
     threadId,
@@ -51,10 +51,7 @@ async function addChatExchange(
 }
 
 /** One assistant reply with its usage row; returns the reply's id. */
-async function addReply(
-  threadId: string,
-  tokens: { prompt: number; completion: number },
-): Promise<string> {
+async function addReply(threadId: string, tokens: { prompt: number; completion: number }) {
   const reply = await insertMessage({ threadId, role: 'assistant', content: 'a reply' });
   await insertMessageUsage({
     messageId: reply.id,
@@ -72,7 +69,7 @@ async function addReply(
   return reply.id;
 }
 
-async function addArrival(threadId: string): Promise<string> {
+async function addArrival(threadId: string) {
   return (await insertMessage({ threadId, role: 'user', content: 'a question' })).id;
 }
 

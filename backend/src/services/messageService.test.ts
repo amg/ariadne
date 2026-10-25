@@ -32,15 +32,19 @@ describe('messageService', () => {
     it('returns null when the thread is unknown or foreign', async () => {
       const { userId } = await createRandomThread();
 
-      expect(await getMessages({ userId, threadId: randomUUID() })).toBeNull();
+      expect(
+        await getMessages({ userId, threadId: randomUUID(), threadAnalysisMode: 'heuristic' }),
+      ).toBeNull();
 
       const other = await createRandomThread();
-      expect(await getMessages({ userId, threadId: other.threadId })).toBeNull();
+      expect(
+        await getMessages({ userId, threadId: other.threadId, threadAnalysisMode: 'heuristic' }),
+      ).toBeNull();
     });
 
     it('returns messages with usage nested when a usage row exists', async () => {
       const { userId, threadId } = await createRandomThread();
-      const userMessage = await insertMessage({
+      await insertMessage({
         threadId: threadId,
         role: 'user',
         content: 'hello',
@@ -64,7 +68,7 @@ describe('messageService', () => {
         latencyMs: 42,
       });
 
-      const messages = await getMessages({ userId, threadId });
+      const messages = await getMessages({ userId, threadId, threadAnalysisMode: 'heuristic' });
 
       expect(messages?.map((m) => m.content)).toEqual([SYSTEM_PROMPT, 'hello', 'world']);
       expect(messages?.[0]?.usage).toBeNull();
@@ -97,7 +101,7 @@ describe('messageService', () => {
         errorClass: 'fatal',
       });
 
-      const messages = await getMessages({ userId, threadId });
+      const messages = await getMessages({ userId, threadId, threadAnalysisMode: 'heuristic' });
 
       expect(messages?.map((m) => m.gateFailed)).toEqual([false, false, false, true]);
     });
@@ -112,7 +116,7 @@ describe('messageService', () => {
         errorClass: 'recoverable',
       });
 
-      const messages = await getMessages({ userId, threadId });
+      const messages = await getMessages({ userId, threadId, threadAnalysisMode: 'heuristic' });
 
       expect(messages?.some((m) => m.gateFailed)).toBe(false);
     });

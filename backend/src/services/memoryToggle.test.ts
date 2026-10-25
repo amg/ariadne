@@ -36,13 +36,19 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue({ memory: memoryOff });
+useTestQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging, titling, memory: memoryOff });
+  return submitChat({
+    ...props,
+    judging,
+    titling,
+    memory: memoryOff,
+    threadAnalysisMode: 'heuristic',
+  });
 }
 
 /** A thread with one settled Turn and a second arrival paused on a fire. */
@@ -72,7 +78,7 @@ async function pausedThread() {
   return { userId, threadId, pausedMessageId, closedSegmentId: logged.segmentId };
 }
 
-async function factCountOf(userId: string): Promise<number> {
+async function factCountOf(userId: string) {
   const facts = await db
     .selectFrom('memory.userFacts')
     .select('id')

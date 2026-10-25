@@ -3,7 +3,7 @@ import type { Database, DbExecutor, NewArrivalJudgmentState, NewSegmentDriftLog 
 import type { Transaction } from 'kysely';
 
 /** A segment an arrival opens; the caller picks its id so the verdict can name it. */
-export interface OpenedSegment {
+interface OpenedSegment {
   id: string;
   threadId: string;
   startMessageId: string;
@@ -11,7 +11,7 @@ export interface OpenedSegment {
 }
 
 /** The checkpoints one verdict commit keeps: the previous arrival's and its own. */
-export interface KeptCheckpoints {
+interface KeptCheckpoints {
   /** Judgment states kept, by their arrival's user Message. */
   stateMessageIds: readonly string[];
   /** Turn folds kept, by their Turn's assistant Message. */
@@ -46,7 +46,7 @@ async function pruneCheckpoints(
     modelId: string;
     keep: KeptCheckpoints;
   },
-): Promise<void> {
+) {
   const { threadId, modelId, keep } = props;
   const states = [...new Set(keep.stateMessageIds)];
   const folds = [...new Set(keep.foldMessageIds)];
@@ -90,7 +90,7 @@ async function storeJudgment(
     threadId: string;
     modelId: string;
   },
-): Promise<void> {
+) {
   if (openedSegments.length > 0) {
     const opened = await trx
       .insertInto('analysis.threadSegments')
@@ -138,7 +138,7 @@ export async function appendArrivalVerdict({
   verdict,
   judgmentState,
   keep,
-}: AppendArrivalVerdictProps): Promise<boolean> {
+}: AppendArrivalVerdictProps) {
   const modelId = verdict?.modelId ?? judgmentState?.modelId ?? openedSegments[0]?.modelId;
   try {
     await db.transaction().execute(async (trx) => {

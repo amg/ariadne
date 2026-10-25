@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 const UNIT = Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : 0));
 const OTHER = Array.from({ length: 1024 }, (_, index) => (index === 1 ? 1 : 0));
 
-async function createMessage(): Promise<string> {
+async function createMessage() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ userId, title: 'Embedding keys' });
@@ -30,7 +30,7 @@ async function createMessage(): Promise<string> {
   return message.id;
 }
 
-async function embeddingSpend(messageId: string, model: string): Promise<number | null> {
+async function embeddingSpend(messageId: string, model: string) {
   const row = await getSideCostByMessageId({
     messageId,
     kind: 'embedding',

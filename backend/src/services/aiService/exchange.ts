@@ -4,31 +4,12 @@ import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { updateMessageContent } from '@queries/messages/updateMessageContent';
 import type { FinishReason, LanguageModelUsage } from 'ai';
+import type { ChatOutcome } from '../../types/aiService';
 import { type Result, err, ok } from '../../types/result';
+import { logBestEffortFailure } from './bestEffortLogging';
 import { buildEstimatedUsageRow, buildUsageRow, hasUsageReport } from './usageMap';
 
-/**
- * One assistant exchange: accumulates streamed text, owns the latency
- * window and the inter-token idle watchdog, persists text and the spend
- * ledger row as it settles, and settles a single outcome promise exactly
- * once. An exchange that ends without a provider usage report settles an
- * estimated spend row instead, so an interrupted exchange still accounts
- * for what it spent.
- *
- * Idle watchdog: arms on the first text delta (prefill is exempt) and
- * re-arms on every subsequent delta. When the deadline elapses it sets
- * `idleFired` and invokes `onIdleTimeout` (caller aborts the stream);
- * the completion paths read `idleFired` to distinguish `stream_timeout`
- * from user stop / client disconnect.
- */
-
-export type ChatOutcome = {
-  finishReason: MessageFinishReason;
-  usagePersisted: boolean;
-  latencyMs: number | null;
-};
-
-export type NaturalFinishEvent = {
+type NaturalFinishEvent = {
   finishReason?: FinishReason;
   usage?: LanguageModelUsage;
   providerId?: string;
@@ -61,6 +42,20 @@ type ExchangeDeps = {
   onIdleTimeout: () => void;
 };
 
+/**
+ * One assistant exchange: accumulates streamed text, owns the latency
+ * window and the inter-token idle watchdog, persists text and the spend
+ * ledger row as it settles, and settles a single outcome promise exactly
+ * once. An exchange that ends without a provider usage report settles an
+ * estimated spend row instead, so an interrupted exchange still accounts
+ * for what it spent.
+ *
+ * Idle watchdog: arms on the first text delta (prefill is exempt) and
+ * re-arms on every subsequent delta. When the deadline elapses it sets
+ * `idleFired` and invokes `onIdleTimeout` (caller aborts the stream);
+ * the completion paths read `idleFired` to distinguish `stream_timeout`
+ * from user stop / client disconnect.
+ */
 export class ChatExchange {
   readonly outcome: Promise<Result<ChatOutcome>>;
 
@@ -110,7 +105,7 @@ export class ChatExchange {
       // Provider-side failure → partial text kept, no usage report, bubble error.
       if (event.finishReason === 'error' || event.finishReason === 'other') {
         await this.settleText('error');
-        await this.persistEstimatedSpend('error').catch(() => {});
+        await this.tryPersistEstimatedSpend('error');
         this.resolveOutcome(err('provider_error', 'The provider aborted the stream.'));
         return;
       }
@@ -132,16 +127,16 @@ export class ChatExchange {
     this.clearIdleTimer();
     // The idle guard fired the abort: the stream died on its own, nobody chose to stop it.
     const exchangeStatus: MessageExchangeStatus = this.idleFired ? 'error' : 'interrupted';
-    await this.settleText(exchangeStatus).catch(() => {});
+    await this.trySettleText(exchangeStatus);
     if (this.idleFired) {
-      await this.persistEstimatedSpend('timeout').catch(() => {});
+      await this.tryPersistEstimatedSpend('timeout');
       this.resolveOutcome(err('stream_timeout', 'The stream went idle between tokens.'));
       return;
     }
     // Aborts carry no provider usage block, so the exchange settles its
     // spend from the locally counted input tokens and the text that made
     // it out — marked estimated on the ledger.
-    const usagePersisted = await this.persistEstimatedSpend('interrupted').catch(() => false);
+    const usagePersisted = await this.tryPersistEstimatedSpend('interrupted');
     this.resolveOutcome(
       ok({ finishReason: 'interrupted', usagePersisted, latencyMs: this.latencyMs() }),
     );
@@ -150,8 +145,8 @@ export class ChatExchange {
   /** Safety net (onError) so the outcome promise always settles. */
   async completeError(error: unknown): Promise<void> {
     this.clearIdleTimer();
-    await this.settleText('error').catch(() => {});
-    await this.persistEstimatedSpend(this.idleFired ? 'timeout' : 'error').catch(() => {});
+    await this.trySettleText('error');
+    await this.tryPersistEstimatedSpend(this.idleFired ? 'timeout' : 'error');
     this.resolveOutcome(
       err(
         this.idleFired ? 'stream_timeout' : 'provider_error',
@@ -202,6 +197,28 @@ export class ChatExchange {
       messageId: this.deps.assistantMessageId,
       exchangeStatus,
     });
+  }
+
+  /** Settles the reply text without letting a failed write change the outcome. */
+  private async trySettleText(exchangeStatus: MessageExchangeStatus) {
+    try {
+      await this.settleText(exchangeStatus);
+    } catch (error) {
+      logBestEffortFailure({ step: 'settleReplyText', error });
+    }
+  }
+
+  /**
+   * Accounts the estimated spend without letting a failed write change the
+   * outcome. False when the row did not land.
+   */
+  private async tryPersistEstimatedSpend(finishReason: MessageFinishReason) {
+    try {
+      return await this.persistEstimatedSpend(finishReason);
+    } catch (error) {
+      logBestEffortFailure({ step: 'persistEstimatedSpend', error });
+      return false;
+    }
   }
 
   private async persistUsage(

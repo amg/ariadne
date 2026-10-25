@@ -45,7 +45,7 @@ const INDEXES = [
   },
 ] as const;
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   for (const index of INDEXES) {
     await db.schema
       .withSchema(index.schema)
@@ -56,7 +56,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   for (const index of INDEXES) {
     await db.schema.withSchema(index.schema).dropIndex(index.name).execute();
   }

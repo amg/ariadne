@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "synth": "CDK_DEFAULT_ACCOUNT=123456789012 AWS_PROD_HOSTNAME=aws-prod.example.com AWS_PROD_ZONE=example.com AWS_PROD_PROJECT=aws-prod cdk synth --quiet -c step=step100 -c imageTag=synth-check",
-    "check": "npm run typecheck && npm run synth"
+    "synth": "CDK_DEFAULT_ACCOUNT=123456789012 AWS_PROD_HOSTNAME=aws-prod.example.com AWS_PROD_ZONE=example.com AWS_PROD_PROJECT=aws-prod cdk synth --quiet -c step=step100 -c imageTag=synth-check -c seedSnapshot=synth-check",
+    "check": "npm run typecheck && npm run test && npm run synth && npm run synth:direct",
+    "test": "CDK_DEFAULT_ACCOUNT=123456789012 AWS_PROD_HOSTNAME=aws-prod.example.com AWS_PROD_ZONE=example.com AWS_PROD_PROJECT=aws-prod tsx --test 'lib/**/*.test.ts'",
+    "synth:direct": "CDK_DEFAULT_ACCOUNT=123456789012 AWS_PROD_HOSTNAME=aws-prod.example.com AWS_PROD_ZONE=example.com AWS_PROD_PROJECT=aws-prod cdk synth --quiet -c step=step100 -c imageTag=synth-check -c seedSnapshot=synth-check -c originAddress=origin.example.com -c originSecurityGroup=sg-0123456789abcdef0"
   },
   "devDependencies": {
     "@aws-sdk/client-cloudformation": "^3.1148.0",
@@ -15,7 +17,6 @@
     "constructs": "^10.8.1",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
-    "undici": "^7.30.0"
+    "typescript": "^7.0.2"
   }
 }

@@ -1,9 +1,9 @@
 import { logger } from '../../logger';
+import type { ServerEvent } from '../../types/events';
 import { type CarriedMessage, type Carrier, userOfMessage } from './carrier';
-import type { ServerEvent } from './serverEvent';
 
 /** A standing subscription to one user's messages. */
-export interface Subscription {
+interface Subscription {
   /**
    * Resolves once published messages reach this subscription. Never rejects.
    */
@@ -12,13 +12,13 @@ export interface Subscription {
 }
 
 /** The running Exchange a stop is for. */
-export interface StopTarget {
+interface StopTarget {
   userId: string;
   threadId: string;
 }
 
 /** The news and stops of every user, delivered to whoever listens for them. */
-export interface EventBus {
+interface EventBus {
   /**
    * Hands the event to every subscriber of its user. Nothing is kept: a
    * subscriber that arrives later never sees it. A subscriber that throws

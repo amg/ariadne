@@ -1,16 +1,16 @@
-import type { DriftExpandOutcome, LiveAnalysisPoint, LiveAnalysisView } from '@/services/api';
+import type { ExpandOutcome, LiveAnalysisPoint, LiveAnalysisView } from '@/services/api';
 import { CircleAlert, PencilSparkles } from 'lucide-react';
 import { Fragment } from 'react';
 
 /** Human reason shown on hover when an arrival's rewrite try failed. */
-const EXPAND_FAILURE_LABEL: Partial<Record<DriftExpandOutcome, string>> = {
+const EXPAND_FAILURE_LABEL: Partial<Record<ExpandOutcome, string>> = {
   failed_refused: 'the rewrite model refused',
   failed_quality: 'the rewrite failed quality control',
   failed_inference: 'the rewrite call failed',
   failed: 'the rewrite was unusable',
 };
 
-function expandFailureTitle(outcome: DriftExpandOutcome): string {
+function expandFailureTitle(outcome: ExpandOutcome) {
   const label = EXPAND_FAILURE_LABEL[outcome] ?? 'the rewrite did not land';
   return `Rewrite ${outcome}: ${label}. The original message was embedded instead.`;
 }

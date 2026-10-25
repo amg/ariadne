@@ -1,4 +1,6 @@
 import { Chat } from '@ai-sdk/react';
+import { chat as chatEndpoint } from '@ari/lib/api/schemas/chat/chat';
+import { pathOf } from '@ari/lib/api/schemas/common/endpoint';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 
 /**
@@ -14,7 +16,7 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
  */
 
 /** A view mounted on one thread receives these exchange notifications. */
-export type ThreadChatListener = {
+type ThreadChatListener = {
   /** A transient data part from the stream (the live verdict signal). */
   onData?: (part: { type?: string; data?: unknown }) => void;
   /** The exchange settled — finished, aborted, or failed. */
@@ -38,7 +40,7 @@ export type GateWaitOutcome = 'gate_pending' | 'gate_failed';
  * with a stable `errorCode`; null when the failure carried no such
  * body (a network fault).
  */
-function chatErrorBody(error: unknown): { error?: unknown; errorCode?: unknown } | null {
+function chatErrorBody(error: unknown) {
   const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
   try {
     const parsed = JSON.parse(message) as unknown;
@@ -51,7 +53,7 @@ function chatErrorBody(error: unknown): { error?: unknown; errorCode?: unknown }
 }
 
 /** The gate-wait class of a failed chat request; null for any other failure. */
-export function gateWaitOutcomeOf(error: unknown): GateWaitOutcome | null {
+export function gateWaitOutcomeOf(error: unknown) {
   const { errorCode } = chatErrorBody(error) ?? {};
   if (errorCode === 'gate_pending' || errorCode === 'gate_failed') return errorCode;
   return null;
@@ -63,7 +65,7 @@ export function gateWaitOutcomeOf(error: unknown): GateWaitOutcome | null {
  * there was no failure, or when it was a gate wait, which is not an
  * error and has its own notice.
  */
-export function describeChatError(error: unknown): string | null {
+export function describeChatError(error: unknown) {
   if (!error || gateWaitOutcomeOf(error)) return null;
   const body = chatErrorBody(error);
   if (body && typeof body.error === 'string' && body.error.length > 0) return body.error;
@@ -76,12 +78,12 @@ const listeners = new Map<string, Set<ThreadChatListener>>();
 /** Draft text of the thread's in-flight submit, when one is running. */
 const pendingSubmits = new Map<string, string>();
 
-function notify(threadId: string, call: (listener: ThreadChatListener) => void): void {
+function notify(threadId: string, call: (listener: ThreadChatListener) => void) {
   listeners.get(threadId)?.forEach(call);
 }
 
 /** The joined text of a message's text parts. */
-function textOf(message: UIMessage): string {
+function textOf(message: UIMessage) {
   return message.parts
     .filter((part) => part.type === 'text')
     .map((part) => (part as { text?: string }).text ?? '')
@@ -93,7 +95,7 @@ function textOf(message: UIMessage): string {
  * returns its draft text; null when no submit was in flight. Regenerates
  * never add a message, so they leave chat state untouched here.
  */
-function dropOptimisticSubmit(threadId: string): string | null {
+function dropOptimisticSubmit(threadId: string) {
   const draft = pendingSubmits.get(threadId);
   if (draft === undefined) return null;
   pendingSubmits.delete(threadId);
@@ -108,7 +110,7 @@ function dropOptimisticSubmit(threadId: string): string | null {
 }
 
 /** A failed submit hands its text back: the restored draft becomes its only copy. */
-function rollBackFailedSubmit(threadId: string): void {
+function rollBackFailedSubmit(threadId: string) {
   const draft = dropOptimisticSubmit(threadId);
   if (draft === null) return;
   notify(threadId, (listener) => listener.onFailedSubmit?.(draft));
@@ -119,7 +121,7 @@ function rollBackFailedSubmit(threadId: string): void {
  * request answers it or it was edited away during the wait. The Thread's
  * stored rows then show what became of it, so no draft comes back.
  */
-function arrivalSettledElsewhere(error: unknown): boolean {
+function arrivalSettledElsewhere(error: unknown) {
   const { errorCode } = chatErrorBody(error) ?? {};
   return errorCode === 'arrival_answered' || errorCode === 'arrival_abandoned';
 }
@@ -131,7 +133,7 @@ function arrivalSettledElsewhere(error: unknown): boolean {
  * error until the next request. An arrival settled elsewhere drops the
  * optimistic copy only. Any other failure rolls the submit back.
  */
-function handleFailedRequest(threadId: string, error: unknown): void {
+function handleFailedRequest(threadId: string, error: unknown) {
   if (gateWaitOutcomeOf(error)) {
     pendingSubmits.delete(threadId);
     return;
@@ -144,13 +146,13 @@ function handleFailedRequest(threadId: string, error: unknown): void {
 }
 
 /** Returns the thread's chat object, creating it on first use in this tab. */
-export function getThreadChat(threadId: string): Chat<UIMessage> {
+export function getThreadChat(threadId: string) {
   const existing = chats.get(threadId);
   if (existing) return existing;
 
   const chat = new Chat<UIMessage>({
     id: threadId,
-    transport: new DefaultChatTransport({ api: `/api/threads/${threadId}/chat` }),
+    transport: new DefaultChatTransport({ api: pathOf(chatEndpoint, { id: threadId }) }),
     onData: (part) => notify(threadId, (listener) => listener.onData?.(part)),
     // Fires after every exchange end — finished, stopped, or failed.
     onFinish: () => {
@@ -165,7 +167,7 @@ export function getThreadChat(threadId: string): Chat<UIMessage> {
 }
 
 /** Subscribes the mounted view to its thread's exchange notifications. */
-export function subscribeToThreadChat(threadId: string, listener: ThreadChatListener): () => void {
+export function subscribeToThreadChat(threadId: string, listener: ThreadChatListener) {
   let set = listeners.get(threadId);
   if (!set) {
     set = new Set();
@@ -182,10 +184,7 @@ export function subscribeToThreadChat(threadId: string, listener: ThreadChatList
  * thread's newest row (a handed-over arrival). Nothing is sent: a failed
  * request leaves the message in place, retryable like any failed reply.
  */
-export function replyToStoredMessage(
-  threadId: string,
-  message: { id: string; content: string },
-): void {
+export function replyToStoredMessage(threadId: string, message: { id: string; content: string }) {
   const chat = getThreadChat(threadId);
   chat.messages = [
     { id: message.id, role: 'user', parts: [{ type: 'text', text: message.content }] },
@@ -194,7 +193,7 @@ export function replyToStoredMessage(
 }
 
 /** Sends a user message and records its draft for failed-submit recovery. */
-export function sendThreadMessage(threadId: string, content: string): void {
+export function sendThreadMessage(threadId: string, content: string) {
   pendingSubmits.set(threadId, content);
   getThreadChat(threadId).sendMessage({
     role: 'user',

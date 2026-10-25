@@ -1,10 +1,10 @@
-import { RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import type * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { DATABASE, PORTS } from '../../config/names.ts';
+import { KEPT_LOGS } from '../keptLogs.ts';
 import type { Cache } from './cache.ts';
 import type { Database } from './database.ts';
 import { type Network, SUBNETS } from './network.ts';
@@ -64,10 +64,7 @@ export class OperatorAccess extends Construct {
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'warm',
-        logGroup: new logs.LogGroup(this, 'WarmLogs', {
-          retention: logs.RetentionDays.ONE_WEEK,
-          removalPolicy: RemovalPolicy.DESTROY,
-        }),
+        logGroup: new logs.LogGroup(this, 'WarmLogs', KEPT_LOGS),
       }),
     });
     this.warmSecurityGroup = new ec2.SecurityGroup(this, 'WarmSecurityGroup', { vpc: network.vpc });

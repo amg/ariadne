@@ -2,6 +2,7 @@ import { env } from '@config/env';
 import { generateText } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
+  type InferenceConfig,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
@@ -18,7 +19,7 @@ import { withOnDemandBackoff } from './onDemandRetry';
 
 // The opening sentence names the task, and stays stable so replies can be
 // matched to it.
-export const FACT_DUPLICATE_SYSTEM_PROMPT = `You compare facts about the user; you never answer them. Given a candidate fact and a numbered list of known facts, output exactly one label:
+const FACT_DUPLICATE_SYSTEM_PROMPT = `You compare facts about the user; you never answer them. Given a candidate fact and a numbered list of known facts, output exactly one label:
 - SAME <number> — known fact <number> is about the same person, animal, or thing as the candidate, and about the same detail of them: the candidate says it again in other words, or gives a new value for it (a corrected date, a new home, a changed job).
 - NEW — no known fact is about that same detail of the same person, animal, or thing.
 Names matter: a fact about one named person or pet and a fact about another are about different things. When the user has several of something (pets, hobbies, likes), a fact about another one is NEW.
@@ -28,20 +29,20 @@ const DUPLICATE_TIMEOUT_MS = 20000;
 const DUPLICATE_MAX_OUTPUT_TOKENS = 8;
 
 /** `same` points into the known Facts given, 0-based. */
-export type FactDuplicateVerdict = { type: 'same'; knownIndex: number } | { type: 'new' };
+type FactDuplicateVerdict = { type: 'same'; knownIndex: number } | { type: 'new' };
 
-export interface FactDuplicateInput {
+interface FactDuplicateInput {
   candidate: string;
   /** Closest known Facts, nearest first. */
   knownFacts: string[];
 }
 
-export interface FactDuplicateData {
+interface FactDuplicateData {
   verdict: FactDuplicateVerdict;
   usage: { promptTokens: number; completionTokens: number };
 }
 
-export function buildFactDuplicatePrompt(input: FactDuplicateInput): string {
+function buildFactDuplicatePrompt(input: FactDuplicateInput) {
   const known = input.knownFacts.map((fact, index) => `${index + 1}. ${fact}`).join('\n');
   return `Candidate: ${input.candidate}\n\nKnown facts:\n${known}`;
 }
@@ -65,7 +66,7 @@ export function parseFactDuplicateLabel(
 }
 
 async function judgeOnce(
-  config: ReturnType<typeof resolveInferenceConfig>,
+  config: InferenceConfig,
   input: FactDuplicateInput,
 ): Promise<Result<FactDuplicateData>> {
   const controller = new AbortController();

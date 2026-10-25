@@ -1,5 +1,5 @@
 import type { Result } from '../../../types/result';
-import type { LiveChain } from './liveChain';
+import type { LiveChain } from '../types';
 
 /**
  * One step of the message transformer. A step reads its inputs from the

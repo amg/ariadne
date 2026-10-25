@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { MessageExpansion } from '@db/types';
 
 type ListMessageExpansionsByMessageIdsProps = {
   messageIds: string[];
@@ -11,7 +10,7 @@ type ListMessageExpansionsByMessageIdsProps = {
  */
 export async function listMessageExpansionsByMessageIds({
   messageIds,
-}: ListMessageExpansionsByMessageIdsProps): Promise<MessageExpansion[]> {
+}: ListMessageExpansionsByMessageIdsProps) {
   if (messageIds.length === 0) return [];
   return db
     .selectFrom('analysis.messageExpansions')

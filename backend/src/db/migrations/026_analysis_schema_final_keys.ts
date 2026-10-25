@@ -29,7 +29,7 @@ import { type Kysely, sql } from 'kysely';
  * pours — is typed builder DDL/DML.
  */
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<any>) {
   // 1. The rewrite step's table, poured out of the arrival rows that
   //    carried it. Untried rewrites read back as `not_needed`.
   await db.schema
@@ -175,7 +175,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down(db: Kysely<any>) {
   // 4 reversed: back comes a surrogate id.
   await db.schema
     .withSchema('analysis')

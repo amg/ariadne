@@ -31,7 +31,7 @@ export const ANALYZER_COST_ROWS = [
 
 type CostRow = typeof CHAT_COST_ROW | (typeof ANALYZER_COST_ROWS)[number];
 
-function formatShare(valueUsd: string, totalUsd: number): string {
+function formatShare(valueUsd: string, totalUsd: number) {
   if (totalUsd <= 0) return '—';
   const pct = (Number.parseFloat(valueUsd) / totalUsd) * 100;
   if (pct <= 0) return '0%';

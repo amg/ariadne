@@ -1,28 +1,21 @@
+import { editMessage as editMessageEndpoint } from '@ari/lib/api/schemas/messages/edit';
 import { enqueueDriftGateJudgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { editMessage } from '@services/messageService';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-import type { Result } from '../../../src/types/result';
+import type { ResultError } from '../../../src/types/result';
+import { type RouteOf, parsedOrNull } from '../contract';
+import { userIdOf } from '../request';
 
-type Params = {
-  id: string;
-  messageId: string;
-};
-
-type PatchBody = {
-  content?: unknown;
-};
-
-/** Maps edit failures to responses; keeps the handler shallow. */
-function sendUpdateError(reply: FastifyReply, error: Extract<Result<never>, { type: 'error' }>) {
+/** The status and body an edit failure answers with. */
+function updateError(error: ResultError): { status: 400 | 404 | 409 | 500; error: string } {
   // Unknown thread, foreign thread and foreign message stay indistinguishable.
-  if (error.code === 'thread_not_found')
-    return reply.code(404).send({ error: 'Message not found' });
-  if (error.code === 'not_last') return reply.code(409).send({ error: error.message });
-  if (error.code === 'invalid_content') return reply.code(400).send({ error: error.message });
-  return reply.code(500).send({ error: 'Failed to update the message.' });
+  if (error.code === 'thread_not_found') return { status: 404, error: 'Message not found' };
+  if (error.code === 'not_last')
+    return { status: 409, error: error.message ?? 'Only the last message can be edited.' };
+  if (error.code === 'invalid_content')
+    return { status: 400, error: error.message ?? 'Invalid content.' };
+  return { status: 500, error: 'Failed to update the message.' };
 }
 
 /**
@@ -33,31 +26,30 @@ function sendUpdateError(reply: FastifyReply, error: Extract<Result<never>, { ty
  * out — retry (chat regenerate) is the recovery path for replies, not
  * deletion.
  */
-export async function setupMessagesPatchRoute(fastify: FastifyInstance) {
-  fastify.patch(
-    '/api/threads/:id/messages/:messageId',
-    { preHandler: verifySession() },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id, messageId } = request.params as Params;
-      if (!isValidUuid(id) || !isValidUuid(messageId)) {
-        return reply.code(400).send({ error: 'Invalid thread or message id' });
-      }
-
-      const body = (request.body ?? {}) as PatchBody;
-      if (typeof body.content !== 'string' || body.content.trim().length === 0) {
-        return reply.code(400).send({ error: 'content must be a non-empty string' });
-      }
+export function setupMessagesPatchRoute(fastify: FastifyInstance) {
+  fastify.route<RouteOf<typeof editMessageEndpoint>>({
+    method: editMessageEndpoint.method,
+    url: editMessageEndpoint.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const params = parsedOrNull(editMessageEndpoint.params, request.params);
+      if (!params) return reply.code(400).send({ error: 'Invalid thread or message id' });
+      const body = parsedOrNull(editMessageEndpoint.body, request.body);
+      if (!body) return reply.code(400).send({ error: 'content must be a non-empty string' });
 
       const result = await editMessage({
-        userId: userId,
-        threadId: id,
-        messageId,
+        userId,
+        threadId: params.id,
+        messageId: params.messageId,
         content: body.content,
         judging: { enqueueDriftGateJudgeArrival },
       });
-      if (result.type === 'error') return sendUpdateError(reply, result);
-      return reply.send(result.data);
+      if (result.type === 'error') {
+        const { status, error } = updateError(result);
+        return reply.code(status).send({ error });
+      }
+      return reply.code(200).send(result.data);
     },
-  );
+  });
 }

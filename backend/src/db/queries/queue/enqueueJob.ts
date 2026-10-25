@@ -1,9 +1,10 @@
 import { db } from '@db/db';
+import { tagQuery } from '@db/queryTag';
 import type { DbExecutor } from '@db/types';
 import { jobKeyOf } from './jobError';
 
 /** The task that runs the job, and the payload registered for it. */
-export type EnqueueJobProps<Name extends keyof GraphileWorker.Tasks> = {
+type EnqueueJobProps<Name extends keyof GraphileWorker.Tasks> = {
   task: Name;
   payload: GraphileWorker.Tasks[Name];
   /** What the job works on; a second job for the same key merges into a waiting one. */
@@ -22,6 +23,7 @@ export async function enqueueJob<Name extends keyof GraphileWorker.Tasks>(
   executor: DbExecutor = db,
 ): Promise<void> {
   await executor
+    .withPlugin(tagQuery('queue/enqueueJob'))
     .selectNoFrom((eb) =>
       eb
         .fn('queues.add_job', [

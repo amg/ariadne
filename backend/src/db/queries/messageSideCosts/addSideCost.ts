@@ -1,7 +1,8 @@
 import { db } from '@db/db';
+import { tagQuery } from '@db/queryTag';
 import type { SideCostKind } from '@db/types';
 
-export type AddSideCostRow = {
+type AddSideCostRow = {
   messageId: string;
   kind: SideCostKind;
   model: string;
@@ -20,13 +21,14 @@ export type AddSideCostRow = {
  * Throws on a cost that is not a finite, non-negative number, since one
  * NaN would poison the row's total for good.
  */
-export async function addSideCost(row: AddSideCostRow): Promise<void> {
+export async function addSideCost(row: AddSideCostRow) {
   const cost = Number(row.costUsd);
   if (row.costUsd.trim() === '' || !Number.isFinite(cost) || cost < 0) {
     throw new Error(`addSideCost: invalid costUsd "${row.costUsd}" for ${row.kind}`);
   }
 
   await db
+    .withPlugin(tagQuery('messageSideCosts/addSideCost'))
     .insertInto('billing.messageSideCosts')
     .values(row)
     .onConflict((oc) =>

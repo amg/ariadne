@@ -15,7 +15,7 @@ import { type Kysely, sql } from 'kysely';
  * Raw `sql` for the lock, the trigger functions, the triggers and the
  * backfill, which the schema builder cannot express.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .withSchema('billing')
     .createTable('daily_spend')
@@ -100,7 +100,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`drop trigger count_daily_spend on analysis.message_embeddings`.execute(db);
   await sql`drop trigger count_daily_spend on billing.message_side_costs`.execute(db);
   await sql`drop trigger count_daily_spend on billing.message_usage`.execute(db);

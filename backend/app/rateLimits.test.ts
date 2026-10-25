@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 /** Each test's own route, so its count starts from nothing. */
-function freshRoute(): string {
+function freshRoute() {
   return `/api/limited-${randomUUID()}`;
 }
 
@@ -21,7 +21,7 @@ function freshRoute(): string {
  * and an auth hook answering `/api/auth/*` before any route matches, as
  * the auth provider does.
  */
-async function copyWithLimits(route: string, { max }: { max: number }): Promise<FastifyInstance> {
+async function copyWithLimits(route: string, { max }: { max: number }) {
   const app = Fastify({ logger: false });
   openApps.push(app);
   await registerRateLimits(app);

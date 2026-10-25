@@ -24,7 +24,14 @@ export class Origin extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props: { network: Network; vault: s3.IBucket; api: AppService; web: AppService },
+    props: {
+      network: Network;
+      vault: s3.IBucket;
+      api: AppService;
+      web: AppService;
+      /** Capacity units kept reserved for the raise's whole life; null leaves the load balancer to grow on its own. */
+      reservedCapacityUnits: number | null;
+    },
   ) {
     super(scope, id);
 
@@ -44,6 +51,7 @@ export class Origin extends Construct {
       securityGroup,
       idleTimeout: IDLE_TIMEOUT,
       dropInvalidHeaderFields: true,
+      minimumCapacityUnit: props.reservedCapacityUnits ?? undefined,
     });
     this.loadBalancer.logAccessLogs(props.vault, 'origin-access-logs');
 
@@ -92,7 +100,7 @@ export class Origin extends Construct {
 }
 
 /** Cloudflare's origin certificate, imported once into ACM by the core command. */
-function originCertificate(scope: Construct): elbv2.IListenerCertificate {
+function originCertificate(scope: Construct) {
   const arn = ssm.StringParameter.valueForStringParameter(scope, PARAMETERS.originCertificateArn);
   return elbv2.ListenerCertificate.fromArn(arn);
 }

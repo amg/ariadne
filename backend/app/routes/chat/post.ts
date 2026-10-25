@@ -1,40 +1,45 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CHAT_CONFLICT_CODES,
+  type ChatConflictCode,
+  GATE_WAIT_CODES,
+  type GateWaitCode,
+  VERDICT_PART_TYPE,
+  chat,
+} from '@ari/lib/api/schemas/chat/chat';
+import type { streamVerdictSchema } from '@ari/lib/api/schemas/common/driftGate';
+import type { Served } from '@ari/lib/api/schemas/common/wire';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
+import {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import {
-  type ArrivalJudging,
-  type ChatStreamHandle,
-  type DriftPause,
-  type RetryChoice,
-  type ThreadTitling,
   clearActiveExchange,
   isDriftPause,
   registerActiveExchange,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
-import type { MemoryFeature } from '@services/memory';
-import { isValidUuid } from '@services/validation';
-import { type UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-import type { Result } from '../../../src/types/result';
+import type {
+  ArrivalJudging,
+  ChatStreamHandle,
+  DriftPause,
+  RetryChoice,
+} from '../../../src/types/aiService';
+import type { MemoryFeature } from '../../../src/types/memory';
+import type { ResultError } from '../../../src/types/result';
+import { type RouteOf, parsedOrNull } from '../contract';
+import { threadIdOrReject, userIdOf } from '../request';
 
-type ThreadParams = {
-  id: string;
-};
+type ThreadTitling = Parameters<typeof submitChat>[0]['titling'];
 
-type ChatRequestBody = {
-  messages?: UIMessage[];
-  /** useChat transport trigger: 'submit-message' | 'regenerate-message' | 'resume-stream'. */
-  trigger?: string;
-  /** On a retry: 'continue' keeps a Paused arrival in this Thread and replies to it. */
-  choice?: unknown;
-};
+type ChatReply = FastifyReply<RouteOf<typeof chat>>;
+type ChatMessages = NonNullable<Served<typeof chat.body>['messages']>;
 
 /** How the chat flow queues and finds Drift gate judgments. */
 const judging: ArrivalJudging = {
@@ -45,20 +50,20 @@ const judging: ArrivalJudging = {
 /** How a settled Exchange reaches the Thread's titling. */
 const titling: ThreadTitling = { enqueueThreadGenerateTitle };
 
-/** The `useChat` POST contains the client's message list; we take the last user text. */
-function extractLastUserText(messages: ChatRequestBody['messages']): string {
+/** The chat client sends its whole message list; the newest user text is the message. */
+function extractLastUserText(messages: ChatMessages | undefined) {
   if (!messages) return '';
   const lastUser = [...messages].reverse().find((message) => message.role === 'user');
   if (!lastUser) return '';
   return lastUser.parts
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text)
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text ?? '')
     .join('')
     .trim();
 }
 
 /** Failures where the thread's state forbids the exchange, with their fallback text. */
-const CONFLICT_MESSAGES: Record<string, string> = {
+const CONFLICT_MESSAGES: Record<ChatConflictCode, string> = {
   arrival_paused: 'The last message is waiting for a choice.',
   arrival_unanswered: 'The last message has no reply yet.',
   arrival_answered: 'The message is already being answered.',
@@ -71,27 +76,25 @@ const CONFLICT_MESSAGES: Record<string, string> = {
  * A verdict not in yet: temporarily unavailable, not failed. The message
  * stays in the Thread and the client retries after the hinted delay.
  */
-const GATE_WAIT_MESSAGES: Record<string, string> = {
+const GATE_WAIT_MESSAGES: Record<GateWaitCode, string> = {
   gate_pending: 'The message is still being checked.',
   gate_failed: 'The message could not be checked.',
 };
 const GATE_RETRY_AFTER_SECONDS = 5;
 
+const isOneOf = <Code extends string>(codes: readonly Code[], code: string): code is Code =>
+  codes.some((known) => known === code);
+
 /** Maps exchange startup failures to responses, each carrying its `errorCode`. */
-function sendExchangeError(
-  reply: FastifyReply,
-  result: Extract<Result<ChatStreamHandle>, { type: 'error' }>,
-): void {
+function sendExchangeError(reply: ChatReply, result: ResultError) {
   const errorCode = result.code;
-  const conflict = CONFLICT_MESSAGES[errorCode];
-  if (conflict !== undefined) {
-    reply.code(409).send({ error: result.message ?? conflict, errorCode });
+  if (isOneOf(CHAT_CONFLICT_CODES, errorCode)) {
+    reply.code(409).send({ error: result.message ?? CONFLICT_MESSAGES[errorCode], errorCode });
     return;
   }
-  const gateWait = GATE_WAIT_MESSAGES[errorCode];
-  if (gateWait !== undefined) {
+  if (isOneOf(GATE_WAIT_CODES, errorCode)) {
     reply.header('Retry-After', String(GATE_RETRY_AFTER_SECONDS));
-    reply.code(503).send({ error: result.message ?? gateWait, errorCode });
+    reply.code(503).send({ error: result.message ?? GATE_WAIT_MESSAGES[errorCode], errorCode });
     return;
   }
   // Unknown thread and foreign thread stay indistinguishable (404).
@@ -105,16 +108,13 @@ function sendExchangeError(
     return;
   }
   // Budget exceeded — 429 with Retry-After header (seconds until UTC midnight).
-  if (result.code === 'budget_exceeded') {
-    // Type guard: BudgetExceededError has retryAfter, StandardError doesn't
-    if ('retryAfter' in result) {
-      reply.header('Retry-After', String(result.retryAfter));
-      reply.code(429).send({
-        error: result.message ?? 'Daily spend budget exceeded.',
-        errorCode,
-        retryAfter: result.retryAfter,
-      });
-    }
+  if ('retryAfter' in result) {
+    reply.header('Retry-After', String(result.retryAfter));
+    reply.code(429).send({
+      error: result.message,
+      errorCode: result.code,
+      retryAfter: result.retryAfter,
+    });
     return;
   }
   // Failure-swap classes the UI can act on (vs the generic 500).
@@ -123,6 +123,19 @@ function sendExchangeError(
     return;
   }
   reply.code(500).send({ error: 'Failed to start the AI exchange.', errorCode: 'internal_error' });
+}
+
+/**
+ * The gate's verdict as a reply-stream part. It is transient: the client
+ * reads it as it arrives, and the message parts never keep it.
+ */
+function verdictPart(verdict: Served<typeof streamVerdictSchema>) {
+  const data: Served<typeof streamVerdictSchema> = {
+    messageId: verdict.messageId,
+    verdict: verdict.verdict,
+    fireChannel: verdict.fireChannel,
+  };
+  return { type: VERDICT_PART_TYPE, id: randomUUID(), data, transient: true } as const;
 }
 
 /**
@@ -148,18 +161,7 @@ function createStreamResponse(threadId: string, handle: ChatStreamHandle, client
       // arrival was judged before inference ran, so the UI tints the user
       // bubble before the reply starts growing. Transient — the settled
       // verdict lives on the persisted signal, not the message parts.
-      if (handle.threadVerdict) {
-        writer.write({
-          type: 'data-thread-verdict',
-          id: randomUUID(),
-          data: {
-            messageId: handle.threadVerdict.messageId,
-            verdict: handle.threadVerdict.verdict,
-            fireChannel: handle.threadVerdict.fireChannel,
-          },
-          transient: true,
-        });
-      }
+      if (handle.threadVerdict) writer.write(verdictPart(handle.threadVerdict));
       writer.merge(handle.stream);
     },
     onError: () => 'An error occurred while generating the reply.',
@@ -174,12 +176,7 @@ function createStreamResponse(threadId: string, handle: ChatStreamHandle, client
 function createPauseResponse(pause: DriftPause) {
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
-      writer.write({
-        type: 'data-thread-verdict',
-        id: randomUUID(),
-        data: pause.threadVerdict,
-        transient: true,
-      });
+      writer.write(verdictPart(pause.threadVerdict));
     },
   });
   return createUIMessageStreamResponse({ stream });
@@ -191,7 +188,7 @@ function createPauseResponse(pause: DriftPause) {
  * socket: under Fastify v5 and current Node, the request's 'close' and
  * 'aborted' events don't fire for streaming responses.
  */
-function clientGoneSignal(reply: FastifyReply): AbortSignal {
+function clientGoneSignal(reply: ChatReply) {
   const gone = new AbortController();
   reply.raw.once('close', () => gone.abort());
   return gone.signal;
@@ -201,10 +198,16 @@ type ChatRequest = { kind: 'submit'; content: string } | { kind: 'retry'; choice
 
 /** Responds to a submit or a retry: an exchange stream, a pause, or an error. */
 async function respondToChat(
-  reply: FastifyReply,
-  input: { userId: string; threadId: string; request: ChatRequest; memory: MemoryFeature },
+  reply: ChatReply,
+  input: {
+    userId: string;
+    threadId: string;
+    request: ChatRequest;
+    memory: MemoryFeature;
+    threadAnalysisMode: ThreadAnalysisMode;
+  },
 ) {
-  const { userId, threadId, request, memory } = input;
+  const { userId, threadId, request, memory, threadAnalysisMode } = input;
   const signal = clientGoneSignal(reply);
   const result =
     request.kind === 'retry'
@@ -215,6 +218,7 @@ async function respondToChat(
           judging,
           titling,
           memory,
+          threadAnalysisMode,
           signal,
         })
       : await submitChat({
@@ -224,6 +228,7 @@ async function respondToChat(
           judging,
           titling,
           memory,
+          threadAnalysisMode,
           signal,
         });
   if (result.type === 'error') return sendExchangeError(reply, result);
@@ -232,59 +237,46 @@ async function respondToChat(
   return createStreamResponse(input.threadId, result.data, signal);
 }
 
-export async function setupChatPostRoute(
+export function setupChatPostRoute(
   fastify: FastifyInstance,
-  { memory }: { memory: MemoryFeature },
+  { memory, threadAnalysisMode }: { memory: MemoryFeature; threadAnalysisMode: ThreadAnalysisMode },
 ) {
-  fastify.post(
-    '/api/threads/:id/chat',
-    {
-      // Each request triggers a billable DeepInfra call — throttle hard.
-      preHandler: verifySession(),
-      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
-    },
-    async (
-      request: FastifyRequest<{ Params: ThreadParams; Body: ChatRequestBody }>,
-      reply: FastifyReply,
-    ) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id: threadId } = request.params;
-      if (!isValidUuid(threadId)) {
-        return reply.code(400).send({ error: 'Invalid thread id' });
-      }
-
-      const trigger = request.body?.trigger;
-      if (
-        trigger !== undefined &&
-        trigger !== 'submit-message' &&
-        trigger !== 'regenerate-message'
-      ) {
-        return reply.code(400).send({ error: `Unsupported trigger: ${trigger}` });
-      }
+  fastify.route<RouteOf<typeof chat>>({
+    method: chat.method,
+    url: chat.path,
+    // Each request triggers a billable DeepInfra call — throttle hard.
+    preHandler: verifySession(),
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const threadId = threadIdOrReject({ request, reply });
+      if (threadId === null) return reply;
+      const body = parsedOrNull(chat.body, request.body ?? {});
+      if (!body) return reply.code(400).send({ error: 'Unsupported chat request' });
 
       // Retry of the last inference (useChat `regenerate()`). The server is
       // authoritative: DB state decides the exchange, client messages ignored.
-      if (trigger === 'regenerate-message') {
-        const choice: RetryChoice = request.body?.choice === 'continue' ? 'continue' : 'retry';
+      if (body.trigger === 'regenerate-message') {
+        const choice: RetryChoice = body.choice ?? 'retry';
         return respondToChat(reply, {
           userId,
           threadId,
           request: { kind: 'retry', choice },
           memory,
+          threadAnalysisMode,
         });
       }
 
-      const content = extractLastUserText(request.body?.messages);
-      if (!content) {
-        return reply.code(400).send({ error: 'Missing message content' });
-      }
+      const content = extractLastUserText(body.messages);
+      if (!content) return reply.code(400).send({ error: 'Missing message content' });
 
       return respondToChat(reply, {
         userId,
         threadId,
         request: { kind: 'submit', content },
         memory,
+        threadAnalysisMode,
       });
     },
-  );
+  });
 }

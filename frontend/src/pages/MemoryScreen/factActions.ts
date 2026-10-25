@@ -1,15 +1,15 @@
 import { type UserFact, deleteUserFact, updateUserFact } from '@/services/api';
 import { toast } from 'sonner';
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function pluralFacts(count: number): string {
+function pluralFacts(count: number) {
   return count === 1 ? '1 fact' : `${count} facts`;
 }
 
-function reportBulkOutcome(results: PromiseSettledResult<unknown>[], pastTenseVerb: string): void {
+function reportBulkOutcome(results: PromiseSettledResult<unknown>[], pastTenseVerb: string) {
   const failedCount = results.filter((result) => result.status === 'rejected').length;
   if (failedCount === 0) {
     toast.success(`${pluralFacts(results.length)} ${pastTenseVerb}`);
@@ -19,7 +19,7 @@ function reportBulkOutcome(results: PromiseSettledResult<unknown>[], pastTenseVe
 }
 
 /** Flips a Fact's suppression. Resolves true when the change was saved. */
-export async function toggleFactSuppressed(fact: UserFact): Promise<boolean> {
+export async function toggleFactSuppressed(fact: UserFact) {
   try {
     await updateUserFact(fact.id, { suppressed: !fact.suppressed });
     toast.success(fact.suppressed ? 'Fact unsuppressed' : 'Fact suppressed');
@@ -31,7 +31,7 @@ export async function toggleFactSuppressed(fact: UserFact): Promise<boolean> {
 }
 
 /** Replaces a Fact's sentence. Resolves true when the change was saved. */
-export async function editFactContent(fact: UserFact, content: string): Promise<boolean> {
+export async function editFactContent(fact: UserFact, content: string) {
   if (content.trim() === '') {
     toast.error('Content cannot be empty');
     return false;
@@ -47,7 +47,7 @@ export async function editFactContent(fact: UserFact, content: string): Promise<
 }
 
 /** Permanently removes a Fact. Resolves true when it was deleted. */
-export async function deleteFact(fact: UserFact): Promise<boolean> {
+export async function deleteFact(fact: UserFact) {
   try {
     await deleteUserFact(fact.id);
     toast.success('Fact deleted');
@@ -59,7 +59,7 @@ export async function deleteFact(fact: UserFact): Promise<boolean> {
 }
 
 /** Brings every given Fact to the requested suppression state; partial failures are reported. */
-export async function setFactsSuppressed(facts: UserFact[], suppressed: boolean): Promise<void> {
+export async function setFactsSuppressed(facts: UserFact[], suppressed: boolean) {
   const changing = facts.filter((fact) => fact.suppressed !== suppressed);
   const results = await Promise.allSettled(
     changing.map((fact) => updateUserFact(fact.id, { suppressed })),
@@ -68,7 +68,7 @@ export async function setFactsSuppressed(facts: UserFact[], suppressed: boolean)
 }
 
 /** Permanently removes every given Fact; partial failures are reported. */
-export async function deleteFacts(facts: UserFact[]): Promise<void> {
+export async function deleteFacts(facts: UserFact[]) {
   const results = await Promise.allSettled(facts.map((fact) => deleteUserFact(fact.id)));
   reportBulkOutcome(results, 'deleted');
 }

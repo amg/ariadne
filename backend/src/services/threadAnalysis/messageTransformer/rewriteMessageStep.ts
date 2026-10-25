@@ -2,14 +2,10 @@ import { env } from '@config/env';
 import type { ExpandOutcome } from '@db/types';
 import { recordMessageExpansion } from '@queries/messageExpansions/recordMessageExpansion';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
+import { round10 } from '@services/aiService/cost';
 import { computeInferenceCostUsd } from '@services/aiService/pricing';
 import { err, ok } from '../../../types/result';
-import {
-  type JudgeContextDependenceInput,
-  judgeContextDependence,
-  rewriteFollowUp,
-} from '../../aiService';
-import { round10 } from '../cost';
+import { judgeContextDependence, rewriteFollowUp } from '../../aiService';
 import {
   REWRITE_CONTEXT_LIMITS,
   REWRITE_MAX_TRIGGER_LENGTH,
@@ -17,10 +13,12 @@ import {
   needsRewriteHeuristic,
   parseRewrite,
 } from '../rewrite';
+import type { JudgingMode, LiveArrival } from '../types';
 import { withExpansion } from './liveChain';
-import type { LiveTurnRow } from './liveTurns';
-import type { MessageStep } from './messageStep';
+import type { MessageStep, MessageStepInput } from './messageStep';
 import { naiveRefusalDetector } from './naiveRefusalDetector';
+
+type JudgeContextDependenceInput = Parameters<typeof judgeContextDependence>[0];
 
 /**
  * Rewrite step: attempt a self-contained reading of the arriving message.
@@ -42,9 +40,6 @@ const MAX_REWRITE_ATTEMPTS = 2;
 /** The bounding retry uses a higher temperature; the first attempt is frozen at 0. */
 const RETRY_REWRITE_TEMPERATURE = 0.7;
 
-/** Live-lane rewrite tier; mirrors the `THREAD_ANALYSIS_MODE` feature flag. */
-type LiveRewriteMode = 'heuristic' | 'always';
-
 /** The token counts one pipeline call reported, for the ledger row. */
 interface ReportedUsage {
   promptTokens: number;
@@ -52,7 +47,7 @@ interface ReportedUsage {
 }
 
 /** Adds one call's usage onto the running step totals. */
-function addUsage(into: ReportedUsage, usage: ReportedUsage | null): void {
+function addUsage(into: ReportedUsage, usage: ReportedUsage | null) {
   if (usage === null) return;
   into.promptTokens += usage.promptTokens;
   into.completionTokens += usage.completionTokens;
@@ -208,9 +203,9 @@ async function resolveExpansion(input: RewriteContext): Promise<ExpansionEnd> {
  * caller can persist the right terminal state.
  */
 async function rewriteDecision(input: {
-  arrival: LiveTurnRow;
-  prior: LiveTurnRow | null;
-  mode: LiveRewriteMode;
+  arrival: LiveArrival;
+  prior: LiveArrival | null;
+  mode: JudgingMode;
 }): Promise<
   ExpansionEnd & {
     tried: boolean;
@@ -267,51 +262,56 @@ async function rewriteDecision(input: {
   };
 }
 
-export const rewriteMessageStep: MessageStep = {
-  name: 'rewrite',
-  async run({ chain, arrivalIndex }) {
-    const arrival = chain.arrivals[arrivalIndex];
-    if (!arrival) return err('thread_not_found');
-    const userMessageId = arrival.userMessage.id;
-    if (chain.expansions.has(userMessageId)) return ok(chain);
+async function rewriteArrival({
+  chain,
+  arrivalIndex,
+  mode,
+}: MessageStepInput & { mode: JudgingMode }) {
+  const arrival = chain.arrivals[arrivalIndex];
+  if (!arrival) return err('thread_not_found');
+  const userMessageId = arrival.userMessage.id;
+  if (chain.expansions.has(userMessageId)) return ok(chain);
 
-    const mode: LiveRewriteMode = env.THREAD_ANALYSIS_MODE === 'always' ? 'always' : 'heuristic';
-    const decision = await rewriteDecision({
-      arrival,
-      prior: chain.arrivals[arrivalIndex - 1] ?? null,
-      mode,
-    });
+  const decision = await rewriteDecision({
+    arrival,
+    prior: chain.arrivals[arrivalIndex - 1] ?? null,
+    mode,
+  });
 
-    // Persists the terminal state on the arrival's expansion row unless
-    // another pass stored one first; the embed step reads whichever is
-    // stored.
-    const stored = await recordMessageExpansion({
+  // Persists the terminal state on the arrival's expansion row unless
+  // another pass stored one first; the embed step reads whichever is
+  // stored.
+  const stored = await recordMessageExpansion({
+    messageId: userMessageId,
+    expandOutcome: decision.tried ? decision.expandOutcome : 'not_needed',
+    expandedText: decision.tried ? decision.expandedText : null,
+  });
+
+  // The rewrite/judge spends land in `message_side_costs`, keyed by step.
+  if (decision.tried && decision.rewriteCostUsd !== null) {
+    await addSideCost({
       messageId: userMessageId,
-      expandOutcome: decision.tried ? decision.expandOutcome : 'not_needed',
-      expandedText: decision.tried ? decision.expandedText : null,
+      kind: 'rewrite',
+      model: env.REWRITE_MODEL,
+      costUsd: round10(decision.rewriteCostUsd).toFixed(10),
+      promptTokens: decision.rewriteUsage?.promptTokens ?? null,
+      completionTokens: decision.rewriteUsage?.completionTokens ?? null,
     });
+  }
+  if (decision.judgeCostUsd !== null) {
+    await addSideCost({
+      messageId: userMessageId,
+      kind: 'judge',
+      model: env.JUDGE_MODEL,
+      costUsd: round10(decision.judgeCostUsd).toFixed(10),
+      promptTokens: decision.judgeUsage?.promptTokens ?? null,
+      completionTokens: decision.judgeUsage?.completionTokens ?? null,
+    });
+  }
+  return ok(withExpansion(chain, stored));
+}
 
-    // The rewrite/judge spends land in `message_side_costs`, keyed by step.
-    if (decision.tried && decision.rewriteCostUsd !== null) {
-      await addSideCost({
-        messageId: userMessageId,
-        kind: 'rewrite',
-        model: env.REWRITE_MODEL,
-        costUsd: round10(decision.rewriteCostUsd).toFixed(10),
-        promptTokens: decision.rewriteUsage?.promptTokens ?? null,
-        completionTokens: decision.rewriteUsage?.completionTokens ?? null,
-      });
-    }
-    if (decision.judgeCostUsd !== null) {
-      await addSideCost({
-        messageId: userMessageId,
-        kind: 'judge',
-        model: env.JUDGE_MODEL,
-        costUsd: round10(decision.judgeCostUsd).toFixed(10),
-        promptTokens: decision.judgeUsage?.promptTokens ?? null,
-        completionTokens: decision.judgeUsage?.completionTokens ?? null,
-      });
-    }
-    return ok(withExpansion(chain, stored));
-  },
-};
+/** The rewrite step for a gate running in the given mode. */
+export function rewriteMessageStep(mode: JudgingMode): MessageStep {
+  return { name: 'rewrite', run: (input) => rewriteArrival({ ...input, mode }) };
+}

@@ -1,50 +1,40 @@
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import { env } from '@config/env';
-import type { DbExecutor } from '@db/types';
-import type { QueuedJob } from '@queries/queue/findJobByKey';
+import type { QueuedJob } from '@db/types';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { type ServerEvent, subscribe } from '@services/events';
-import type { FireChannel, GateVerdict } from '@services/threadAnalysis';
+import { subscribe } from '@services/events';
+import type { Arrival, ArrivalJudging, ArrivalVerdict } from '../../types/aiService';
+import type { ServerEvent } from '../../types/events';
 import { EMBEDDING_MODEL_ID } from './config';
-
-/** The arrival a Drift gate judgment is about. */
-export interface Arrival {
-  userId: string;
-  threadId: string;
-  messageId: string;
-}
-
-/** The live gate's judgment of one arrival. */
-export interface ArrivalVerdict {
-  messageId: string;
-  verdict: GateVerdict;
-  fireChannel: FireChannel | null;
-}
-
-/** Queues the Drift gate's judgment of arrivals, and reports where one stands. */
-export interface ArrivalJudging {
-  /** Queues the arrival's judgment; given a transaction, it commits with the caller's writes. */
-  enqueueDriftGateJudgeArrival(arrival: Arrival, trx?: DbExecutor): Promise<void>;
-  /** The arrival's queued judgment; null when none is queued or it already finished. */
-  findDriftGateJudgeArrivalJobOrNull(messageId: string): Promise<QueuedJob | null>;
-}
 
 /**
  * Where an arrival stands with the Drift gate once the wait is over:
  * judged clear (verdict null while the gate is switched off), fired on,
- * past help until the operator acts, or still being judged when the wait
- * ran out or the caller stopped waiting.
+ * past help until the operator acts, still being judged when the wait ran
+ * out, or unknown because the caller stopped waiting first. A verdict
+ * that was stored before the wait began says so.
  */
-export type ArrivalGateOutcome =
-  | { kind: 'clear'; verdict: ArrivalVerdict | null }
-  | { kind: 'paused'; verdict: ArrivalVerdict & { verdict: 'fire' } }
+type ArrivalGateOutcome =
+  | { kind: 'clear'; verdict: ArrivalVerdict | null; storedBeforeWait?: boolean }
+  | {
+      kind: 'paused';
+      verdict: ArrivalVerdict & { verdict: 'fire' };
+      storedBeforeWait?: boolean;
+    }
   | { kind: 'failed' }
-  | { kind: 'pending' };
+  | { kind: 'pending' }
+  | { kind: 'gone' };
+
+/** Whether the outcome is a verdict that was already stored before the wait began. */
+export function storedBeforeWait(gate: ArrivalGateOutcome) {
+  return (gate.kind === 'clear' || gate.kind === 'paused') && gate.storedBeforeWait === true;
+}
 
 /**
  * Whether an arrival's queued judgment gave up for good: it failed fatally
  * and waits for the operator to re-queue it.
  */
-export function judgmentFailed(job: QueuedJob | null): boolean {
+export function judgmentFailed(job: QueuedJob | null) {
   return job?.state === 'dead' && job.errorClass === 'fatal';
 }
 
@@ -84,7 +74,7 @@ function outcomeOfEvent(event: GateEvent): ArrivalGateOutcome {
  * is `ready`, before the judgment can land, so nothing published in
  * between is missed.
  */
-export interface VerdictListener {
+interface VerdictListener {
   /** Resolves once the verdict is published; never rejects. */
   ready: Promise<void>;
   /** The first outcome heard, or null once the time is up or the signal aborts. */
@@ -146,6 +136,8 @@ type AwaitArrivalGateProps = {
   /** Opened before the judgment could land. Closed here. */
   listener: VerdictListener;
   judging: ArrivalJudging;
+  /** With the gate off, nothing is judged and every arrival is clear. */
+  threadAnalysisMode: ThreadAnalysisMode;
   /** Aborts when nobody is waiting for the answer any more. */
   signal?: AbortSignal;
 };
@@ -174,18 +166,21 @@ async function settledGateOutcomeOrNull(
  *
  * The stored state is checked again once the listener is sure to hear, and
  * once more when the wait runs out.
+ *
+ * A caller that stops waiting before the gate answers is `gone`.
  */
 export async function awaitArrivalGate({
   arrival,
   listener,
   judging,
+  threadAnalysisMode,
   signal,
 }: AwaitArrivalGateProps): Promise<ArrivalGateOutcome> {
   try {
-    if (env.THREAD_ANALYSIS_MODE === 'off') return { kind: 'clear', verdict: null };
+    if (threadAnalysisMode === 'off') return { kind: 'clear', verdict: null };
     await listener.ready;
     const stored = await storedGateOutcomeOrNull(arrival.messageId);
-    if (stored) return stored;
+    if (stored) return { ...stored, storedBeforeWait: true };
 
     const job = await judging.findDriftGateJudgeArrivalJobOrNull(arrival.messageId);
     if (judgmentFailed(job)) return { kind: 'failed' };
@@ -193,6 +188,7 @@ export async function awaitArrivalGate({
 
     const heard = await listener.next(env.GATE_WAIT_MS, signal);
     if (heard) return heard;
+    if (signal?.aborted) return { kind: 'gone' };
     return (await settledGateOutcomeOrNull(arrival.messageId, judging)) ?? { kind: 'pending' };
   } finally {
     listener.close();

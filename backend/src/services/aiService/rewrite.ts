@@ -1,7 +1,8 @@
 import { env } from '@config/env';
 import { generateText } from 'ai';
-import { type Result, err, ok } from '../../types/result';
+import { err, ok } from '../../types/result';
 import {
+  type InferenceConfig,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
@@ -36,7 +37,7 @@ import { withOnDemandBackoff } from './onDemandRetry';
 // prohibitions. The examples themselves stay clean by construction: none
 // illustrates a forbidden import, since example content can leak into
 // real rewrites.
-export const REWRITE_SYSTEM_PROMPT = `You rewrite chat follow-ups; you never answer them. Given a prior exchange and a follow-up, output exactly one message: the follow-up made self-contained by resolving its pronouns, ellipsis, and vague references from the prior exchange.
+const REWRITE_SYSTEM_PROMPT = `You rewrite chat follow-ups; you never answer them. Given a prior exchange and a follow-up, output exactly one message: the follow-up made self-contained by resolving its pronouns, ellipsis, and vague references from the prior exchange.
 Rules:
 - If the follow-up already stands on its own, there is nothing to resolve — including bare acknowledgements like "ok" or "thanks" — output the follow-up verbatim, unchanged.
 - Only rewrite when the follow-up contains a pronoun or vague reference — "it", "that", "this", "these", "those", "the one", "the same" — that points at something in the prior exchange. Add exactly that referent, nothing else. Never introduce a new topic and never pull content from either the assistant's reply or the user's own earlier message into the rewrite — if the follow-up already carries its meaning in its own words, that wins, and the prior exchange adds nothing.
@@ -80,7 +81,7 @@ const REWRITE_TIMEOUT_MS = 5000;
 /** The rewrite is a short rephrase; bound output so nothing rambles. */
 const REWRITE_MAX_OUTPUT_TOKENS = 120;
 
-export interface RewriteFollowUpInput {
+interface RewriteFollowUpInput {
   /** Prior Turn's user content — already capped by the caller. */
   contextUserText: string;
   /** Prior Turn's assistant content — already capped by the caller. */
@@ -89,13 +90,7 @@ export interface RewriteFollowUpInput {
   followUpText: string;
 }
 
-export interface RewriteFollowUpData {
-  /** Raw model output — the caller sanitizes before use. */
-  text: string;
-  usage: { promptTokens: number; completionTokens: number };
-}
-
-export function buildRewritePrompt(input: RewriteFollowUpInput): string {
+function buildRewritePrompt(input: RewriteFollowUpInput) {
   return (
     `Prior exchange:\nUser: ${input.contextUserText}\n` +
     `Assistant: ${input.contextAssistantText}\n\n` +
@@ -104,10 +99,10 @@ export function buildRewritePrompt(input: RewriteFollowUpInput): string {
 }
 
 async function rewriteOnce(
-  config: ReturnType<typeof resolveInferenceConfig>,
+  config: InferenceConfig,
   input: RewriteFollowUpInput,
   temperature: number,
-): Promise<Result<RewriteFollowUpData>> {
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REWRITE_TIMEOUT_MS);
   try {
@@ -145,7 +140,7 @@ async function rewriteOnce(
 /** Sampling temperature; defaults to the frozen 0. */
 const DEFAULT_REWRITE_TEMPERATURE = 0;
 
-export interface RewriteFollowUpOptions {
+interface RewriteFollowUpOptions {
   /** Sampling temperature; defaults to the frozen 0. */
   temperature?: number;
 }
@@ -153,7 +148,7 @@ export interface RewriteFollowUpOptions {
 export async function rewriteFollowUp(
   input: RewriteFollowUpInput,
   options?: RewriteFollowUpOptions,
-): Promise<Result<RewriteFollowUpData>> {
+) {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);

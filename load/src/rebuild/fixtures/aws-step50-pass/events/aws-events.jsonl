@@ -1,0 +1,2 @@
+{"at":"2026-10-18T00:01:50.000Z","source":"scaling","resource":"AriAwsApp-ServicesWorkerService-WRK1","summary":"Successfully set desired count to 2. Change successfully fulfilled by ecs.","detail":{"cause":"monitor alarm QueueWait in state ALARM"}}
+{"at":"2026-10-18T00:02:30.000Z","source":"deployment","resource":"AriAwsApp-ServicesWorkerService-WRK1","summary":"PRIMARY, rollout COMPLETED","detail":{}}

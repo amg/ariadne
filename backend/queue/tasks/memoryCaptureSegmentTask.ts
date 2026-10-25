@@ -1,11 +1,11 @@
-import type { DbExecutor } from '@db/types';
+import type { DbExecutor, QueuedJob } from '@db/types';
 import { enqueueJob } from '@queries/queue/enqueueJob';
-import { type QueuedJob, findJobByKeyOrNull } from '@queries/queue/findJobByKey';
-import { type SegmentToCapture, captureSegment } from '@services/memory';
-import { TaskFailure } from '../errors';
+import { findJobByKey } from '@queries/queue/findJobByKey';
+import { captureSegment } from '@services/memory';
+import type { SegmentToCapture } from '../../src/types/memory';
+import { MAX_ATTEMPTS, TaskFailure } from '../errors';
 
 export const MEMORY_CAPTURE_SEGMENT = 'memoryCaptureSegment';
-const MAX_ATTEMPTS = 3;
 
 declare global {
   namespace GraphileWorker {
@@ -16,10 +16,7 @@ declare global {
 }
 
 /** Queues a closed segment's capture; one already waiting for it absorbs the request. */
-export function enqueueMemoryCaptureSegment(
-  segment: SegmentToCapture,
-  trx?: DbExecutor,
-): Promise<void> {
+export function enqueueMemoryCaptureSegment(segment: SegmentToCapture, trx?: DbExecutor) {
   return enqueueJob(
     {
       task: MEMORY_CAPTURE_SEGMENT,
@@ -33,7 +30,7 @@ export function enqueueMemoryCaptureSegment(
 
 /** The segment's capture in the queue; null when none is queued or it finished. */
 export function findMemoryCaptureSegmentJobOrNull(segmentId: string): Promise<QueuedJob | null> {
-  return findJobByKeyOrNull({ task: MEMORY_CAPTURE_SEGMENT, key: segmentId });
+  return findJobByKey({ task: MEMORY_CAPTURE_SEGMENT, key: segmentId });
 }
 
 /**
@@ -44,7 +41,7 @@ export function findMemoryCaptureSegmentJobOrNull(segmentId: string): Promise<Qu
  * segment that owes nothing, gone or already read, is a capture with
  * nothing to store, so running it twice stores nothing extra.
  */
-export async function captureMemorySegment(segment: SegmentToCapture): Promise<SegmentToCapture> {
+export async function captureMemorySegment(segment: SegmentToCapture) {
   const report = await captureSegment(segment);
   if (report.failed > 0) {
     throw new TaskFailure(

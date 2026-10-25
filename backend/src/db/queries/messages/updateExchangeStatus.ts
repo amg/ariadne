@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { Message, MessageExchangeStatus } from '@db/types';
+import type { MessageExchangeStatus } from '@db/types';
 
 type UpdateExchangeStatusProps = {
   messageId: string;
@@ -10,7 +10,7 @@ type UpdateExchangeStatusProps = {
 export async function updateExchangeStatus({
   messageId,
   exchangeStatus,
-}: UpdateExchangeStatusProps): Promise<Message> {
+}: UpdateExchangeStatusProps) {
   return db
     .updateTable('chat.messages')
     .set({ exchangeStatus })

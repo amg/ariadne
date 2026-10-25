@@ -2,11 +2,6 @@ import { createDeepInfra } from '@ai-sdk/deepinfra';
 import { env } from '@config/env';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 
-/**
- * Provider configuration for the AI Connector boundary
- *. Uses centralized env config.
- */
-
 export const SYSTEM_PROMPT = 'You are a helpful assistant.';
 
 /**
@@ -28,7 +23,7 @@ export type InferenceConfig = {
   enableReasoning: boolean;
 };
 
-export function resolveInferenceConfig(): InferenceConfig {
+export function resolveInferenceConfig() {
   const baseUrl = env.MOCK_AI_BASE_URL ? env.MOCK_AI_BASE_URL.replace(/\/+$/, '') : undefined;
   const config: InferenceConfig = {
     model: env.DEFAULT_MODEL,
@@ -41,7 +36,7 @@ export function resolveInferenceConfig(): InferenceConfig {
 }
 
 /** Mock testing via `MOCK_AI_BASE_URL` counts as configured (no key needed). */
-export function isInferenceConfigured(config: InferenceConfig): boolean {
+export function isInferenceConfigured(config: InferenceConfig) {
   return config.baseUrl !== undefined || config.apiKey !== undefined;
 }
 

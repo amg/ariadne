@@ -1,6 +1,6 @@
 import { type Kysely, sql } from 'kysely';
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   // Add cached_rate_multiplier column if it isn't there yet. Migration 003
   // (shipped in the same change) already creates it, so a fresh schema
   // replay would otherwise collide — `if not exists` keeps 004 a no-op
@@ -10,6 +10,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   );
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.alterTable('model_configs').dropColumn('cached_rate_multiplier').execute();
 }

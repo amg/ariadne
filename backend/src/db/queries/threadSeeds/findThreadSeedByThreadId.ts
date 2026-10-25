@@ -1,10 +1,7 @@
 import { db } from '@db/db';
-import type { ThreadSeed } from '@db/types';
 
 /** The Thread's Seed, or null when it was created without one. */
-export async function findThreadSeedByThreadIdOrNull({
-  threadId,
-}: { threadId: string }): Promise<ThreadSeed | null> {
+export async function findThreadSeedByThreadId({ threadId }: { threadId: string }) {
   const row = await db
     .selectFrom('memory.threadSeeds')
     .selectAll()

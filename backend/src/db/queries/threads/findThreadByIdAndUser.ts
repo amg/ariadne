@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { Thread } from '@db/types';
 
 type FindThreadByIdAndUserProps = {
   userId: string;
@@ -11,10 +10,7 @@ type FindThreadByIdAndUserProps = {
  * user; unknown ids and foreign threads are indistinguishable (both
  * undefined), so callers can 404 without leaking existence.
  */
-export async function findThreadByIdAndUser({
-  userId,
-  threadId,
-}: FindThreadByIdAndUserProps): Promise<Thread | undefined> {
+export async function findThreadByIdAndUser({ userId, threadId }: FindThreadByIdAndUserProps) {
   return db
     .selectFrom('chat.threads')
     .selectAll()

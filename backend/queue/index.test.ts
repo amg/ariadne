@@ -3,7 +3,7 @@ import http from 'node:http';
 import { env } from '@config/env';
 import { db } from '@db/db';
 import { insertMessage } from '@queries/messages/insertMessage';
-import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
+import { findJobByKey } from '@queries/queue/findJobByKey';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -53,7 +53,7 @@ async function startProvider(title: string) {
   return () => new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-async function until(condition: () => Promise<boolean>, what: string): Promise<void> {
+async function until(condition: () => Promise<boolean>, what: string) {
   const deadline = Date.now() + 10_000;
   while (!(await condition())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
@@ -88,21 +88,20 @@ describe('startQueue', () => {
     try {
       await until(
         async () =>
-          (await findJobByKeyOrNull({ task: THREAD_GENERATE_TITLE, key: threadId }))?.state ===
-          'running',
+          (await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId }))?.state === 'running',
         'the crashed process holds the job',
       );
       // It took the job long ago.
       await sql`update queues._private_jobs set locked_at = now() - interval '1 hour'`.execute(db);
 
-      await startQueue({ memory: memoryOff });
+      await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
 
       await until(
         async () =>
           (await findThreadByIdAndUser({ userId, threadId }))?.title === 'Steam Engine Basics',
         'the restarted queue titles the thread',
       );
-      expect(await findJobByKeyOrNull({ task: THREAD_GENERATE_TITLE, key: threadId })).toBeNull();
+      expect(await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId })).toBeNull();
     } finally {
       crash(new Error('the process is gone'));
       await crashed.stop();

@@ -3,13 +3,12 @@ import { enqueueJob } from '@queries/queue/enqueueJob';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { autoTitleThread } from '@services/titlingService';
 import { ErrorCodes } from '../../src/types/errorCodes';
-import { TaskFailure } from '../errors';
+import { MAX_ATTEMPTS, TaskFailure } from '../errors';
 
 export const THREAD_GENERATE_TITLE = 'threadGenerateTitle';
-const MAX_ATTEMPTS = 3;
 
 /** The Thread one titling is about. */
-export interface ThreadGenerateTitleParams {
+interface ThreadGenerateTitleParams {
   userId: string;
   threadId: string;
   /** A forced titling names a Thread that already has a title. */
@@ -25,10 +24,7 @@ declare global {
 }
 
 /** Queues a Thread's titling; a titling still waiting for it absorbs the request. */
-export function enqueueThreadGenerateTitle(
-  params: ThreadGenerateTitleParams,
-  trx?: DbExecutor,
-): Promise<void> {
+export function enqueueThreadGenerateTitle(params: ThreadGenerateTitleParams, trx?: DbExecutor) {
   return enqueueJob(
     {
       task: THREAD_GENERATE_TITLE,
@@ -44,7 +40,7 @@ export function enqueueThreadGenerateTitle(
  * What one titling run concluded. `gone` means the Thread no longer exists
  * for its user, `settled` that nothing owed a title; neither is an error.
  */
-export type ThreadTitleOutcome =
+type ThreadTitleOutcome =
   | { kind: 'gone' }
   | { kind: 'settled' }
   | { kind: 'titled'; userId: string; threadId: string; title: string };

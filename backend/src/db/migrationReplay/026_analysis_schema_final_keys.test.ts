@@ -45,7 +45,7 @@ let scratch: Pool;
 let spendBefore: unknown[];
 
 /** Runs the tracked migrations on the scratch database up to `target`. */
-async function migrateTo(target: string | undefined): Promise<void> {
+async function migrateTo(target: string | undefined) {
   const db = createDbFromPool(scratch);
   const migrator = new Migrator({
     db,
@@ -61,7 +61,7 @@ async function migrateTo(target: string | undefined): Promise<void> {
 }
 
 /** The exact column list of a table's primary key, in key order. */
-async function primaryKeyColumns(table: string): Promise<string[]> {
+async function primaryKeyColumns(table: string) {
   const { rows } = await scratch.query(
     `select a.attname
        from pg_index i
@@ -76,7 +76,7 @@ async function primaryKeyColumns(table: string): Promise<string[]> {
 }
 
 /** The daily-spend ledger as rows of plain strings. */
-async function dailySpend(): Promise<unknown[]> {
+async function dailySpend() {
   const { rows } = await scratch.query(
     'select day::text, cost_usd::text from billing.daily_spend order by day',
   );
@@ -84,7 +84,7 @@ async function dailySpend(): Promise<unknown[]> {
 }
 
 /** Column names of an analysis table, alphabetically. */
-async function analysisColumns(table: string): Promise<string[]> {
+async function analysisColumns(table: string) {
   const { rows } = await scratch.query(
     `select column_name from information_schema.columns
       where table_schema = 'analysis' and table_name = $1
@@ -99,7 +99,7 @@ async function analysisColumns(table: string): Promise<string[]> {
  * carrying rewrite columns and spend, a Turn vector, a half-finished
  * arrival (outcome stored, vector never filled), and a live-chain verdict.
  */
-async function seedOldShape(): Promise<void> {
+async function seedOldShape() {
   const user = '11111111-1111-1111-1111-111111111111';
   const thread = '22222222-2222-2222-2222-222222222222';
   const u1 = '33333333-3333-3333-3333-333333333331';

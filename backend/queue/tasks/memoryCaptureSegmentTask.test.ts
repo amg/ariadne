@@ -10,12 +10,13 @@ import {
 } from '@queue/tasks/memoryCaptureSegmentTask';
 import { queueTasks } from '@queue/worker';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
-import { type ServerEvent, subscribe } from '@services/events';
+import { subscribe } from '@services/events';
 import { memoryOn } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
+import type { ServerEvent } from '../../src/types/events';
 
 /**
  * A segment's capture on the worker: what it announces, and how its
@@ -76,7 +77,7 @@ describe('memoryCaptureSegment on the worker', () => {
     const segment = await closedSegment();
 
     await enqueueMemoryCaptureSegment(segment);
-    await drainQueue(queueTasks(memoryOn));
+    await drainQueue(queueTasks({ memory: memoryOn, threadAnalysisMode: 'heuristic' }));
 
     expect(events).toEqual([{ kind: 'memory-captured', ...segment }]);
     expect(await findMemoryCaptureSegmentJobOrNull(segment.segmentId)).toBeNull();
@@ -87,7 +88,7 @@ describe('memoryCaptureSegment on the worker', () => {
     mock.memory.failExtractions();
 
     await enqueueMemoryCaptureSegment(segment);
-    await drainQueue(queueTasks(memoryOn));
+    await drainQueue(queueTasks({ memory: memoryOn, threadAnalysisMode: 'heuristic' }));
 
     expect(events).toEqual([]);
     expect(await findMemoryCaptureSegmentJobOrNull(segment.segmentId)).toMatchObject({
@@ -104,7 +105,7 @@ describe('memoryCaptureSegment on the worker', () => {
     process.env.DEEPINFRA_API_KEY = '';
     try {
       await enqueueMemoryCaptureSegment(segment);
-      await drainQueue(queueTasks(memoryOn));
+      await drainQueue(queueTasks({ memory: memoryOn, threadAnalysisMode: 'heuristic' }));
     } finally {
       process.env.MOCK_AI_BASE_URL = savedUrl ?? '';
       process.env.DEEPINFRA_API_KEY = savedKey ?? '';

@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["infra/cdk.out", "infra/node_modules", "infra/.runs"]
+    "ignore": [
+      "infra/cdk.out",
+      "infra/node_modules",
+      "infra/.runs",
+      "**/rebuild/fixtures",
+      "**/*.generated.ts"
+    ]
   },
   "organizeImports": {
     "enabled": true
@@ -15,6 +21,11 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUnusedImports": "error"
+      },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
           "level": "error",

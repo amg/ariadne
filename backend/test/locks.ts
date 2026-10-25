@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 import { afterEach } from 'vitest';
 
 /** Resolves once a session of this test database waits on a row lock. */
-export async function someoneWaitsOnALock(): Promise<void> {
+export async function someoneWaitsOnALock() {
   const deadline = Date.now() + 5000;
   for (;;) {
     // The activity view sits outside the typed schema.
@@ -17,14 +17,12 @@ export async function someoneWaitsOnALock(): Promise<void> {
   }
 }
 
-export type HeldTransaction = { trx: DbExecutor; commit: () => Promise<void> };
-
 /**
  * Lets the suite hold transactions open, standing in for a write caught
  * mid-way; `commit` lets one finish. Any a failed test left open are
  * committed after it, so its locks never stall the next test.
  */
-export function useHeldTransactions(): () => Promise<HeldTransaction> {
+export function useHeldTransactions() {
   const open = new Set<() => Promise<void>>();
   afterEach(async () => {
     await Promise.all([...open].map((commit) => commit()));

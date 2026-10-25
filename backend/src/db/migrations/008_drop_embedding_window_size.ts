@@ -12,12 +12,12 @@ import { type Kysely, sql } from 'kysely';
  *
  * Idempotent: the delete narrows, the column drop is guarded.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await sql`delete from message_embeddings where window_size <> 1`.execute(db);
   await sql`alter table message_embeddings drop column if exists window_size`.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   // Restores the 007 column shape; vacated rows stay gone (re-embed on
   // re-analysis).
   await sql`

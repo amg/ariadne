@@ -25,7 +25,7 @@ import { type Kysely, sql } from 'kysely';
  * Idempotent (`if not exists` / guarded alters): test provisioning replays
  * every migration on a fresh schema.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await sql`
     alter table message_embeddings
       add column if not exists expanded_text text,
@@ -66,7 +66,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     on segment_drift_logs (message_id)`.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`drop table if exists segment_drift_logs`.execute(db);
   await sql`drop table if exists thread_segments`.execute(db);
   await sql`alter table message_embeddings

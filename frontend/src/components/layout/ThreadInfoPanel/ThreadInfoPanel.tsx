@@ -55,6 +55,10 @@ function toastCaptureReport(report: MemoryCaptureReport) {
     toast.info('Nothing new to record', {
       description: 'Every answered message in this thread has already been read.',
     });
+  } else if (report.added === 0 && report.replaced === 0) {
+    toast.info('No facts found', {
+      description: 'No new or updated facts were found in the unread messages.',
+    });
   } else {
     toast.success('Memory updated', {
       description: `${report.added} new fact(s), ${report.replaced} updated.`,

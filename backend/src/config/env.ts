@@ -1,100 +1,13 @@
-/**
- * Centralized environment configuration.
- *
- * All environment variables and their defaults are defined in this single module.
- * This class acts as a stateless singleton proxy - it reads directly from process.env
- * at access time (lazy evaluation) so tests can override env vars before use.
- *
- * Usage: import { env } from '@config/env';
- */
+import {
+  THREAD_ANALYSIS_MODES,
+  type ThreadAnalysisMode,
+} from '@ari/lib/api/schemas/threads/analysis';
+import type { ProcessRole } from '../types/config';
 
-export type EnvConfig = {
-  // Server (optional - have sensible defaults)
-  NODE_ENV: string;
-  PORT: number;
-  HOST: string;
-  DEBUG: boolean;
-
-  // Database (required - no defaults)
-  /** Explicit URL, else assembled from the DB_* parts; always defined. */
-  DATABASE_URL: string;
-  /** Second standing pool for bench review (same backend, other database). */
-  BENCH_DATABASE_URL: string | undefined;
-  DB_HOST: string;
-  DB_PORT: number;
-  DB_NAME: string;
-  DB_USER: string;
-  DB_PASSWORD: string;
-
-  // AI Provider
-  DEEPINFRA_API_KEY: string | undefined;
-  DEFAULT_MODEL: string;
-  MOCK_AI_BASE_URL: string | undefined;
-  AI_STREAM_IDLE_TIMEOUT_MS: number;
-  ENABLE_REASONING: boolean;
-
-  // Exchange lifecycle (required - no defaults)
-  /** How long an assistant row may stay `pending` before being declared lost. */
-  EXCHANGE_STALENESS_MS: number;
-  /** How long a chat request holds its response open for the drift gate's verdict. */
-  GATE_WAIT_MS: number;
-  /** How long a handover request holds for the closed segment's capture. */
-  HANDOVER_WAIT_MS: number;
-
-  // Global spend budget (rate limiting ticket)
-  /** Daily spend budget in USD. Unset = no gate, fail open. */
-  DAILY_SPEND_BUDGET_USD: number | undefined;
-
-  // Titling Service
-  AI_TITLING_TIMEOUT_MS: number | undefined;
-  TITLING_MODEL: string | undefined;
-
-  // Thread analysis (live drift gate) - required
-  THREAD_ANALYSIS_MODE: 'off' | 'heuristic' | 'always';
-  JUDGE_MODEL: string;
-  REWRITE_MODEL: string;
-
-  // User memory: Fact extraction and duplicate checks
-  MEMORY_MODEL: string;
-
-  // Feature toggles, read once at boot
-  FEATURE_MEMORY: boolean;
-
-  // CORS (required for SuperTokens)
-  CORS_ORIGINS: string;
-
-  // Logger
-  FORCE_COLOR: string | undefined;
-  NO_COLOR: string | undefined;
-
-  // SuperTokens (required)
-  SUPERTOKENS_CONNECTION_URI: string;
-  SUPERTOKENS_API_KEY: string | undefined;
-  /** Whether new accounts can be created; sign-in is unaffected. */
-  AUTH_SIGNUP_ENABLED: boolean;
-  /**
-   * Whether a Cloudflare rule limits the auth routes by real client
-   * address, so the app leaves them unlimited. Off: the app limits them.
-   */
-  AUTH_RATE_LIMIT_AT_EDGE: boolean;
-
-  // Running as several backend copies
-  /**
-   * The Redis every backend copy shares for news and stops (event bus).
-   * Unset: everything stays inside this one process. Rate-limit counts are
-   * in-memory (home) or at the Cloudflare edge (prod).
-   */
-  VALKEY_URL: string | undefined;
-  /** What this process runs: the API, the background worker, or both. */
-  PROCESS_ROLE: ProcessRole;
-};
-
-/** What one backend process runs. */
-export type ProcessRole = 'all' | 'api' | 'worker';
 const PROCESS_ROLES: readonly ProcessRole[] = ['all', 'api', 'worker'];
 
 /** The role named in the environment; anything unknown refuses to start. */
-function getProcessRole(key: string): ProcessRole {
+function getProcessRole(key: string) {
   const value = process.env[key]?.trim().toLowerCase() || 'all';
   const role = PROCESS_ROLES.find((known) => known === value);
   if (role === undefined) {
@@ -103,71 +16,57 @@ function getProcessRole(key: string): ProcessRole {
   return role;
 }
 
-/**
- * Helper to get a string from env with fallback.
- * Defaults live here — consumers use env.X without fallbacks.
- */
-function getString(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+/** A number of at least zero, or undefined when unset or empty; anything else is refused. */
+function getNonNegativeNumberOrUndefined(key: string) {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${key} must be a number of at least 0, got: ${raw}`);
+  }
+  return value;
 }
 
-/**
- * Helper to get a required string — throws if not set.
- */
-function getRequiredString(key: string): string {
-  const value = process.env[key];
-  if (value === undefined) {
-    throw new Error(`Required environment variable ${key} is not set`);
+/** A whole number of at least one; anything else refuses to start. */
+function getPositiveInteger(key: string, raw: string | undefined, fallback: number) {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${key} must be a whole number of at least 1, got: ${raw}`);
   }
   return value;
 }
 
 /**
- * Helper to get a number from env with fallback.
+ * Helper to get a string from env with fallback.
+ * Defaults live here — consumers use env.X without fallbacks.
  */
-function getNumber(key: string, fallback: number): number {
+function getString(key: string, fallback: string) {
+  return process.env[key] ?? fallback;
+}
+
+/** A whole number from env; anything unreadable falls back. */
+function getNumber(key: string, fallback: number) {
   const parsed = Number.parseInt(process.env[key] ?? String(fallback), 10);
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
-/**
- * Helper to get a required number — throws if not set or invalid.
- */
-function getRequiredNumber(key: string): number {
-  const value = process.env[key];
-  if (value === undefined) {
-    throw new Error(`Required environment variable ${key} is not set`);
-  }
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) {
-    throw new Error(`Environment variable ${key} must be a valid number, got: ${value}`);
-  }
-  return parsed;
-}
-
-function getBoolean(key: string, fallback: boolean): boolean {
+function getBoolean(key: string, fallback: boolean) {
   const value = process.env[key];
   if (value === undefined) return fallback;
   return value === 'true';
 }
 
 /** Thread-analysis feature flag values; anything else falls back. */
-type ThreadAnalysisMode = 'off' | 'heuristic' | 'always';
-const THREAD_ANALYSIS_MODES: readonly ThreadAnalysisMode[] = ['off', 'heuristic', 'always'];
-
-function getThreadAnalysisMode(key: string, fallback: ThreadAnalysisMode): ThreadAnalysisMode {
+function getThreadAnalysisMode(key: string, fallback: ThreadAnalysisMode) {
   const value = process.env[key];
   if (value === undefined) return fallback;
   const normalized = value.trim().toLowerCase();
   return THREAD_ANALYSIS_MODES.find((mode) => mode === normalized) ?? fallback;
 }
 
-/**
- * Environment configuration proxy.
- * Reads from process.env at access time (lazy) with fallback to defaults.
- * This allows tests to override process.env before the values are read.
- */
-export const env: EnvConfig = {
+/** The environment, each value read on access with its default applied. */
+export const env = {
   // Server
   get NODE_ENV() {
     return getString('NODE_ENV', 'development');
@@ -183,15 +82,16 @@ export const env: EnvConfig = {
   },
 
   // Database — explicit URL wins; parts only feed the fallback assembly.
-  get DATABASE_URL() {
+  /**
+   * Explicit URL, else assembled from the DB_* parts; always defined. The
+   * annotation is needed because the getter reads other fields of `env`.
+   */
+  get DATABASE_URL(): string {
     const explicit = process.env.VITEST_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
     if (explicit) return explicit;
     const user = encodeURIComponent(env.DB_USER);
     const password = encodeURIComponent(env.DB_PASSWORD);
     return `postgres://${user}:${password}@${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME}`;
-  },
-  get BENCH_DATABASE_URL() {
-    return process.env.BENCH_DATABASE_URL;
   },
   get DB_HOST() {
     return getString('DB_HOST', '127.0.0.1');
@@ -246,13 +146,9 @@ export const env: EnvConfig = {
     return getNumber('HANDOVER_WAIT_MS', 10_000);
   },
 
-  // Global spend budget (rate limiting ticket)
-  /** Daily spend budget in USD. Unset = no gate, fail open by design. */
+  // Global spend budget: unset or empty means no gate, by design.
   get DAILY_SPEND_BUDGET_USD() {
-    const value = process.env.DAILY_SPEND_BUDGET_USD;
-    if (value === undefined) return undefined;
-    const parsed = Number.parseFloat(value);
-    return Number.isNaN(parsed) ? undefined : parsed;
+    return getNonNegativeNumberOrUndefined('DAILY_SPEND_BUDGET_USD');
   },
 
   // Titling Service
@@ -292,9 +188,17 @@ export const env: EnvConfig = {
     return getBoolean('FEATURE_MEMORY', false);
   },
 
-  // CORS (required for SuperTokens - defaults to local dev)
+  /**
+   * The website origins `CORS_ORIGINS` names: split on commas, each origin
+   * trimmed, empty entries and trailing slashes dropped, since a browser's
+   * `Origin` never has one. Unset names none; each entry point applies its
+   * own deployment fallback.
+   */
   get CORS_ORIGINS() {
-    return getString('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173');
+    return getString('CORS_ORIGINS', '')
+      .split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter((origin) => origin !== '');
   },
 
   // Logger
@@ -312,37 +216,49 @@ export const env: EnvConfig = {
   get SUPERTOKENS_API_KEY() {
     return process.env.SUPERTOKENS_API_KEY;
   },
+  /** Whether new accounts can be created; sign-in is unaffected. */
   get AUTH_SIGNUP_ENABLED() {
     return getBoolean('AUTH_SIGNUP_ENABLED', true);
   },
+  /**
+   * Whether a Cloudflare rule limits the auth routes by real client
+   * address, so the app leaves them unlimited. Off: the app limits them.
+   */
   get AUTH_RATE_LIMIT_AT_EDGE() {
     return getBoolean('AUTH_RATE_LIMIT_AT_EDGE', false);
   },
 
   // Running as several backend copies
+  /**
+   * The Redis every backend copy shares for news and stops (event bus).
+   * Unset: everything stays inside this one process. Rate-limit counts are
+   * in-memory (home) or at the Cloudflare edge (prod).
+   */
   get VALKEY_URL() {
     return process.env.VALKEY_URL?.trim() || undefined;
   },
+  /** What this process runs: the API, the background worker, or both. */
   get PROCESS_ROLE() {
     return getProcessRole('PROCESS_ROLE');
   },
+  /** How many queue jobs one process runs side by side. */
+  get WORKER_JOB_CONCURRENCY() {
+    return getPositiveInteger('WORKER_JOB_CONCURRENCY', process.env.WORKER_JOB_CONCURRENCY, 4);
+  },
+  /** Seconds between the state records a process writes of what it is carrying. */
+  get STATE_LOG_INTERVAL_SECONDS() {
+    return getPositiveInteger(
+      'STATE_LOG_INTERVAL_SECONDS',
+      process.env.STATE_LOG_INTERVAL_SECONDS,
+      20,
+    );
+  },
+  /** Whether each app record also publishes its figures as metrics. Only aws-prod does. */
+  get PUBLISH_METRICS() {
+    return getBoolean('PUBLISH_METRICS', false);
+  },
+  /** Where ECS answers what task this process runs in; unset outside ECS. */
+  get ECS_CONTAINER_METADATA_URI_V4() {
+    return process.env.ECS_CONTAINER_METADATA_URI_V4?.trim() || undefined;
+  },
 };
-
-/**
- * Check if AI inference is configured (real provider or mock).
- * @internal - kept for potential future use
- */
-function isInferenceConfigured(): boolean {
-  return env.MOCK_AI_BASE_URL !== undefined || env.DEEPINFRA_API_KEY !== undefined;
-}
-
-/**
- * Get CORS origins as an array.
- * @internal - kept for potential future use
- */
-function getCorsOrigins(): string[] | undefined {
-  if (!env.CORS_ORIGINS) return undefined;
-  return env.CORS_ORIGINS.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-}

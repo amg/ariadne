@@ -2,14 +2,6 @@ import { db } from '@db/db';
 import { toVectorText } from '@queries/messageEmbeddings/embeddingMapping';
 import { sql } from 'kysely';
 
-export interface NearUserFact {
-  id: string;
-  content: string;
-  suppressed: boolean;
-  /** Cosine distance to the probe vector, 0 = identical direction. */
-  distance: number;
-}
-
 type ListNearestUserFactsProps = {
   userId: string;
   embedding: number[];
@@ -28,7 +20,7 @@ export async function listNearestUserFacts({
   embedding,
   modelId,
   limit,
-}: ListNearestUserFactsProps): Promise<NearUserFact[]> {
+}: ListNearestUserFactsProps) {
   const probe = sql`${toVectorText(embedding)}::vector`;
   const rows = await db
     .selectFrom('memory.userFacts')

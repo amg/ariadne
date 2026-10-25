@@ -1,5 +1,5 @@
+import type { HandoverProgress, RestoredDraft } from '@/components/chat/types';
 import {
-  type Handover,
   type Message,
   fetchResumeDraft,
   handOverArrival,
@@ -7,10 +7,10 @@ import {
   updateMessage,
 } from '@/services/api';
 import { useChat } from '@ai-sdk/react';
+import { VERDICT_PART_TYPE } from '@ari/lib/api/schemas/chat/chat';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import ChatView from '../ChatView';
-import type { HandoverProgress, RestoredDraft } from '../ChatView/types';
 import {
   describeChatError,
   gateWaitOutcomeOf,
@@ -51,11 +51,7 @@ const HANDOVER_RETRY_DELAY_MS = 1_000;
  * the old chat's memory is still being saved. Null once `stillWanted`
  * says nobody is waiting any more; nothing has moved then.
  */
-async function movedArrivalOrNull(
-  threadId: string,
-  messageId: string,
-  stillWanted: () => boolean,
-): Promise<Handover | null> {
+async function movedArrivalOrNull(threadId: string, messageId: string, stillWanted: () => boolean) {
   for (;;) {
     const outcome = await handOverArrival(threadId, messageId);
     if (outcome.kind === 'moved') return outcome.handover;
@@ -117,7 +113,7 @@ export default function ChatController({
       // pending arrival (the last user message) so the bubble tints before the
       // reply starts growing.
       onData: (part) => {
-        if (part.type !== 'data-thread-verdict') return;
+        if (part.type !== VERDICT_PART_TYPE) return;
         const payload = readVerdictData(part);
         const arrival = lastUserMessage(messagesRef.current);
         if (!payload || !arrival) return;

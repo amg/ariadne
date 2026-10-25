@@ -11,14 +11,12 @@ import {
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { findMemoryCaptureSegmentJobOrNull } from '@queue/tasks/memoryCaptureSegmentTask';
 import {
-  type ChatStreamHandle,
   EMBEDDING_MODEL_ID,
-  type RetryChoice,
   isDriftPause,
   retryLastExchange,
   submitChat,
 } from '@services/aiService';
-import { type ServerEvent, subscribe } from '@services/events';
+import { subscribe } from '@services/events';
 import { handOverArrival } from '@services/handoverService';
 import { assembledSystemPrompt, captureUnreadTurns } from '@services/memory';
 import { editMessage } from '@services/messageService';
@@ -28,6 +26,8 @@ import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
+import type { ChatStreamHandle, RetryChoice } from '../types/aiService';
+import type { ServerEvent } from '../types/events';
 
 /**
  * The pause-and-choose flow end to end against the mock provider. The mock
@@ -47,18 +47,31 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue({ memory: memoryOn });
+useTestQueue({ memory: memoryOn, threadAnalysisMode: 'heuristic' });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts the move itself, not titles: settlement never asks for one. */
 const titling = { enqueueThreadGenerateTitle: async () => {} };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging, titling, memory: memoryOn });
+  return submitChat({
+    ...props,
+    judging,
+    titling,
+    memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
+  });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
+  return retryLastExchange({
+    ...props,
+    choice,
+    judging,
+    titling,
+    memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
+  });
 }
 
 /** A short hold, so a handover waiting on a failing capture answers quickly. */
@@ -71,7 +84,7 @@ afterEach(() => {
 });
 
 /** The segment the arrival's fire closed. */
-async function closedSegmentIdOf(messageId: string): Promise<string> {
+async function closedSegmentIdOf(messageId: string) {
   const logged = await findSegmentDriftLogByMessageId({ messageId, modelId: EMBEDDING_MODEL_ID });
   if (!logged) throw new Error('the arrival closed no segment');
   return logged.segmentId;
@@ -85,7 +98,7 @@ async function handOverOnceSettled(props: {
   userId: string;
   threadId: string;
   messageId: string;
-}): Promise<Awaited<ReturnType<typeof handOverArrival>>> {
+}) {
   for (let tries = 0; tries < 40; tries += 1) {
     const result = await handOverArrival({ ...props, memory: memoryOn });
     if (result.type === 'success' || result.code !== 'capture_pending') return result;
@@ -94,7 +107,7 @@ async function handOverOnceSettled(props: {
   throw new Error('the capture never settled');
 }
 
-async function drain(handle: ChatStreamHandle): Promise<void> {
+async function drain(handle: ChatStreamHandle) {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
     // Consuming the stream lets the exchange settle.
   }

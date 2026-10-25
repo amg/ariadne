@@ -1,12 +1,10 @@
-import { env } from '@config/env';
-import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
+import { captureThreadMemory } from '@ari/lib/api/schemas/threads/capture-memory';
 import { captureUnreadTurns } from '@services/memory';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-
-type CaptureMemoryParams = { id: string };
+import type { RouteOf } from '../contract';
+import { ownedThreadIdOrReject, userIdOf } from '../request';
 
 /**
  * Captures on demand everything in the thread not yet read, from each
@@ -16,20 +14,19 @@ type CaptureMemoryParams = { id: string };
  * then stays put for the next pass. 403 while thread analysis is off:
  * without segments there is nothing to capture from.
  */
-export async function setupThreadCaptureMemoryRoute(fastify: FastifyInstance) {
-  fastify.post(
-    '/api/threads/:id/capture-memory',
-    { preHandler: verifySession() },
-    async (request: FastifyRequest<{ Params: CaptureMemoryParams }>, reply: FastifyReply) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id: threadId } = request.params;
-      if (!isValidUuid(threadId)) {
-        return reply.code(400).send({ error: 'Invalid thread id' });
-      }
-      if (!(await findThreadByIdAndUser({ userId, threadId }))) {
-        return reply.code(404).send({ error: 'Thread not found' });
-      }
-      if (env.THREAD_ANALYSIS_MODE === 'off') {
+export function setupThreadCaptureMemoryRoute(
+  fastify: FastifyInstance,
+  { threadAnalysisMode }: { threadAnalysisMode: ThreadAnalysisMode },
+) {
+  fastify.route<RouteOf<typeof captureThreadMemory>>({
+    method: captureThreadMemory.method,
+    url: captureThreadMemory.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const threadId = await ownedThreadIdOrReject({ request, reply, userId });
+      if (threadId === null) return reply;
+      if (threadAnalysisMode === 'off') {
         return reply.code(403).send({ error: 'Thread analysis is disabled' });
       }
 
@@ -41,7 +38,7 @@ export async function setupThreadCaptureMemoryRoute(fastify: FastifyInstance) {
           error: `${report.failed} of ${report.owed} segment(s) could not be captured. Try again.`,
         });
       }
-      return reply.send(report);
+      return reply.code(200).send(report);
     },
-  );
+  });
 }

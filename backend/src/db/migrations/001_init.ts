@@ -1,6 +1,6 @@
 import { type Kysely, sql } from 'kysely';
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   // 1. Extensions
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`.execute(db);
   await sql`CREATE EXTENSION IF NOT EXISTS "vector"`.execute(db);
@@ -34,7 +34,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.dropTable('messages').execute();
   await db.schema.dropTable('threads').execute();
   await db.schema.dropTable('users').execute();

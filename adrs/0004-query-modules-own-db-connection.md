@@ -31,10 +31,10 @@ instance via `createDbFromPool`.
   database, then clones it once per vitest worker; a setup file points each
   worker's `VITEST_TEST_DATABASE_URL` at its own clone before any test file
   imports the singleton, so it binds to that clone automatically.
-  `useTestDb()` is a lifecycle hook (truncate between tests, destroy the
-  pool after the file) instead of a connection factory. Test files run in
-  parallel; truncates never cross workers because no two workers share a
-  database.
+  `useTestDb()` is a lifecycle hook (empty every table between tests,
+  destroy the pool after the file) instead of a connection factory. Test
+  files run in parallel; clearing never crosses workers because no two
+  workers share a database.
 - `createDbFromPool` remains exported for global-setup's schema reset.
 
 ## Consequences

@@ -6,7 +6,7 @@ type DeleteUserFactProps = {
 };
 
 /** Hard-deletes a Fact row. False when the user has no Fact with that id. */
-export async function deleteUserFact({ factId, userId }: DeleteUserFactProps): Promise<boolean> {
+export async function deleteUserFact({ factId, userId }: DeleteUserFactProps) {
   const deleted = await db
     .deleteFrom('memory.userFacts')
     .where('id', '=', factId)

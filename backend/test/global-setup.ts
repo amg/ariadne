@@ -50,7 +50,7 @@ interface DbConfig {
  * fallbacks apply when nothing is configured at all. `host` stays
  * undefined for bare `DB_*` parts with no `DB_HOST`.
  */
-function deriveConfiguredDb(): DbConfig {
+function deriveConfiguredDb() {
   const explicit = process.env.DATABASE_URL;
   if (explicit) {
     const url = new URL(explicit);
@@ -70,7 +70,7 @@ function deriveConfiguredDb(): DbConfig {
 }
 
 /** Default-route gateway IP of this container's network (Linux only). */
-function detectGatewayIp(): string | undefined {
+function detectGatewayIp() {
   try {
     for (const line of readFileSync('/proc/net/route', 'utf8').split('\n').slice(1)) {
       const [, destination, gateway] = line.trim().split(/\s+/);
@@ -89,10 +89,7 @@ function detectGatewayIp(): string | undefined {
  * Ensure the dedicated `chatbot_test` database exists on the target
  * server and return its URL. Throws when no Postgres is reachable.
  */
-async function ensureTestDatabase(
-  target: { host: string } & DbConfig,
-  timeoutMillis: number,
-): Promise<string> {
+async function ensureTestDatabase(target: { host: string } & DbConfig, timeoutMillis: number) {
   const admin = `postgres://${encodeURIComponent(target.user)}:${encodeURIComponent(target.password)}@${target.host}:${target.port}`;
   const pool = new Pool({
     connectionString: `${admin}/postgres`,
@@ -119,7 +116,7 @@ async function ensureTestDatabase(
  * container gateway; both share the configured port and credentials.
  * Returns the first reachable candidate with its provenance.
  */
-async function resolveSandboxDatabase(): Promise<{ url: string; mode: string }> {
+async function resolveSandboxDatabase() {
   const config = deriveConfiguredDb();
   const gateway = detectGatewayIp();
 
@@ -157,7 +154,7 @@ async function resolveSandboxDatabase(): Promise<{ url: string; mode: string }> 
   );
 }
 
-function redactUrl(url: string): string {
+function redactUrl(url: string) {
   return url.replace(/:[^:@/]+@/, ':***@');
 }
 
@@ -165,7 +162,7 @@ function redactUrl(url: string): string {
  * Recreate `<template>_w1`…`<template>_wN` as copies of the migrated
  * template. The template must have no open connections while copying.
  */
-async function cloneWorkerDatabases(templateUrl: string, workers: number): Promise<void> {
+async function cloneWorkerDatabases(templateUrl: string, workers: number) {
   const url = new URL(templateUrl);
   const templateName = decodeURIComponent(url.pathname.slice(1));
   url.pathname = '/postgres';

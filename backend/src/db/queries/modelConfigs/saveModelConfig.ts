@@ -10,7 +10,7 @@ type SaveModelConfigProps = {
  * fields are refreshed; `provider` is left untouched (it is part of the
  * identity, not the cached data).
  */
-export async function saveModelConfig({ config }: SaveModelConfigProps): Promise<void> {
+export async function saveModelConfig({ config }: SaveModelConfigProps) {
   await db
     .insertInto('billing.modelConfigs')
     .values(config)

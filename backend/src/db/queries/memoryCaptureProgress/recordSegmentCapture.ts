@@ -4,7 +4,7 @@ import { toVectorText } from '@queries/messageEmbeddings/embeddingMapping';
 import { sql } from 'kysely';
 
 /** One Fact a capture read, stored in the order it was read. */
-export interface CapturedFact {
+interface CapturedFact {
   /** Chosen by the capture, so a later Fact of the same read can replace this one. */
   id: string;
   row: NewUserFact;
@@ -28,7 +28,7 @@ class CapturedByAnotherPass extends Error {}
 async function pointerMoved(
   trx: DbExecutor,
   { segmentId, readFrom, throughAt }: RecordSegmentCaptureProps,
-): Promise<boolean> {
+) {
   if (readFrom === null) {
     const inserted = await trx
       .insertInto('memory.memoryCaptureProgress')
@@ -77,7 +77,7 @@ async function storeFact(trx: DbExecutor, { id, row, replacesFactId }: CapturedF
  * written, when the pointer no longer holds the value the capture read:
  * another pass captured those Turns first.
  */
-export async function recordSegmentCapture(props: RecordSegmentCaptureProps): Promise<boolean> {
+export async function recordSegmentCapture(props: RecordSegmentCaptureProps) {
   try {
     await db.transaction().execute(async (trx) => {
       if (!(await pointerMoved(trx, props))) throw new CapturedByAnotherPass();

@@ -1,12 +1,6 @@
 /**
- * Error-code contract shared with the frontend (mirrored by
- * `frontend/src/services/errorCodes.ts`).
- *
- * Policy (curated error surface):
- *  - The client receives a stable `errorCode` and nothing else.
- *  - Raw provider details (DeepInfra rejection messages, stack context) stay
- *    in the server console only — the frontend is public, these aren't.
- *  - The frontend maps each code to its own friendly copy for toasts/UI.
+ * The stable codes a titling failure is recorded with. Raw provider
+ * details stay in the server log only.
  */
 export const ErrorCodes = {
   THREAD_NOT_FOUND: 'thread_not_found',

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TITLE: what changed and why</title>
+<style>
+  :root { --ink:#1d2433; --mute:#5b6577; --line:#d5dae3; --bg:#f6f7fa; --new:#1f8a5b; --chg:#b7791f; --bad:#c0392b; --blue:#2b6cb0; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.55 system-ui, sans-serif; color: var(--ink); background: #fff; margin: 0; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 48px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 24px 0 6px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--mute); margin-bottom: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card b { display: block; font-size: 24px; }
+  .card span { color: var(--mute); font-size: 13px; }
+  figure { margin: 16px 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+  figcaption { color: var(--mute); font-size: 13px; margin-top: 6px; }
+  svg text { font: 12px system-ui, sans-serif; fill: var(--ink); }
+  svg .mute { fill: var(--mute); }
+  svg .small { font-size: 11px; }
+  svg .bold { font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  th { background: var(--bg); }
+  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; color: #fff; }
+  .tag.new { background: var(--new); } .tag.chg { background: var(--chg); } .tag.test { background: var(--blue); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .note { border-left: 4px solid var(--chg); background: #fffaf0; padding: 8px 14px; margin: 12px 0; }
+  ul { margin: 6px 0 6px 20px; padding: 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>TITLE: what changed and why</h1>
+<p class="sub">One sentence on the goal.</p>
+
+<div class="cards">
+  <div class="card"><b>N</b><span>existing files changed (+A / −D)</span></div>
+  <div class="card"><b>N</b><span>new files</span></div>
+  <div class="card"><b>N</b><span>tests pass; gate result</span></div>
+  <div class="card"><b>N</b><span>one more fact worth a card</span></div>
+</div>
+
+<h2>1. The problem</h2>
+<p>Why the change was needed, in plain words. Then a before and after picture.</p>
+<div class="two">
+  <figure>
+    <svg viewBox="0 0 440 150" width="100%" role="img" aria-label="Before">
+      <text x="8" y="16" class="bold">Before</text>
+      <!-- bars: rect rx=4, fill #9fb8e0 normal, #fbe9e7 + stroke #c0392b dashed for lost/failed -->
+    </svg>
+  </figure>
+  <figure>
+    <svg viewBox="0 0 440 150" width="100%" role="img" aria-label="After">
+      <text x="8" y="16" class="bold">After</text>
+    </svg>
+  </figure>
+</div>
+
+<h2>2. Where the code lives</h2>
+<figure>
+  <svg viewBox="0 0 900 400" width="100%" role="img" aria-label="Structure">
+    <defs>
+      <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6577"/></marker>
+      <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f8a5b"/></marker>
+    </defs>
+    <!-- boxes: rx=6; new fill #e5f5ed stroke #1f8a5b; changed fill #fdf3dd stroke #b7791f; unchanged fill #fff stroke #9aa3b2 -->
+  </svg>
+  <figcaption>What to look at in this picture.</figcaption>
+</figure>
+
+<h2>3. What happens, step by step</h2>
+<p>The main scenario end to end.</p>
+<table>
+<tr><th>Moment</th><th>Who</th><th>Recorded</th></tr>
+<tr><td></td><td></td><td></td></tr>
+</table>
+
+<h2>4. File by file</h2>
+<h3>part <span class="tag new">new file</span> <span class="tag chg">changed</span></h3>
+<table>
+<tr><th>File</th><th>What</th><th>Why</th></tr>
+<tr><td><code></code></td><td></td><td></td></tr>
+</table>
+
+<h2>5. How it is tested</h2>
+<table>
+<tr><th>What</th><th>Where</th></tr>
+<tr><td></td><td><code></code></td></tr>
+</table>
+
+<h2>6. Decisions worth a second look</h2>
+<ul>
+  <li><b>Choice:</b> why.</li>
+</ul>
+<div class="note"><b>Why:</b> a caveat the reader should not miss.</div>
+
+<h2>7. What is still open</h2>
+<p>What was not run or not verified, and the exact command to run it.</p>
+
+</main>
+</body>
+</html>

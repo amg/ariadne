@@ -29,11 +29,19 @@ const SCAN_DIRS = [
   'backend/smoke',
   'backend/test',
   'frontend/src',
+  'infra/bin',
+  'infra/config',
+  'infra/lib',
+  'lib/api',
+  'lib/metrics',
+  'load/src',
   'scripts/checks',
 ].map((d) => join(ROOT, d));
 
 const isScannable = (path) =>
-  /\.(tsx?|mjs)$/.test(path) && SCAN_DIRS.some((d) => path.startsWith(`${d}/`));
+  /\.(tsx?|mjs)$/.test(path) &&
+  !path.endsWith('.generated.ts') &&
+  SCAN_DIRS.some((d) => path.startsWith(`${d}/`));
 
 /**
  * The gross classes. A pattern fires only when designed to: word-boundary
@@ -197,7 +205,7 @@ if (violations > 0) {
       ...report,
       '',
       '  Fix standard — load the docs-quality skill before rewriting:',
-      '    .pi/agent/skills/docs-quality/SKILL.md',
+      '    .pi/skills/common/docs-quality/SKILL.md',
       '  No ticket/spec/ADR references, no .md citations, no dated narration,',
       '  no vocabulary lists, no implementation leaks in interface comments.',
       '  Repo-wide audit: node scripts/checks/comment-hygiene.mjs --all',

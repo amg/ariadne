@@ -33,6 +33,7 @@ const EXEMPT = new Set([
   'FORCE_COLOR', // terminal convention (colorette, npm scripts), not app config
   'NO_COLOR', // terminal convention (https://no-color.org), not app config
   'ENV_FILE', // dotenv loader plumbed by src/config/dotenv.ts, not app config
+  'ECS_CONTAINER_METADATA_URI_V4', // ECS sets it in every task, not app config
 ]);
 
 /**

@@ -1,9 +1,9 @@
 import { env } from '@config/env';
 import { db } from '@db/db';
-import { type JobErrorClass, jobKeyOf, taggedJobError } from '@queries/queue/jobError';
+import type { JobErrorClass } from '@db/types';
+import { jobKeyOf, taggedJobError } from '@queries/queue/jobError';
 import { QUEUE_SCHEMA, startQueue, stopQueue } from '@queue/index';
 import { queueRuntime } from '@queue/worker';
-import type { MemoryFeature } from '@services/memory';
 import { type TaskList, makeWorkerUtils, runOnce } from 'graphile-worker';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
@@ -16,7 +16,7 @@ function workerUtils() {
  * fatal failures to be marked dead. A job waiting out its retry pause is
  * not due; `makeWaitingJobsDue` brings it forward.
  */
-export async function drainQueue(tasks: TaskList): Promise<void> {
+export async function drainQueue(tasks: TaskList) {
   const utils = await workerUtils();
   try {
     const runtime = queueRuntime(tasks, utils);
@@ -35,7 +35,7 @@ export async function drainQueue(tasks: TaskList): Promise<void> {
 }
 
 /** Makes every job waiting out a retry pause due right now. */
-export async function makeWaitingJobsDue(): Promise<void> {
+export async function makeWaitingJobsDue() {
   const waiting = await db
     .selectFrom('queues.jobs')
     .select('id')
@@ -60,7 +60,7 @@ export async function addDeadJob(job: {
   key: string;
   payload: Record<string, unknown>;
   errorClass: JobErrorClass;
-}): Promise<void> {
+}) {
   const utils = await workerUtils();
   try {
     const added = await utils.addJob(job.task, job.payload, {
@@ -75,7 +75,7 @@ export async function addDeadJob(job: {
 }
 
 /** Resolves once no job is running and none is due, or throws after the time limit. */
-async function queueIdle(limitMs = 20_000): Promise<void> {
+async function queueIdle(limitMs = 20_000) {
   const deadline = Date.now() + limitMs;
   for (;;) {
     const busy = await db
@@ -96,13 +96,13 @@ async function queueIdle(limitMs = 20_000): Promise<void> {
 
 /**
  * Runs the app's worker in the test process for the whole file, the way
- * the server does with the given Memory decision, so a request waiting on
+ * the server does with the given feature decisions, so a request waiting on
  * a task sees it complete. Call after `useTestDb()`: each test's jobs
  * finish before its tables are cleared.
  */
-export function useTestQueue({ memory }: { memory: MemoryFeature }): void {
+export function useTestQueue({ memory, threadAnalysisMode }: Parameters<typeof startQueue>[0]) {
   beforeAll(async () => {
-    await startQueue({ memory });
+    await startQueue({ memory, threadAnalysisMode });
   });
   afterEach(async () => {
     await queueIdle();
@@ -110,4 +110,22 @@ export function useTestQueue({ memory }: { memory: MemoryFeature }): void {
   afterAll(async () => {
     await stopQueue();
   });
+}
+
+/** Leaves a job behind that is due at `runAt`, which may be in the past, as if it had waited since. */
+export async function addJobDueAt(job: {
+  task: string;
+  key: string;
+  runAt: Date;
+}) {
+  const utils = await workerUtils();
+  try {
+    await utils.addJob(
+      job.task,
+      { subject: job.key },
+      { jobKey: jobKeyOf(job.task, job.key), runAt: job.runAt },
+    );
+  } finally {
+    await utils.release();
+  }
 }

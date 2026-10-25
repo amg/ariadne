@@ -4,9 +4,11 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from '@config/env';
-import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
+import { CamelCasePlugin, Kysely } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
+import { appPoolSize } from './poolSize';
+import { TaggingPostgresDialect } from './queryTag';
 import type { Database } from './types';
 
 /**
@@ -16,36 +18,38 @@ import type { Database } from './types';
  * result rows map back to camelCase. Raw `sql` templates pass through
  * untouched, SQL and result rows alike.
  */
-export function createDbFromPool(pool: Pool): Kysely<Database> {
+export function createDbFromPool(pool: Pool) {
   return new Kysely<Database>({
-    dialect: new PostgresDialect({ pool }),
+    dialect: new TaggingPostgresDialect({ pool }),
     plugins: [new CamelCasePlugin()],
   });
 }
 
 /**
- * Per-request database selection: a benched request enters a bench scope;
- * everything outside a scoped request keeps the default pool.
+ * Per-request database selection: a request that enters a scope runs its queries on the
+ * handle the scope holds. Everything outside a scope uses the default pool.
  */
 export const requestDbScope = new AsyncLocalStorage<Kysely<Database>>();
 
-/** The default database: a standing pool on DATABASE_URL. */
-const mainDb = createDbFromPool(new Pool({ connectionString: env.DATABASE_URL }));
+/** The default database's pool: standing, on DATABASE_URL, sized for the jobs this process runs. */
+const mainPool = new Pool({
+  connectionString: env.DATABASE_URL,
+  max: appPoolSize(env.PROCESS_ROLE, env.WORKER_JOB_CONCURRENCY),
+});
+const mainDb = createDbFromPool(mainPool);
 
-/** The bench database: a standing pool on BENCH_DATABASE_URL, null if unset. */
-const benchDb: Kysely<Database> | null = env.BENCH_DATABASE_URL
-  ? createDbFromPool(new Pool({ connectionString: env.BENCH_DATABASE_URL }))
-  : null;
+/** How many connections are lent out now, and how many requests are waiting for a free one. */
+export function databaseConnections() {
+  return { inUse: mainPool.totalCount - mainPool.idleCount, waiting: mainPool.waitingCount };
+}
 
 /**
  * The app-wide database handle.
  *
- * Every access resolves against the bench database when the current request
- * is bench-scoped, else against the default — the swap stays invisible to
- * callers. `migrateToLatest` never touches the bench database: migrations
- * belong to the deployment's own schema.
+ * Every access resolves against the database of the current request scope, else
+ * against the default, so the swap stays invisible to callers.
  */
-const resolveActiveDb = (): Kysely<Database> => requestDbScope.getStore() ?? mainDb;
+const resolveActiveDb = () => requestDbScope.getStore() ?? mainDb;
 export const db: Kysely<Database> = new Proxy(mainDb, {
   get(_target, prop) {
     const active = resolveActiveDb();

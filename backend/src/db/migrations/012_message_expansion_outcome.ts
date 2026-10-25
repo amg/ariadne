@@ -18,7 +18,7 @@ import { type Kysely, sql } from 'kysely';
  * from the tracked Migrator (test provisioning rebuilds the schema fresh
  * each run and replays the whole stack).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('message_embeddings')
     .addColumn('expand_outcome', sql`varchar(24)`)
@@ -26,7 +26,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema
     .alterTable('message_embeddings')
     .dropColumn('expand_outcome')

@@ -7,7 +7,7 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
 
-async function createThread(): Promise<string> {
+async function createThread() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
   const thread = await insertThread({ userId });

@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { UserFact } from '@db/types';
 
 type FindCurrentUserFactProps = {
   factId: string;
@@ -7,10 +6,7 @@ type FindCurrentUserFactProps = {
 };
 
 /** The user's Fact with this id while it is current; null when missing or superseded. */
-export async function findCurrentUserFactOrNull({
-  factId,
-  userId,
-}: FindCurrentUserFactProps): Promise<UserFact | null> {
+export async function findCurrentUserFact({ factId, userId }: FindCurrentUserFactProps) {
   const fact = await db
     .selectFrom('memory.userFacts')
     .select([

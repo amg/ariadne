@@ -3,8 +3,8 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import type { Construct } from 'constructs';
 import { AVAILABILITY_ZONES, INTERNAL_DOMAIN, OUTPUTS, RAISE_TAGS } from '../../config/names.ts';
 import type { Step } from '../../config/steps.ts';
-import type { CoreResources } from '../core/coreStack.ts';
 import { markLifetime } from '../lifetime.ts';
+import type { CoreResources } from '../types/core.ts';
 import { Cache } from './cache.ts';
 import { Database } from './database.ts';
 import { Network, SUBNETS } from './network.ts';
@@ -12,9 +12,11 @@ import { OperatorAccess } from './operatorAccess.ts';
 import { Origin } from './origin.ts';
 import { Services } from './services.ts';
 
-export type AppStackProps = StackProps & {
+type AppStackProps = StackProps & {
   step: Step;
   imageTag: string;
+  /** The snapshot the database is restored from; null for a step that starts empty. */
+  seedSnapshot: string | null;
   core: CoreResources;
 };
 
@@ -28,12 +30,13 @@ export class AppStack extends Stack {
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
     markLifetime(this, 'app');
-    const { step, imageTag, core } = props;
+    const { step, imageTag, seedSnapshot, core } = props;
     Tags.of(this).add(RAISE_TAGS.step, step.name);
     Tags.of(this).add(RAISE_TAGS.imageTag, imageTag);
+    if (seedSnapshot !== null) Tags.of(this).add(RAISE_TAGS.seedSnapshot, seedSnapshot);
 
     const network = new Network(this, 'Network');
-    const database = new Database(this, 'Database', { network, step });
+    const database = new Database(this, 'Database', { network, step, seedSnapshot });
     const cache = new Cache(this, 'Cache', { network, step });
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
@@ -55,6 +58,7 @@ export class AppStack extends Stack {
       vault: core.vault,
       api: services.api,
       web: services.web,
+      reservedCapacityUnits: step.loadBalancer.reservedCapacityUnits,
     });
     const access = new OperatorAccess(this, 'OperatorAccess', {
       network,

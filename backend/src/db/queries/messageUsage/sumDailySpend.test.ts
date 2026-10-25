@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
-import { type AddSideCostRow, addSideCost } from '@queries/messageSideCosts/addSideCost';
+import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
 import { sumDailySpend } from '@queries/messageUsage/sumDailySpend';
 import { insertMessage } from '@queries/messages/insertMessage';
@@ -10,6 +10,7 @@ import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService/config';
 import { useTestDb } from '@test/test-db';
+import { sql } from 'kysely';
 import { describe, expect, it } from 'vitest';
 
 async function createThread(): Promise<{ userId: string; threadId: string }> {
@@ -19,8 +20,8 @@ async function createThread(): Promise<{ userId: string; threadId: string }> {
   return { userId, threadId: thread.id };
 }
 
-async function seedChatSpend(threadId: string, costUsd: string): Promise<void> {
-  const user = await insertMessage({ threadId, role: 'user', content: 'hello' });
+async function seedChatSpend(threadId: string, costUsd: string) {
+  await insertMessage({ threadId, role: 'user', content: 'hello' });
   const assistant = await insertMessage({ threadId, role: 'assistant', content: 'hi' });
 
   await insertMessageUsage({
@@ -32,6 +33,17 @@ async function seedChatSpend(threadId: string, costUsd: string): Promise<void> {
     costUsd,
     finishReason: 'stop',
   });
+}
+
+/** The slots of today's spend that hold anything, in order. */
+async function slotsHoldingToday() {
+  const rows = await db
+    .selectFrom('billing.dailySpend')
+    .select('slot')
+    .where('day', '=', sql<Date>`(now() at time zone 'UTC')::date`)
+    .orderBy('slot')
+    .execute();
+  return rows.map((row) => row.slot);
 }
 
 describe('sumDailySpend', () => {
@@ -118,7 +130,7 @@ describe('sumDailySpend', () => {
   it('counts spend added to rows that already exist', async () => {
     const { threadId } = await createThread();
     const user = await insertMessage({ threadId, role: 'user', content: 'test' });
-    const sideCost: Omit<AddSideCostRow, 'costUsd'> = {
+    const sideCost: Omit<Parameters<typeof addSideCost>[0], 'costUsd'> = {
       messageId: user.id,
       kind: 'judge',
       model: 'test-model',
@@ -158,5 +170,61 @@ describe('sumDailySpend', () => {
       .execute();
 
     expect(await sumDailySpend()).toBe('0.0000010000');
+  });
+
+  it('spreads spend over several rows, and the day’s total stays their sum', async () => {
+    const { threadId } = await createThread();
+    const user = await insertMessage({ threadId, role: 'user', content: 'test' });
+
+    for (let spender = 0; spender < 40; spender += 1) {
+      await addSideCost({
+        messageId: user.id,
+        kind: 'judge',
+        model: `model-${spender}`,
+        costUsd: '0.0000001000',
+        promptTokens: null,
+        completionTokens: null,
+      });
+    }
+
+    expect((await slotsHoldingToday()).length).toBeGreaterThan(1);
+    expect(await sumDailySpend()).toBe('0.0000040000');
+  });
+
+  it('keeps everything one transaction spends in one row, so it never holds two', async () => {
+    const { threadId } = await createThread();
+    const user = await insertMessage({ threadId, role: 'user', content: 'test' });
+    const assistant = await insertMessage({ threadId, role: 'assistant', content: 'hi' });
+
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .insertInto('billing.messageUsage')
+        .values({
+          messageId: assistant.id,
+          model: 'provider/chat',
+          providerId: randomUUID(),
+          promptTokens: 10,
+          completionTokens: 5,
+          costUsd: '0.0000010000',
+          finishReason: 'stop',
+        })
+        .execute();
+      for (const kind of ['rewrite', 'judge'] as const) {
+        await trx
+          .insertInto('billing.messageSideCosts')
+          .values({
+            messageId: user.id,
+            kind,
+            model: 'test-model',
+            costUsd: '0.0000002000',
+            promptTokens: null,
+            completionTokens: null,
+          })
+          .execute();
+      }
+    });
+
+    expect(await slotsHoldingToday()).toHaveLength(1);
+    expect(await sumDailySpend()).toBe('0.0000014000');
   });
 });
