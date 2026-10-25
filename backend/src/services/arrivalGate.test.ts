@@ -10,15 +10,10 @@ import {
   enqueueDriftGateJudgeArrival,
   findDriftGateJudgeArrivalJobOrNull,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
-import {
-  type ChatStreamHandle,
-  type RetryChoice,
-  isDriftPause,
-  retryLastExchange,
-  submitChat,
-} from '@services/aiService';
+import { isDriftPause, retryLastExchange, submitChat } from '@services/aiService';
 import { publish } from '@services/events';
 import { editMessage } from '@services/messageService';
+import { useAppRecordCapture } from '@test/appRecords';
 import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { memoryOn } from '@test/memory';
 import { addDeadJob, useTestQueue } from '@test/queue';
@@ -26,6 +21,7 @@ import { useTestDb } from '@test/test-db';
 import { readUIMessageStream } from 'ai';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
+import type { ChatStreamHandle, RetryChoice } from '../types/aiService';
 
 /**
  * The chat request holding for the Drift gate's verdict, end to end with
@@ -50,7 +46,8 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue({ memory: memoryOn });
+useTestQueue({ memory: memoryOn, threadAnalysisMode: 'heuristic' });
+const capture = useAppRecordCapture();
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts verdict waits, not titles: settlement never asks for one. */
@@ -65,6 +62,7 @@ function submit(
     judging,
     titling,
     memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
     ...(signal ? { signal } : {}),
   });
 }
@@ -80,6 +78,7 @@ function retry(
     judging,
     titling,
     memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
     ...(signal ? { signal } : {}),
   });
 }
@@ -103,7 +102,7 @@ async function drained(result: Awaited<ReturnType<typeof submitChat>>): Promise<
 }
 
 /** Resolves once the arrival's judgment has finished, successfully or not. */
-async function judgmentSettled(messageId: string): Promise<void> {
+async function judgmentSettled(messageId: string) {
   const deadline = Date.now() + 10_000;
   for (;;) {
     const job = await findDriftGateJudgeArrivalJobOrNull(messageId);
@@ -113,7 +112,7 @@ async function judgmentSettled(messageId: string): Promise<void> {
   }
 }
 
-async function verdictCount(messageId: string): Promise<number> {
+async function verdictCount(messageId: string) {
   const rows = await db
     .selectFrom('analysis.segmentDriftLogs')
     .select('messageId')
@@ -157,12 +156,24 @@ describe('the chat request waiting on the gate', () => {
 
     const result = await submit({ userId, threadId, content: 'Closing the tab now' }, gone.signal);
 
-    expect(result).toMatchObject({ type: 'error', code: 'gate_pending' });
+    expect(result).toMatchObject({ type: 'error', code: 'client_gone' });
     const arrival = await newestUserRow(threadId);
     await judgmentSettled(arrival.id);
     expect(await verdictCount(arrival.id)).toBe(1);
     const rows = await listMessagesByThread({ threadId });
     expect(rows.map((row) => row.role)).toEqual(['user']);
+  });
+
+  it('records a client that left mid-wait as gone, with no verdict and no wait at the limit', async () => {
+    const { userId, threadId } = await freshThread();
+    const gone = new AbortController();
+    gone.abort();
+
+    await submit({ userId, threadId, content: 'Leaving before the verdict' }, gone.signal);
+
+    expect(capture.written('exchange')).toMatchObject([
+      { outcome: 'gone', verdict: null, errorCode: 'client_gone' },
+    ]);
   });
 
   it('starts no reply when the client is gone by the time the verdict answers', async () => {
@@ -282,6 +293,22 @@ describe('a Paused arrival', () => {
     expect(reply.threadVerdict).toMatchObject({ messageId: pausedId, verdict: 'fire' });
     expect(await verdictCount(pausedId)).toBe(1);
   });
+
+  it('records the continue as replaying the fire, which the pause already counted', async () => {
+    const { userId, threadId } = await pausedThread();
+
+    await drained(await retry({ userId, threadId }, 'continue'));
+
+    expect(
+      capture
+        .written('exchange')
+        .map(({ trigger, verdict, verdictReplayed }) => ({ trigger, verdict, verdictReplayed })),
+    ).toEqual([
+      { trigger: 'submit', verdict: expect.any(String), verdictReplayed: false },
+      { trigger: 'submit', verdict: 'fire', verdictReplayed: false },
+      { trigger: 'retry', verdict: 'fire', verdictReplayed: true },
+    ]);
+  });
 });
 
 describe('requests meeting on one arrival', () => {
@@ -325,7 +352,13 @@ describe('requests meeting on one arrival', () => {
 
   function heldSubmit(props: { userId: string; threadId: string; content: string }) {
     const held = heldJudging();
-    return submitChat({ ...props, judging: held.judging, titling, memory: memoryOn });
+    return submitChat({
+      ...props,
+      judging: held.judging,
+      titling,
+      memory: memoryOn,
+      threadAnalysisMode: 'heuristic',
+    });
   }
 
   it('starts one reply when a submit and a retry wake on the same verdict', async () => {
@@ -341,6 +374,7 @@ describe('requests meeting on one arrival', () => {
       judging: retryHeld.judging,
       titling,
       memory: memoryOn,
+      threadAnalysisMode: 'heuristic',
     });
     await retryHeld.asked();
 

@@ -4,20 +4,12 @@ type ListUnansweredArrivalsByUserProps = {
   userId: string;
 };
 
-/** A user Message that is the newest live row of its Thread. */
-export interface UnansweredArrival {
-  threadId: string;
-  messageId: string;
-}
-
 /**
  * Each of the user's Threads whose newest live row is a user Message, with
  * that Message; Threads ending in a reply are left out. Newest Thread
  * first, like the thread list. One query, whatever the user's history.
  */
-export async function listUnansweredArrivalsByUser({
-  userId,
-}: ListUnansweredArrivalsByUserProps): Promise<UnansweredArrival[]> {
+export async function listUnansweredArrivalsByUser({ userId }: ListUnansweredArrivalsByUserProps) {
   return db
     .selectFrom((eb) =>
       eb

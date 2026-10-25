@@ -5,7 +5,7 @@ import { db } from '@db/db';
  * refresh" marker used for the stateless refresh cooldown. Undefined when
  * no configs have been loaded yet.
  */
-export async function getLatestModelConfigRefresh(): Promise<Date | undefined> {
+export async function getLatestModelConfigRefresh() {
   const row = await db
     .selectFrom('billing.modelConfigs')
     .select((eb) => eb.fn.max<Date>('lastUpdated').as('latest'))

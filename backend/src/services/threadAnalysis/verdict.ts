@@ -1,97 +1,47 @@
-import { type PageHinkleyDetector, type PatrolSnapshot, createPageHinkley } from './pageHinkley';
-import {
-  type BaselineSnapshot,
-  type SegmentRollingStats,
-  createSegmentRollingStats,
-} from './segmentRollingStats';
+import type { FireChannel } from '@ari/lib/api/schemas/common/driftGate';
+import { type BaselineSnapshot, createSegmentRollingStats } from './segmentRollingStats';
+import { type PatrolSnapshot, createSlowPatrol } from './slowPatrol';
+import type { JudgingParams } from './types';
 
-/**
- * The two-channel verdict core shared by both drift flows. The offline
- * fold and the gate replay run this exact judgment — they differ only in
- * the READING that feeds it: the fold feeds the complete-turn reading
- * (stored embedding vs the segment's Gravity point), the replay feeds the
- * composite prospective reading (expanded rewrite when the rewrite tier
- * produced one, raw fallback otherwise).
- *
- * Mechanics, once:
- *  - every segment carries a noise baseline (rolling μ/σ over the readings
- *    of its ACCEPTED members, folded only after a reading was judged and
- *    passed — judge first, fold second);
- *  - the immediate channel standardizes the arrival against the baseline,
- *    z = (reading − μ) / max(σ, σ_floor), and fires at z ≥ immediateK;
- *  - while the baseline holds fewer than MIN_CRITERION_SAMPLES accepted
- *    members the flat T_segment bootstraps as the prior (the constant
- *    survives ONLY as this prior);
- *  - the slow channel is a Page–Hinkley patrol over the RAW drift
- *    readings against the detector's own running mean (λ, δ, minSamples)
- *    — it speaks only while the immediate channel stays silent;
- *  - any verdict shreds the baseline; an immediate fire hard-resets the
- *    patrol WITHOUT consuming the spike; a rejected arrival seeds the new
- *    segment's geometry but never enters any baseline (ratchet guard).
- */
+type SlowPatrol = ReturnType<typeof createSlowPatrol>;
 
-/** The full two-channel judging parameter set, flat and shared. */
-export interface JudgingParams {
-  /**
-   * T_segment — the bootstrap prior. Flat criterion that adjudicates
-   * arrivals while the current segment's baseline holds fewer than
-   * MIN_CRITERION_SAMPLES accepted members; the constant survives only
-   * as this prior in both flows.
-   */
-  segmentThreshold: number;
-  /** k_immediate: the immediate channel fires at z ≥ k. */
-  immediateK: number;
-  /** σ_floor: the divisor floor under the baseline's sample σ. */
-  sigmaFloor: number;
-  /** λ: the slow patrol's PageHinkley fire budget, in drift units. */
-  lambda: number;
-  /** δ: the slow patrol's allowance, in drift units. */
-  delta: number;
-  /** Minimum slow-channel samples before any fire is admitted. */
-  minSamples: number;
-  /** Completed turns during which the flow mutes (no verdicts). */
-  coldStartTurns: number;
-}
+type SegmentRollingStats = ReturnType<typeof createSegmentRollingStats>;
 
-/** The PageHinkley options both the patrol and any counsel detector use. */
-export function patrolOptions(params: JudgingParams) {
-  return { lambda: params.lambda, delta: params.delta, minSamples: params.minSamples };
-}
+/** The judging params every judgment uses. */
+export const JUDGING_DEFAULTS: JudgingParams = {
+  coldStartTurns: 1,
+  immediate: { stdDevs: 2, minStdDev: 0.08, bootstrapThreshold: 0.52 },
+  slow: { fireBudget: 0.15, minRiseRequired: 0.05, minSamples: 3 },
+};
 
 /**
  * The immediate channel's bookkeeping floor: a segment with fewer than 2
- * accepted members has no true spread yet, so the constant T_segment
- * adjudicates until then — the constant survives purely as this bootstrap
- * prior. Separate from `minSamples`, which stays the PageHinkley floor.
+ * accepted members has no true spread yet, so `immediate.bootstrapThreshold`
+ * judges until then. Separate from `slow.minSamples`, the slow channel's floor.
  */
-export const MIN_CRITERION_SAMPLES = 2;
+const MIN_CRITERION_SAMPLES = 2;
 
 /**
  * One judgment's audit trail: the fire channel (null when none fired),
- * the criterion level the reading was judged against, its z score, the
- * segment baseline's μ/σ exactly as they stood at judgment — BEFORE any
- * fold, verdict reset or shred — and whether the patrol actually
- * consumed this reading as a step (its readings ride the point only
- * then: a verdict-shredded baseline hands over nothing, so the detector's
- * stale recording never leaks onto the first arrival of a new segment).
+ * the criterion level the reading was judged against, its z score, and
+ * the segment baseline's μ/σ exactly as they stood at judgment, before
+ * any fold or reset.
  */
-export interface Judgment {
-  fireChannel: 'immediate' | 'slow' | null;
-  /** When fireChannel === 'slow', the message ID of the turn that anchored the Page-Hinkley low-water mark. */
+interface Judgment {
+  fireChannel: FireChannel | null;
+  /** When fireChannel === 'slow', the arrival at the slow patrol's lowest point. */
   slowDriftStartMessageId: string | null;
   immediateThreshold: number;
-  /** Null while the criterion bootstraps on T_segment (baseline < 2). */
+  /** Null while the criterion bootstraps on `immediate.bootstrapThreshold` (baseline < 2). */
   immediateZ: number | null;
   /** Null while the baseline is empty (the bootstrap phase charts nothing). */
   segmentMu: number | null;
   /** Null while the baseline holds fewer than 2 accepted members. */
   segmentSigma: number | null;
-  /** True when the patrol consumed this reading as a raw drift step. */
-  patrolConsumed: boolean;
 }
 
 /** Mutable verdict state threaded through a judging loop, one Turn at a time. */
-export interface VerdictState {
+interface VerdictState {
   /**
    * The CURRENT segment's noise baseline: rolling mean and sample spread
    * of the fold-time readings of accepted members only, folded only
@@ -101,8 +51,8 @@ export interface VerdictState {
    * baseline, so the new baseline starts empty.
    */
   baseline: SegmentRollingStats;
-  /** The slow patrol over the raw drift readings. */
-  patrol: PageHinkleyDetector;
+  /** The slow patrol over the arrivals' Anchor distances. */
+  patrol: SlowPatrol;
 }
 
 /**
@@ -111,37 +61,47 @@ export interface VerdictState {
  * from it replays the same arithmetic a rebuild would: bit-identical
  * inputs, bit-identical judgments.
  */
-export interface JudgmentStateSnapshot {
+interface JudgmentStateSnapshot {
   baseline: BaselineSnapshot;
   patrol: PatrolSnapshot;
 }
 
-export function createVerdictState(
-  params: JudgingParams,
-  from?: JudgmentStateSnapshot,
-): VerdictState {
+export function createVerdictState(params: JudgingParams, from?: JudgmentStateSnapshot) {
   return {
     baseline: createSegmentRollingStats(from?.baseline),
-    patrol: createPageHinkley(patrolOptions(params), from?.patrol),
+    patrol: createSlowPatrol({
+      lambda: params.slow.fireBudget,
+      delta: params.slow.minRiseRequired,
+      minSamples: params.slow.minSamples,
+      from: from?.patrol,
+    }),
   };
 }
 
 /** The verdict state as a checkpoint stores it. */
-export function snapshotOfVerdictState(state: VerdictState): JudgmentStateSnapshot {
+export function snapshotOfVerdictState(state: VerdictState) {
   return { baseline: state.baseline.snapshot, patrol: state.patrol.snapshot };
 }
 
 /**
- * Shared mute policy: turns inside the cold start get no verdict, and a
- * turn with no reading (the opening seed of the fold, the pre-Gravity
- * Turn 1 of the replay) is unjudgeable by construction.
+ * The mute policy: turns inside the cold start get no verdict, and a
+ * turn with no reading (nothing folded to measure it against yet) cannot
+ * be judged.
  */
-export function isColdStart(
-  completedTurns: number,
-  params: JudgingParams,
-  reading: number | null,
-): boolean {
+export function isColdStart(completedTurns: number, params: JudgingParams, reading: number | null) {
   return reading === null || completedTurns < params.coldStartTurns;
+}
+
+/** One reading to judge: the Gravity reading, its Anchor distance, and the arrival it belongs to. */
+interface ReadingToJudge {
+  state: VerdictState;
+  params: JudgingParams;
+  /** Segment drift: the reading the immediate channel judges. */
+  reading: number;
+  /** Anchor distance: the reading the slow channel accumulates. */
+  anchorReading: number;
+  /** The arrival's message id. */
+  sampleId: string;
 }
 
 /**
@@ -149,41 +109,39 @@ export function isColdStart(
  * CURRENT segment's baseline.
  *
  * Immediate channel: standardize the arrival reading against the baseline —
- * z = (x − μ) / max(σ, σ_floor) — and fire at z ≥ k_immediate,
- * algebraically the identical call as exceeding μ + k·max(σ, σ_floor).
- * With fewer than MIN_CRITERION_SAMPLES accepted members there is no true
- * spread yet: the flat T_segment takes over as the bootstrap prior.
+ * z = (x − μ) / max(σ, σ_floor) — and fire at z ≥ k, the same call as
+ * exceeding μ + k·max(σ, σ_floor). With fewer than MIN_CRITERION_SAMPLES
+ * accepted members there is no true spread yet, so the flat T_segment
+ * judges instead.
  *
- * Slow channel: feed the patrol the RAW drift reading itself — the same
- * verdict-lane signal the immediate channel just judged — accumulated
- * against the detector's OWN running mean (unchanged PageHinkley
- * internals). No baseline standardization: a chasing baseline μ erases a
- * gentle wander from the signal, and the σ floor amplifies reading noise
- * into it. The patrol therefore warms from its first consumed step — the
- * detector's own mean handles it, and its minSamples floor mutes fires
- * through the first steps.
+ * Slow channel: feed the patrol the arrival's Anchor distance — how far
+ * it sits from where the segment started — accumulated against the
+ * patrol's own running mean, firing once the rise reaches λ. No baseline
+ * standardization: a chasing baseline μ erases a gentle wander from the
+ * signal, and σ_floor amplifies reading noise into it. The minimum-samples
+ * floor mutes fires through the first steps.
  *
  * A verdict — either channel — shreds the baseline wholesale and
  * hard-resets the accumulator without consuming the spike: the rejected
- * arrival seeds the new segment's geometry but never enters any baseline
- * (ratchet guard — the deciding population is made of blessed steps
- * only).
+ * arrival seeds the new segment's geometry but never enters any baseline,
+ * so a baseline only ever learns from readings it accepted.
  */
-export function twoChannelJudge(
-  state: VerdictState,
-  params: JudgingParams,
-  reading: number,
-  anchorReading: number,
-  sampleId: string,
-): Judgment {
+function twoChannelJudge({
+  state,
+  params,
+  reading,
+  anchorReading,
+  sampleId,
+}: ReadingToJudge): Judgment {
   const mu = state.baseline.mean;
   const sigma = state.baseline.std;
-  const sigmaEff = Math.max(sigma ?? 0, params.sigmaFloor);
+  const k = params.immediate.stdDevs;
+  const sigmaFloor = params.immediate.minStdDev;
+  const bootstrapThreshold = params.immediate.bootstrapThreshold;
+  const sigmaEff = Math.max(sigma ?? 0, sigmaFloor);
   const baselineWarm =
     mu !== null && sigma !== null && state.baseline.count >= MIN_CRITERION_SAMPLES;
-  const immediateThreshold = baselineWarm
-    ? mu + params.immediateK * sigmaEff
-    : params.segmentThreshold;
+  const immediateThreshold = baselineWarm ? mu + k * sigmaEff : bootstrapThreshold;
   const immediateZ = baselineWarm ? (reading - mu) / sigmaEff : null;
   const base = {
     immediateThreshold,
@@ -199,41 +157,39 @@ export function twoChannelJudge(
     // consumed by neither.
     state.baseline = createSegmentRollingStats();
     state.patrol.reset();
-    return { ...base, fireChannel: 'immediate', patrolConsumed: false };
+    return { ...base, fireChannel: 'immediate' };
   }
 
-  // The patrol consumes the raw drift step verbatim — every accepted
-  // reading, from the very first: its own running mean is the baseline,
-  // the minSamples floor guards the fire.
-  const firedSlow = state.patrol.update(anchorReading, sampleId);
-  if (firedSlow) {
+  // The patrol takes every Anchor distance that did not fire the
+  // immediate channel, from the very first: its own running mean is the
+  // baseline, and the minimum-samples floor guards the fire.
+  const slowFire = state.patrol.update({ sample: anchorReading, sampleId });
+  if (slowFire) {
     // The accumulated rise reached λ (drift units): verdict. Shred the
-    // baseline; the detector re-stamps its firing rise, then resets itself
-    // in update().
-    const slowDriftStartMessageId = state.patrol.lowWaterId;
+    // baseline; the detector already reset itself in update().
     state.baseline = createSegmentRollingStats();
-    return { ...base, fireChannel: 'slow', patrolConsumed: true, slowDriftStartMessageId };
+    return { ...base, fireChannel: 'slow', slowDriftStartMessageId: slowFire.lowWaterId };
   }
 
-  return { ...base, fireChannel: null, patrolConsumed: true };
+  return { ...base, fireChannel: null };
 }
 
 /**
+ * The Drift gate's two-channel verdict on one reading. The immediate
+ * channel judges the reading against the current segment's own noise
+ * level. The slow channel fires on a sustained rise, and it speaks only
+ * while the immediate channel stays silent. Any verdict clears the
+ * segment's baseline, and a reading that fired never joins a baseline.
+ *
  * Judge one reading against both channels, then accept-then-record it into
  * the segment baseline — a passing reading joins the segment's deciding
  * population; a rejected arrival never enters its OLD segment's baseline,
  * and the NEW segment's baseline starts empty of it too (its reading
  * measured the departure, not the new topic's noise).
  */
-export function evaluateAndRecord(
-  state: VerdictState,
-  params: JudgingParams,
-  reading: number,
-  anchorReading: number,
-  sampleId: string,
-): { judgment: Judgment; fired: boolean } {
-  const judgment = twoChannelJudge(state, params, reading, anchorReading, sampleId);
+export function evaluateAndRecord(input: ReadingToJudge): { judgment: Judgment; fired: boolean } {
+  const judgment = twoChannelJudge(input);
   const fired = judgment.fireChannel !== null;
-  if (!fired) state.baseline.add(reading);
+  if (!fired) input.state.baseline.add(input.reading);
   return { judgment, fired };
 }

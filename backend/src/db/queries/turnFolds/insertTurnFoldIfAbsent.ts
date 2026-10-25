@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { NewTurnFold, TurnFold } from '@db/types';
+import type { NewTurnFold } from '@db/types';
 
 type InsertTurnFoldIfAbsentProps = {
   /** The fold to store, keyed to the Turn's assistant Message and the model. */
@@ -12,9 +12,7 @@ type InsertTurnFoldIfAbsentProps = {
  * and vector compute the same values, so the conflict is the answer, not
  * a race. Returns the stored row, whichever pass wrote it.
  */
-export async function insertTurnFoldIfAbsent({
-  fold,
-}: InsertTurnFoldIfAbsentProps): Promise<TurnFold> {
+export async function insertTurnFoldIfAbsent({ fold }: InsertTurnFoldIfAbsentProps) {
   const inserted = await db
     .insertInto('analysis.turnFolds')
     .values(fold)

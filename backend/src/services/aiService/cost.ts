@@ -5,7 +5,7 @@
  */
 
 /** Flat USD pricing per million tokens (null = unknown → no charge). */
-export interface UsagePricing {
+interface UsagePricing {
   input: number | null;
   output: number | null;
   /**
@@ -15,8 +15,9 @@ export interface UsagePricing {
   cachedRateMultiplier?: number | null;
 }
 
-function round10(n: number): number {
-  return Number(n.toFixed(10));
+/** Rounds to 10 decimals, matching the `cost_usd` numeric(14,10) precision. */
+export function round10(value: number) {
+  return Number(value.toFixed(10));
 }
 
 /**
@@ -29,7 +30,7 @@ export function computeCostUsd(args: {
   promptTokens: number;
   completionTokens: number;
   cachedInputTokens?: number | null;
-}): number {
+}) {
   const { pricing } = args;
   if (!pricing || pricing.input === null || pricing.output === null) return 0;
 

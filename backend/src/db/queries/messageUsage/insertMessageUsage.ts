@@ -1,7 +1,7 @@
 import { db } from '@db/db';
-import type { MessageUsage, NewMessageUsage } from '@db/types';
+import type { NewMessageUsage } from '@db/types';
 
-export async function insertMessageUsage(usage: NewMessageUsage): Promise<MessageUsage> {
+export async function insertMessageUsage(usage: NewMessageUsage) {
   return db
     .insertInto('billing.messageUsage')
     .values(usage)

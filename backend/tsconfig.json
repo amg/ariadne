@@ -9,7 +9,8 @@
       "@db/*": ["./src/db/*"],
       "@queries/*": ["./src/db/queries/*"],
       "@queue/*": ["./queue/*"],
-      "@test/*": ["./test/*"]
+      "@test/*": ["./test/*"],
+      "@ari/lib/*": ["../lib/*"]
     },
     // "rootDir": "./src",
     // "outDir": "./dist",
@@ -18,6 +19,7 @@
     // See also https://aka.ms/tsconfig/module
     "module": "esnext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "target": "esnext",
     "types": [],
     // For nodejs:
@@ -27,8 +29,6 @@
 
     // Other Outputs
     "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,

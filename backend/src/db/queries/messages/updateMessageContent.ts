@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { Message, MessageExchangeStatus, MessagesTable } from '@db/types';
+import type { Database, MessageExchangeStatus } from '@db/types';
 import type { Updateable } from 'kysely';
 
 type UpdateMessageContentProps = {
@@ -18,8 +18,8 @@ export async function updateMessageContent({
   messageId,
   content,
   exchangeStatus,
-}: UpdateMessageContentProps): Promise<Message> {
-  const updates: Updateable<MessagesTable> = { content };
+}: UpdateMessageContentProps) {
+  const updates: Updateable<Database['chat.messages']> = { content };
   if (exchangeStatus !== undefined) updates.exchangeStatus = exchangeStatus;
   return db
     .updateTable('chat.messages')

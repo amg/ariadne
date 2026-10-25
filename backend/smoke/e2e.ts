@@ -1,4 +1,4 @@
-import { promises as fs, existsSync, readFileSync } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
@@ -19,7 +19,7 @@ const FALLBACK_USER = 'postgres';
 const FALLBACK_PASSWORD = 'postgrespassword';
 const FALLBACK_PORT = 5432;
 
-function detectGatewayIp(): string | undefined {
+function detectGatewayIp() {
   try {
     for (const line of readFileSync('/proc/net/route', 'utf8').split('\n').slice(1)) {
       const [, destination, gateway] = line.trim().split(/\s+/);
@@ -34,7 +34,7 @@ function detectGatewayIp(): string | undefined {
   return undefined;
 }
 
-async function ensureSmokeDatabase(): Promise<string> {
+async function ensureSmokeDatabase() {
   const gateway = detectGatewayIp();
   if (!gateway) throw new Error('No gateway found — run this on a machine with Docker access.');
   const adminUrl = `postgres://${FALLBACK_USER}:${FALLBACK_PASSWORD}@${gateway}:${FALLBACK_PORT}/postgres`;
@@ -169,7 +169,7 @@ async function testInFlightGuard(base: string, threadId: string) {
   }
 }
 
-async function createSmokeThread(base: string): Promise<string> {
+async function createSmokeThread(base: string) {
   const response = await fetch(`${base}/api/threads`, { method: 'POST' });
   const thread = (await response.json()) as { id: string };
   return thread.id;
@@ -220,8 +220,8 @@ async function main() {
   setupThreadsPostRoute(app, { memory: { kind: 'off' } });
   setupThreadsPatchRoute(app);
   setupThreadsDeleteRoute(app);
-  setupMessagesGetRoute(app);
-  setupChatPostRoute(app, { memory: { kind: 'off' } });
+  setupMessagesGetRoute(app, { threadAnalysisMode: 'heuristic' });
+  setupChatPostRoute(app, { memory: { kind: 'off' }, threadAnalysisMode: 'heuristic' });
   await seedDefaultUser();
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();

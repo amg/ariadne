@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["infra/cdk.out", "infra/node_modules", "infra/.runs"]
+    "ignore": ["infra/cdk.out", "infra/node_modules", "infra/.runs", "**/*.generated.ts"]
   },
   "organizeImports": {
     "enabled": true

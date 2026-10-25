@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import type { NewUserFact } from '@db/types';
-import {
-  type CapturedFact,
-  recordSegmentCapture,
-} from '@queries/memoryCaptureProgress/recordSegmentCapture';
+import { recordSegmentCapture } from '@queries/memoryCaptureProgress/recordSegmentCapture';
 import {
   captureProgressOf,
   upsertCaptureProgress,
@@ -17,6 +14,8 @@ import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { useTestDb } from '@test/test-db';
 import { describe, expect, it } from 'vitest';
+
+type CapturedFact = Parameters<typeof recordSegmentCapture>[0]['facts'][number];
 
 useTestDb();
 const holdTransaction = useHeldTransactions();

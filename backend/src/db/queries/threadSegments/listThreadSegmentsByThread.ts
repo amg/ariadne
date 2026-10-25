@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { ThreadSegment } from '@db/types';
 
 type ListThreadSegmentsByThreadProps = {
   threadId: string;
@@ -11,7 +10,7 @@ type ListThreadSegmentsByThreadProps = {
 export async function listThreadSegmentsByThread({
   threadId,
   modelId,
-}: ListThreadSegmentsByThreadProps): Promise<ThreadSegment[]> {
+}: ListThreadSegmentsByThreadProps) {
   return db
     .selectFrom('analysis.threadSegments')
     .selectAll()

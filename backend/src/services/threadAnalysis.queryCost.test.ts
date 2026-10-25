@@ -55,18 +55,18 @@ async function countQueries<T>(fn: () => Promise<T>): Promise<{ result: T; queri
 }
 
 /** Adds an arrival and judges it, the way a live exchange does, before its reply. */
-async function arriveAndJudge(threadId: string, index: number): Promise<string> {
+async function arriveAndJudge(threadId: string, index: number) {
   const arrival = await insertMessage({
     threadId,
     role: 'user',
     content: `question ${index} about subject ${index}${PAD}`,
   });
-  const judged = await runLiveGate({ threadId, upToMessageId: arrival.id });
+  const judged = await runLiveGate({ threadId, upToMessageId: arrival.id, mode: 'heuristic' });
   expect(judged.type).toBe('success');
   return arrival.id;
 }
 
-async function reply(threadId: string, index: number): Promise<void> {
+async function reply(threadId: string, index: number) {
   await insertMessage({ threadId, role: 'assistant', content: `answer ${index}${PAD}` });
 }
 
@@ -89,10 +89,33 @@ async function liveThreadAwaitingVerdict(turns: number) {
   return { threadId, arrivalId: arrival.id };
 }
 
-async function judgmentCost(turns: number): Promise<number> {
+/** Runs `fn` and reports how many stored vectors the database sent back. */
+async function countVectorsRead<T>(fn: () => Promise<T>): Promise<{ result: T; vectors: number }> {
+  let vectors = 0;
+  const counting: KyselyPlugin = {
+    transformQuery: (args) => args.node,
+    transformResult: async (args) => {
+      vectors += args.result.rows.filter((row) => typeof row.embedding === 'string').length;
+      return args.result;
+    },
+  };
+  const result = await requestDbScope.run(db.withPlugin(counting), fn);
+  return { result, vectors };
+}
+
+async function vectorsReadByJudgment(turns: number) {
+  const { threadId, arrivalId } = await liveThreadAwaitingVerdict(turns);
+  const { result, vectors } = await countVectorsRead(() =>
+    runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' }),
+  );
+  expect(result.type).toBe('success');
+  return vectors;
+}
+
+async function judgmentCost(turns: number) {
   const { threadId, arrivalId } = await liveThreadAwaitingVerdict(turns);
   const { result, queries } = await countQueries(() =>
-    runLiveGate({ threadId, upToMessageId: arrivalId }),
+    runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' }),
   );
   expect(result.type).toBe('success');
   const logs = await listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID });
@@ -107,11 +130,22 @@ describe('the cost of judging an arrival', () => {
     expect(long).toBe(short);
   });
 
+  it('reads the same stored vectors however long the Thread is', async () => {
+    const short = await vectorsReadByJudgment(2);
+    const long = await vectorsReadByJudgment(16);
+    expect(short).toBeGreaterThan(0);
+    expect(long).toBe(short);
+  });
+
   it('reads a finished Thread in a fixed handful of queries', async () => {
     const { threadId, arrivalId } = await liveThreadAwaitingVerdict(12);
-    expect((await runLiveGate({ threadId, upToMessageId: arrivalId })).type).toBe('success');
+    expect(
+      (await runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' })).type,
+    ).toBe('success');
 
-    const replayed = await countQueries(() => runLiveGate({ threadId, upToMessageId: arrivalId }));
+    const replayed = await countQueries(() =>
+      runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' }),
+    );
     expect(replayed.result.type).toBe('success');
     // The Thread, its embeddings, its expansions, its verdicts, its segments.
     expect(replayed.queries).toBe(5);

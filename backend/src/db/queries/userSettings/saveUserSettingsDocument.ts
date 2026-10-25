@@ -8,7 +8,7 @@ export async function saveUserSettingsDocument({
 }: {
   userId: string;
   settings: Record<string, unknown>;
-}): Promise<void> {
+}) {
   const document = sql`${JSON.stringify(settings)}::jsonb`;
   await db
     .insertInto('memory.userSettings')

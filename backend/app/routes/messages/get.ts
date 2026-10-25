@@ -1,29 +1,27 @@
+import { listMessages } from '@ari/lib/api/schemas/messages/list';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import { getMessages } from '@services/messageService';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
+import type { RouteOf } from '../contract';
+import { threadIdOrReject, userIdOf } from '../request';
 
-type ThreadParams = {
-  id: string;
-};
-
-export async function setupMessagesGetRoute(fastify: FastifyInstance) {
-  fastify.get(
-    '/api/threads/:id/messages',
-    { preHandler: verifySession() },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const params = request.params as ThreadParams;
-      if (!isValidUuid(params.id)) {
-        return reply.code(400).send({ error: 'Invalid thread id' });
-      }
-      const messages = await getMessages({ userId: userId, threadId: params.id });
-      if (!messages) {
-        // Unknown thread and foreign thread are intentionally indistinguishable.
-        return reply.code(404).send({ error: 'Thread not found' });
-      }
-      return reply.send(messages);
+export function setupMessagesGetRoute(
+  fastify: FastifyInstance,
+  { threadAnalysisMode }: { threadAnalysisMode: ThreadAnalysisMode },
+) {
+  fastify.route<RouteOf<typeof listMessages>>({
+    method: listMessages.method,
+    url: listMessages.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const threadId = threadIdOrReject({ request, reply });
+      if (threadId === null) return reply;
+      const messages = await getMessages({ userId, threadId, threadAnalysisMode });
+      // Unknown thread and foreign thread are intentionally indistinguishable.
+      if (!messages) return reply.code(404).send({ error: 'Thread not found' });
+      return reply.code(200).send(messages);
     },
-  );
+  });
 }

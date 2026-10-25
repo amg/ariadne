@@ -5,6 +5,6 @@ import type { Message } from '@db/types';
  * or a starting Exchange targets, whether or not a reply grew beneath it.
  * Abandoned rows never count. -1 when the Thread has none.
  */
-export function newestLiveUserIndex(rows: readonly Message[]): number {
+export function newestLiveUserIndex(rows: readonly Message[]) {
   return rows.findLastIndex((row) => row.role === 'user' && !row.abandoned);
 }

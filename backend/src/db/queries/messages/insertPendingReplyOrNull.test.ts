@@ -10,7 +10,7 @@ import { updateExchangeStatus } from './updateExchangeStatus';
 
 useTestDb();
 
-async function freshThreadId(): Promise<string> {
+async function freshThreadId() {
   const userId = randomUUID();
   await insertUserIfNotExists({ id: userId });
   const { id } = await insertThread({ userId });

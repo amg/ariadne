@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('segment_drift_logs')
     .addColumn('slow_drift_start_message_id', 'uuid', (col) =>
@@ -9,7 +9,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema
     .alterTable('segment_drift_logs')
     .dropColumn('slow_drift_start_message_id')

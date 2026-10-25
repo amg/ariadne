@@ -6,12 +6,13 @@ import { whenArrivalJudged, whenJudgmentAbandoned } from '@queue/flows/driftGate
 import { judgeArrival } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { findMemoryCaptureSegmentJobOrNull } from '@queue/tasks/memoryCaptureSegmentTask';
 import { queueTasks } from '@queue/worker';
-import { type ServerEvent, subscribe } from '@services/events';
+import { subscribe } from '@services/events';
 import { memoryOff, memoryOn } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
+import type { ServerEvent } from '../../src/types/events';
 
 /**
  * The Drift gate's flow: verdicts announced and a fired arrival's closed
@@ -72,7 +73,10 @@ describe('whenArrivalJudged', () => {
     const params = { userId, threadId, messageId: opening.id };
     listen(userId, threadId);
 
-    await whenArrivalJudged({ params, judgment: await judgeArrival(params), memory: memoryOn });
+    await whenArrivalJudged({
+      judgment: await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' }),
+      memory: memoryOn,
+    });
 
     expect(events).toEqual([
       { kind: 'verdict-ok', userId, threadId, messageId: opening.id, verdict: 'muted' },
@@ -83,13 +87,13 @@ describe('whenArrivalJudged', () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
     listen(userId, threadId);
-    const judgment = await judgeArrival(params);
+    const judgment = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
     if (judgment.kind !== 'judged' || !judgment.closedSegment) {
       throw new Error('expected a fire with a closed segment');
     }
     const extractionsBefore = mock.memory.extractionCount();
 
-    await whenArrivalJudged({ params, judgment, memory: memoryOn });
+    await whenArrivalJudged({ judgment, memory: memoryOn });
 
     // Queued before the announcement: the job is visible the moment the
     // pause event has flown.
@@ -101,7 +105,7 @@ describe('whenArrivalJudged', () => {
       },
     );
 
-    await drainQueue(queueTasks(memoryOn));
+    await drainQueue(queueTasks({ memory: memoryOn, threadAnalysisMode: 'heuristic' }));
     expect(await findMemoryCaptureSegmentJobOrNull(judgment.closedSegment.segmentId)).toBeNull();
     expect(mock.memory.extractionCount()).toBeGreaterThan(extractionsBefore);
     expect(events.at(-1)).toEqual({
@@ -116,23 +120,22 @@ describe('whenArrivalJudged', () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
     listen(userId, threadId);
-    const judgment = await judgeArrival(params);
+    const judgment = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
     if (judgment.kind !== 'judged' || !judgment.closedSegment) {
       throw new Error('expected a fire with a closed segment');
     }
 
-    await whenArrivalJudged({ params, judgment, memory: memoryOff });
+    await whenArrivalJudged({ judgment, memory: memoryOff });
 
     expect(events.map((event) => event.kind)).toEqual(['verdict-paused']);
     expect(await findMemoryCaptureSegmentJobOrNull(judgment.closedSegment.segmentId)).toBeNull();
   });
 
   it('announces nothing for an arrival that is gone', async () => {
-    const { userId, threadId, shiftId } = await threadWithShift();
-    const params = { userId, threadId, messageId: shiftId };
+    const { userId, threadId } = await threadWithShift();
     listen(userId, threadId);
 
-    await whenArrivalJudged({ params, judgment: { kind: 'gone' }, memory: memoryOn });
+    await whenArrivalJudged({ judgment: { kind: 'gone' }, memory: memoryOn });
 
     expect(events).toEqual([]);
   });

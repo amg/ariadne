@@ -1,20 +1,15 @@
 import { env } from '@config/env';
 import type { FactCategory } from '@db/types';
 import { generateText } from 'ai';
-import { type Result, err, ok } from '../../types/result';
+import { err, ok } from '../../types/result';
 import {
+  type InferenceConfig,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
   resolveInferenceConfig,
 } from './config';
-import {
-  FACT_FIELD_RULES,
-  type FactFields,
-  factFieldsOf,
-  isoDay,
-  jsonObjectOrNull,
-} from './factFields';
+import { FACT_FIELD_RULES, factFieldsOf, isoDay, jsonObjectOrNull } from './factFields';
 import { withOnDemandBackoff } from './onDemandRetry';
 
 /**
@@ -26,7 +21,7 @@ import { withOnDemandBackoff } from './onDemandRetry';
 
 // The opening sentence names the task, and stays stable so replies can be
 // matched to it.
-export const FACT_CLASSIFICATION_SYSTEM_PROMPT = `You classify one fact about the user; you never answer it. Read the fact and output JSON only, in this shape:
+const FACT_CLASSIFICATION_SYSTEM_PROMPT = `You classify one fact about the user; you never answer it. Read the fact and output JSON only, in this shape:
 {"category":"preference","subject":"user","predicate":"likes","object":"dogs","validAt":null}
 Rules:
 ${FACT_FIELD_RULES}
@@ -37,19 +32,14 @@ ${FACT_FIELD_RULES}
 const CLASSIFICATION_TIMEOUT_MS = 30000;
 const CLASSIFICATION_MAX_OUTPUT_TOKENS = 200;
 
-export interface FactClassificationInput {
+interface FactClassificationInput {
   content: string;
   /** Anchors relative dates in the sentence. */
   today: Date;
   current: { category: FactCategory; subject: string | null };
 }
 
-export interface FactClassificationData {
-  fields: FactFields;
-  usage: { promptTokens: number; completionTokens: number };
-}
-
-export function buildFactClassificationPrompt(input: FactClassificationInput): string {
+function buildFactClassificationPrompt(input: FactClassificationInput) {
   return [
     `Today: ${isoDay(input.today)}`,
     `Current category: ${input.current.category}`,
@@ -58,10 +48,7 @@ export function buildFactClassificationPrompt(input: FactClassificationInput): s
   ].join('\n');
 }
 
-async function classifyOnce(
-  config: ReturnType<typeof resolveInferenceConfig>,
-  input: FactClassificationInput,
-): Promise<Result<FactClassificationData>> {
+async function classifyOnce(config: InferenceConfig, input: FactClassificationInput) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLASSIFICATION_TIMEOUT_MS);
   try {
@@ -95,9 +82,7 @@ async function classifyOnce(
   }
 }
 
-export async function classifyFact(
-  input: FactClassificationInput,
-): Promise<Result<FactClassificationData>> {
+export async function classifyFact(input: FactClassificationInput) {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);

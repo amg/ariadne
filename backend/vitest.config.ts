@@ -22,9 +22,9 @@ export default defineConfig({
     globalSetup: ['./test/global-setup.ts'],
     setupFiles: ['./test/worker-db-setup.ts'],
     // Each worker runs against its own database clone, so files run in
-    // parallel without sharing rows or truncates. Bounded by the Postgres
+    // parallel without sharing rows or clearing each other's. Bounded by the Postgres
     // connection budget, which the dev database shares.
-    maxWorkers: 4,
+    maxWorkers: 6,
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

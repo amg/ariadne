@@ -1,33 +1,27 @@
-import type { ColumnType, Generated, Insertable, Kysely, Selectable } from 'kysely';
+import type { Insertable, Kysely, Selectable } from 'kysely';
+import type { DB } from './schema.generated';
+
+export { FACT_CATEGORIES, type FactCategory } from '@ari/lib/api/schemas/settings/facts';
+export type {
+  ExchangeStatus as MessageExchangeStatus,
+  FinishReason as MessageFinishReason,
+} from '@ari/lib/api/schemas/messages/message';
+export type { ExpandOutcome } from '@ari/lib/api/schemas/threads/analysis';
 
 /**
- * Code-side identifiers are camelCase; `CamelCasePlugin` (see `db.ts`)
- * maps them onto the snake_case schema at query time and maps result
- * rows back to camelCase. Table keys follow the same convention
+ * The app's tables as the migrations build them, plus the two tables other
+ * systems own. Code-side
+ * identifiers are camelCase; `CamelCasePlugin` (see `db.ts`) maps them
+ * onto the snake_case schema at query time and maps result rows back to
+ * camelCase. Table keys follow the same convention
  * (`billing.messageUsage` → `billing.message_usage`). Every key carries
  * its domain schema: app tables live one domain per schema, the auth
  * provider's tables stay in `public`, and the queue engine owns its own
  * schema.
  */
-export interface Database {
-  'chat.users': UsersTable;
-  'chat.threads': ThreadsTable;
-  'chat.messages': MessagesTable;
-  'analysis.messageEmbeddings': MessageEmbeddingsTable;
-  'analysis.messageExpansions': MessageExpansionsTable;
-  'analysis.threadSegments': ThreadSegmentsTable;
-  'analysis.segmentDriftLogs': SegmentDriftLogsTable;
-  'analysis.arrivalJudgmentStates': ArrivalJudgmentStatesTable;
-  'analysis.turnFolds': TurnFoldsTable;
-  'memory.userFacts': UserFactsTable;
-  'memory.threadSeeds': ThreadSeedsTable;
-  'memory.userSettings': UserSettingsTable;
-  'memory.memoryCaptureProgress': MemoryCaptureProgressTable;
-  'billing.messageUsage': MessageUsageTable;
-  'billing.messageSideCosts': MessageSideCostsTable;
-  'billing.dailySpend': DailySpendTable;
-  'billing.modelConfigs': ModelConfigsTable;
+export interface Database extends DB {
   'queues.jobs': QueueJobsView;
+  'auth.emailpasswordUsers': EmailPasswordUsersTable;
 }
 
 /**
@@ -55,442 +49,80 @@ export interface QueueJobsView {
   createdAt: Date;
 }
 
-export interface UsersTable {
-  id: Generated<string>; // UUID
-  createdAt: Generated<Date>;
+/**
+ * The auth provider's sign-in accounts. The provider owns and migrates this
+ * table; the app only reads which user an email belongs to.
+ */
+interface EmailPasswordUsersTable {
+  userId: string; // char(36), the same UUID as `chat.users.id`
+  email: string;
 }
 
-export interface ThreadsTable {
-  id: Generated<string>; // UUID
-  userId: string;
-  title: string | null;
-  createdAt: Generated<Date>;
-}
+export type NewThread = Insertable<Database['chat.threads']>;
 
-export interface MessagesTable {
-  id: Generated<string>; // UUID
-  threadId: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  /**
-   * Set on an exchange's arrival row when the exchange ended without
-   * completing, so the abandoned arrival registers in the thread
-   * (partial title + resume draft) instead of being swallowed.
-   */
-  abandoned: Generated<boolean>;
-  /**
-   * Lifecycle of an assistant row's exchange: `pending` while the reply
-   * streams, terminal once it settles. Non-assistant rows keep the
-   * terminal default.
-   */
-  exchangeStatus: Generated<MessageExchangeStatus>;
-  createdAt: Generated<Date>;
+export type Message = Selectable<Database['chat.messages']>;
+export type NewMessage = Insertable<Database['chat.messages']>;
+
+export type MessageUsage = Selectable<Database['billing.messageUsage']>;
+export type NewMessageUsage = Insertable<Database['billing.messageUsage']>;
+
+export type NewModelConfig = Insertable<Database['billing.modelConfigs']>;
+
+export type MessageEmbeddingStored = Selectable<Database['analysis.messageEmbeddings']>;
+
+/** Embedding row as returned by `queries/messageEmbeddings` (vector parsed to numbers). */
+export type MessageEmbedding = Omit<MessageEmbeddingStored, 'embedding'> & { embedding: number[] };
+
+/** Insert input for `queries/messageEmbeddings` (vector as numbers). */
+export type NewMessageEmbedding = Omit<MessageEmbeddingStored, 'embedding' | 'createdAt'> & {
+  embedding: number[];
+};
+
+/** Expansion row as returned by `queries/messageExpansions`. */
+export type MessageExpansion = Selectable<Database['analysis.messageExpansions']>;
+
+export type ThreadSegment = Selectable<Database['analysis.threadSegments']>;
+export type NewThreadSegment = Insertable<Database['analysis.threadSegments']>;
+
+/** Insert input for `queries/userFacts` (vector as numbers). */
+export type NewUserFact = Omit<
+  Selectable<Database['memory.userFacts']>,
+  'id' | 'embedding' | 'invalidAt' | 'suppressed' | 'createdAt'
+> &
+  Pick<Insertable<Database['memory.userFacts']>, 'suppressed'> & { embedding: number[] };
+
+export type SegmentDriftLog = Selectable<Database['analysis.segmentDriftLogs']>;
+export type NewSegmentDriftLog = Insertable<Database['analysis.segmentDriftLogs']>;
+export type ArrivalJudgmentState = Selectable<Database['analysis.arrivalJudgmentStates']>;
+export type NewArrivalJudgmentState = Insertable<Database['analysis.arrivalJudgmentStates']>;
+export type TurnFold = Selectable<Database['analysis.turnFolds']>;
+export type NewTurnFold = Insertable<Database['analysis.turnFolds']>;
+
+/**
+ * How a failed job's stored error tells its class: `recoverable` failures
+ * are worth trying again on their own, `fatal` ones wait for the operator.
+ */
+export type JobErrorClass = 'recoverable' | 'fatal';
+
+export interface QueuedJob {
+  id: string;
+  state: JobState;
+  /** The class of the last failure; null while the job has not failed. */
+  errorClass: JobErrorClass | null;
+  lastError: string | null;
 }
 
 /**
- * The recorded end of an assistant exchange. `pending` rows belong to a
- * live or lost stream; `interrupted` = stopped or disconnected on
- * purpose, `error` = the exchange failed.
+ * Where a job stands. `queued` covers a job waiting for its first run and
+ * one waiting out the pause before its next attempt; `dead` means it has
+ * no attempts left.
  */
-export const EXCHANGE_STATUSES = ['pending', 'completed', 'interrupted', 'error'] as const;
-export type MessageExchangeStatus = (typeof EXCHANGE_STATUSES)[number];
+type JobState = 'queued' | 'running' | 'dead';
 
-/**
- * Daily spend: everything recorded as spent on one UTC day, across chat,
- * embeddings and side calls. Kept current by the database whenever spend
- * is written, and kept when the messages behind it are deleted.
- */
-export interface DailySpendTable {
-  /** The UTC day; written as `YYYY-MM-DD`, read back as a `Date`, never changed. */
-  day: ColumnType<Date, string, never>;
-  costUsd: string; // numeric(20,10) — Kysely selects numeric as string
-}
+export type SideCostKind = Selectable<Database['billing.messageSideCosts']>['kind'];
 
-/**
- * The chat exchange's inference telemetry, linked 1:1 to `messages`.
- * `estimated` flags rows the exchange counted locally because the
- * provider never reported usage (the exchange ended early); every other
- * column is filled on both paths. The analyzer pipeline's spend lives
- * elsewhere: every side call — rewrites, judges, Fact capture, and the
- * embeddings themselves — carries its own row in `message_side_costs`.
- */
-export interface MessageUsageTable {
-  messageId: string; // UUID FK -> messages.id (PK)
-  /** True when tokens and cost were counted locally, not provider-reported. */
-  estimated: Generated<boolean>;
-  model: string;
-  /** NULL when no provider response exists (estimated spends). */
-  providerId: string | null;
-  /** Estimates count these locally, so the columns stay NOT NULL. */
-  promptTokens: number;
-  completionTokens: number;
-  /** NULL when the provider doesn't report cache telemetry. */
-  cachedInputTokens: number | null;
-  cacheWriteTokens: number | null;
-  /** Provider-reported reasoning tokens (DeepInfra reports 0 even when reasoning). */
-  reasoningTokens: number | null;
-  /** Our estimate from reasoning content length (NULL when no reasoning). */
-  estimatedReasoningTokens: number | null;
-  costUsd: string; // numeric(14,10) — Kysely selects numeric as string
-  finishReason: MessageFinishReason;
-  latencyMs: number | null;
-  createdAt: Generated<Date>;
-}
-
-/**
- * Billed spend of the side pipelines, one row per (message, kind,
- * model): the arrival's rewrite (expansion) step and its trigger judge,
- * the Fact capture a Boundary arrival triggers — extraction, duplicate
- * checks, and Fact embeddings, each summed across the segment's calls —
- * and the message's embeddings, every pass that paid one summed under
- * the `embedding` kind. Model attribution is fixed by the environment's
- * pipeline models; the provider response id is not persisted for these
- * calls.
- */
-export const SIDE_COST_KINDS = [
-  'rewrite',
-  'judge',
-  'fact_extraction',
-  'fact_duplicate_check',
-  'fact_embedding',
-  'embedding',
-] as const;
-export type SideCostKind = (typeof SIDE_COST_KINDS)[number];
-
-export interface MessageSideCostsTable {
-  messageId: string; // UUID FK -> messages.id (PK together with `kind` and `model`)
-  kind: SideCostKind;
-  model: string;
-  /** NULL when the provider reported no token counts. */
-  promptTokens: number | null;
-  completionTokens: number | null;
-  costUsd: string; // numeric(14,10) — Kysely selects numeric as string
-  createdAt: Generated<Date>;
-}
-
-/**
- * Thread-health embeddings, one row per Message and embedding model: a
- * *Turn* row keys to the Turn's assistant Message — "state of the
- * conversation ending at this message", NOT "this message"; an *arrival*
- * row keys to the Turn's user Message — the arriving signal judged
- * before inference. Vectors from different models are never compared;
- * switching the model keeps the old rows and starts a parallel chain.
- * The rewrite's reading and its spend live in `message_expansions` and
- * `message_side_costs`.
- */
-export interface MessageEmbeddingsTable {
-  /** 1:1 with the Message per model (PK, cascade delete). */
-  messageId: string; // UUID FK -> messages.id
-  modelId: string;
-  /** pgvector `vector(1024)`; Postgres text form `[0.1,-0.2,…]` (parsed in the query layer). */
-  embedding: string;
-  createdAt: Generated<Date>;
-}
-
-/**
- * One arrival's try at a self-contained rewrite: what the reading ended
- * up as (`accepted` — it landed; `failed_*` — it did not, and why;
- * `not_needed` — none was attempted, the raw message stood on its own),
- * and the reading itself, present exactly when it landed.
- */
-export interface MessageExpansionsTable {
-  messageId: string; // UUID FK -> messages.id (1:1, PK, cascade delete)
-  expandOutcome: ExpandOutcome;
-  /** The self-contained rewrite; null on every other end. */
-  expandedText: string | null;
-  createdAt: Generated<Date>;
-}
-
-/**
- * The recorded end of one arrival's try at a rewrite: what the reading
- * ended up as, and when no reading landed, why — the rewrite model
- * refused, a quality check rejected it, the provider call failed, or the
- * output was unusable. `not_needed` marks the arrivals whose raw message
- * stood on its own, no rewrite attempted.
- */
-export type ExpandOutcome =
-  | 'accepted'
-  | 'failed_refused'
-  | 'failed_quality'
-  | 'failed_inference'
-  | 'failed'
-  | 'not_needed';
-
-/**
- * The live arrival chain the gate builds as the conversation progresses —
- * deliberately NOT the offline fold's segments. A segment's end is simply
- * the next segment's start (chronology), so there is no end column.
- */
-export interface ThreadSegmentsTable {
-  id: Generated<string>; // UUID
-  threadId: string; // UUID FK -> threads.id (cascade delete)
-  startMessageId: string; // UUID FK -> messages.id (first user Message of the segment)
-  /** Provenance of the reading that cut this segment — the embedding model. */
-  modelId: string;
-  createdAt: Generated<Date>;
-}
-
-/**
- * How far Fact capture has read a segment — Memory's own bookkeeping,
- * kept out of the segmentation table. One row per segment that capture
- * has taken in at least once.
- */
-export interface MemoryCaptureProgressTable {
-  segmentId: string; // UUID PK, FK -> thread_segments.id (cascade)
-  /** `created_at` of the last Turn a capture pass read. */
-  capturedThroughAt: Date;
-  updatedAt: Generated<Date>;
-}
-
-/**
- * One row per judged arrival in the live lane: the composite reading
- * judged against the segment it entered, plus the µ/σ/z snapshot of that
- * segment's baseline exactly as it stood BEFORE the arrival joined it. Muted
- * strides keep a row with null numbers. Keyed by the Message and the
- * model — one chain per embedding model runs.
- */
-export interface SegmentDriftLogsTable {
-  segmentId: string; // UUID FK -> thread_segments.id (segment the arrival was judged in)
-  messageId: string; // UUID FK -> messages.id (the user Message that arrived; PK with `modelId`)
-  /** Provenance of the judged reading — the embedding model. */
-  modelId: string;
-  /** The composite reading judged; null on muted arrivals. */
-  driftP: number | null;
-  mu: number | null;
-  sigma: number | null;
-  zScore: number | null;
-  verdict: 'muted' | 'pass' | 'fire';
-  /** Which channel produced a fire; null otherwise. */
-  fireChannel: 'immediate' | 'slow' | null;
-  /** When fireChannel === 'slow', the message ID of the turn that anchored the Page-Hinkley low-water mark. */
-  slowDriftStartMessageId: string | null;
-  /**
-   * The immediate criterion the reading was judged against — μ +
-   * k·max(σ, σ_floor) once the baseline warms, the flat T_segment while
-   * it bootstraps. Null exactly when `driftP` is: muted arrivals judged
-   * nothing. Stored per row so the chart draws the line each point was
-   * actually judged against, not one recomputed from today's params.
-   */
-  immediateThreshold: number | null;
-  createdAt: Generated<Date>;
-}
-
-/**
- * One judged arrival's gate state, stored so the next judgment starts
- * from it instead of rebuilding the whole chain: the segment baseline
- * (Welford moments) and the slow patrol (Page–Hinkley accumulator) as
- * they stand AFTER the arrival was judged. Keyed to the arrival's drift
- * log; the keep-two rule prunes all but the newest two arrivals' rows.
- */
-export interface ArrivalJudgmentStatesTable {
-  /** The arrival's user Message (PK with `modelId`; the drift log it rides). */
-  messageId: string;
-  /** Provenance of the judged chain — the embedding model. */
-  modelId: string;
-  baselineCount: number;
-  baselineMean: number;
-  baselineM2: number;
-  patrolCount: number;
-  patrolSum: number;
-  patrolCumulative: number;
-  /** The Page–Hinkley low-water mark's level; 0 while the patrol is empty. */
-  patrolLowWater: number;
-  /** The sample that anchors the low-water mark; null while the patrol is empty. */
-  patrolLowWaterMessageId: string | null;
-  createdAt: Generated<Date>;
-}
-
-/**
- * One folded Turn's gate state, stored so the next judgment measures
- * against it instead of re-folding the chain: the current segment's
- * summed geometry (full float64 — the sums accumulate bit-identically to
- * a rebuild), the segment the conversation sits in, and how many Turns
- * the live chain has folded. Keyed to the Turn's embedding row; the
- * keep-two rule prunes all but the newest two Turns' rows.
- */
-export interface TurnFoldsTable {
-  /** The Turn's assistant Message (PK with `modelId`; the embedding it rides). */
-  messageId: string;
-  /** Provenance of the folded chain — the embedding model. */
-  modelId: string;
-  /** The segment the conversation sits in once this Turn folded. */
-  segmentId: string; // UUID FK -> thread_segments.id (cascade delete)
-  /** Elementwise sum of the segment's folded Turn vectors; its unit vector is the Gravity point. */
-  gravitySum: number[]; // float8[] — full float64, no rounding
-  /** Sum of the segment's first up-to-three folded Turn vectors — the anchor reading's base. */
-  anchorSum: number[];
-  /** How many Turn vectors the anchor sum holds (1–3). */
-  anchorCount: number;
-  /** Complete Turns the live chain has folded through this Turn — the cold-start and staleness counter. */
-  completedTurns: number;
-  createdAt: Generated<Date>;
-}
-
-export interface ModelConfigsTable {
-  modelId: string; // Primary key
-  provider: string;
-  contextWindow: number | null;
-  inputPricePerMillion: number | null;
-  outputPricePerMillion: number | null;
-  cachedRateMultiplier: number | null; // multiplier of input price (e.g., 0.5 = 50%)
-  supportsCaching: boolean;
-  lastUpdated: Generated<Date>;
-}
-
-/** The fixed category set every Fact is filed under. */
-export const FACT_CATEGORIES = [
-  'identity',
-  'preference',
-  'health',
-  'relationships',
-  'work',
-  'location',
-  'credentials',
-  'other',
-] as const;
-export type FactCategory = (typeof FACT_CATEGORIES)[number];
-
-/**
- * The Memory store: one self-contained sentence about the user per row.
- * Rows are superseded by invalidation (`invalidAt`), never overwritten.
- * Facts outlive Threads, so the source message reference nulls out when
- * its Thread is deleted.
- */
-export interface UserFactsTable {
-  id: Generated<string>; // UUID
-  userId: string; // UUID FK -> users.id (cascade delete)
-  content: string;
-  category: FactCategory;
-  /** Entity the Fact is about; "user" for the user themself. */
-  subject: string | null;
-  /** Normalized snake_case relation, e.g. `lives_in`. */
-  predicate: string | null;
-  object: string | null;
-  /** pgvector `vector(1024)` in Postgres text form. */
-  embedding: string;
-  modelId: string;
-  /** The user Message of the Turn the Fact came from; null once its Thread is gone. */
-  sourceMessageId: string | null;
-  /** When the Fact became true, as the conversation states it; null when it states none. */
-  validAt: Date | null;
-  /** When the Fact stopped being current; null while it is. */
-  invalidAt: Date | null;
-  /** Kept in the store but never injected into a Seed. */
-  suppressed: Generated<boolean>;
-  /** When the Fact was noted: its capture, or the edit that replaced an older row. */
-  createdAt: Generated<Date>;
-}
-
-/**
- * A Thread's Seed: the memory block frozen at Thread creation and
- * prepended to the system prompt on every Exchange of that Thread.
- */
 /**
  * One Fact as a Seed renders it, with its category kept so a category the
  * user blocks later drops out of Seeds already frozen.
  */
-export interface SeedLine {
-  category: FactCategory;
-  text: string;
-}
-
-export interface ThreadSeedsTable {
-  threadId: string; // UUID PK, FK -> threads.id (cascade delete)
-  /** jsonb array, in render order. */
-  lines: SeedLine[];
-  factCount: number;
-  /** The drift-paused arrival this Thread was handed over from; null otherwise. */
-  handoverMessageId: string | null;
-  validAt: Generated<Date>;
-  invalidAt: Date | null;
-  createdAt: Generated<Date>;
-}
-
-/** Per-user settings document; missing and unknown keys resolve in code. */
-export interface UserSettingsTable {
-  userId: string; // UUID PK, FK -> users.id (cascade delete)
-  settings: unknown;
-  updatedAt: Generated<Date>;
-}
-
-export type User = Selectable<UsersTable>;
-
-export type Thread = Selectable<ThreadsTable>;
-export type NewThread = Insertable<ThreadsTable>;
-
-export type Message = Selectable<MessagesTable>;
-export type NewMessage = Insertable<MessagesTable>;
-
-export type MessageUsage = Selectable<MessageUsageTable>;
-export type NewMessageUsage = Insertable<MessageUsageTable>;
-
-export type MessageSideCost = Selectable<MessageSideCostsTable>;
-
-export type ModelConfig = Selectable<ModelConfigsTable>;
-export type NewModelConfig = Insertable<ModelConfigsTable>;
-
-export type MessageEmbeddingStored = Selectable<MessageEmbeddingsTable>;
-
-/** Embedding row as returned by `queries/messageEmbeddings` (vector parsed to numbers). */
-export type MessageEmbedding = {
-  messageId: string;
-  modelId: string;
-  embedding: number[];
-  createdAt: Date;
-};
-
-/** Insert input for `queries/messageEmbeddings` (vector as numbers). */
-export type NewMessageEmbedding = {
-  messageId: string;
-  embedding: number[];
-  modelId: string;
-};
-
-/** Expansion row as returned by `queries/messageExpansions`. */
-export type MessageExpansion = Selectable<MessageExpansionsTable>;
-
-export type ThreadSegment = Selectable<ThreadSegmentsTable>;
-export type NewThreadSegment = Insertable<ThreadSegmentsTable>;
-
-export type ThreadSeed = Selectable<ThreadSeedsTable>;
-
-/** Fact row as returned by `queries/userFacts` (vector omitted). */
-export type UserFact = Omit<Selectable<UserFactsTable>, 'embedding'>;
-
-/** Insert input for `queries/userFacts` (vector as numbers). */
-export type NewUserFact = {
-  userId: string;
-  content: string;
-  category: FactCategory;
-  subject: string | null;
-  predicate: string | null;
-  object: string | null;
-  embedding: number[];
-  modelId: string;
-  sourceMessageId: string | null;
-  validAt: Date | null;
-  /** Defaults to false. */
-  suppressed?: boolean;
-};
-
-export type SegmentDriftLog = Selectable<SegmentDriftLogsTable>;
-export type NewSegmentDriftLog = Insertable<SegmentDriftLogsTable>;
-export type ArrivalJudgmentState = Selectable<ArrivalJudgmentStatesTable>;
-export type NewArrivalJudgmentState = Insertable<ArrivalJudgmentStatesTable>;
-export type TurnFold = Selectable<TurnFoldsTable>;
-export type NewTurnFold = Insertable<TurnFoldsTable>;
-/**
- * Synthetic + provider finish states persisted on `message_usage`.
- * `interrupted` = user stop; `timeout` = inter-token idle guard;
- * `error` = the exchange failed (provider abort or stream error).
- */
-export const FINISH_REASONS = [
-  'stop',
-  'length',
-  'content_filter',
-  'tool_calls',
-  'interrupted',
-  'timeout',
-  'error',
-] as const;
-export type MessageFinishReason = (typeof FINISH_REASONS)[number];
+export type SeedLine = Selectable<Database['memory.threadSeeds']>['lines'][number];

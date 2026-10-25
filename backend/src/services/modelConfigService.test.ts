@@ -7,7 +7,7 @@ import {
   refreshModelConfigs,
 } from '@services/modelConfigService';
 import { useTestDb } from '@test/test-db';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * modelConfigService stays stateless: the refresh cooldown is derived from
@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
  * holds across servers and users.
  */
 
-async function seedConfig(lastUpdated: Date): Promise<void> {
+async function seedConfig(lastUpdated: Date) {
   const row: NewModelConfig = {
     modelId: 'test/model',
     provider: 'deepinfra',
@@ -83,6 +83,52 @@ describe('modelConfigService', () => {
 
     it('returns null for unknown models with no DB row', async () => {
       expect(await getModelConfig('unknown/model')).toBeNull();
+    });
+  });
+
+  describe('reading the model list the provider sends', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function providerAnswers(body: unknown) {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(body), { status: 200 }),
+      );
+    }
+
+    async function storedModelIds() {
+      const rows = await db.selectFrom('billing.modelConfigs').select('modelId').execute();
+      return rows.map((row) => row.modelId).sort();
+    }
+
+    it('fails the refresh, as for an error status, when the list is not a list', async () => {
+      providerAnswers({ error: 'maintenance' });
+
+      const result = await refreshModelConfigs();
+
+      expect(result).toMatchObject({ success: false, modelsUpdated: 0 });
+      expect(await storedModelIds()).toEqual([]);
+    });
+
+    it('stores the models it can read and skips the ones it cannot', async () => {
+      providerAnswers([
+        {
+          name: 'org/readable',
+          context_length: 4096,
+          pricing: { cents_per_input_token: 0.00001, cents_per_output_token: 0.00002 },
+        },
+        'not a model',
+        null,
+        { name: 5 },
+        { name: 'org/no-details', pricing: null, capabilities: null },
+      ]);
+
+      const result = await refreshModelConfigs();
+
+      expect(result).toEqual({ success: true, modelsUpdated: 2 });
+      expect(await storedModelIds()).toEqual(['org/no-details', 'org/readable']);
     });
   });
 });

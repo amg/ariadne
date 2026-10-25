@@ -29,7 +29,7 @@ interface Rule {
   /** Files to skip (relative paths or patterns) */
   skip?: string[];
   /** Check function - returns violations */
-  check: (filePath: string, content: string, relativePath: string) => Violation[];
+  check: (file: { content: string; relativePath: string }) => Violation[];
   /** How to fix violations */
   fix: string;
 }
@@ -60,7 +60,7 @@ const RULES: Rule[] = [
       '/mock/', // Mock servers need process.env
       'validate-env-usage.ts', // This script itself
     ],
-    check: (filePath, content, relativePath) => {
+    check: ({ content, relativePath }) => {
       const violations: Violation[] = [];
       const lines = content.split('\n');
       const processEnvRegex = /process\.env/;
@@ -102,7 +102,7 @@ const RULES: Rule[] = [
   //     This helps developers understand the rationale.
   //   `,
   //   skip: ['pattern-to-skip'],
-  //   check: (filePath, content, relativePath) => {
+  //   check: ({ content, relativePath }) => {
   //     const violations: Violation[] = [];
   //     // Your validation logic here
   //     return violations;
@@ -115,7 +115,7 @@ const RULES: Rule[] = [
 // Validation Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
-function findTsFiles(dir: string): string[] {
+function findTsFiles(dir: string) {
   const files: string[] = [];
 
   function walk(currentDir: string): void {
@@ -141,7 +141,7 @@ function findTsFiles(dir: string): string[] {
   return files;
 }
 
-function shouldSkipFile(relativePath: string, skipPatterns: string[] = []): boolean {
+function shouldSkipFile(relativePath: string, skipPatterns: string[] = []) {
   return skipPatterns.some((pattern) => {
     if (pattern.startsWith('/') && pattern.endsWith('/')) {
       // Directory pattern
@@ -156,7 +156,7 @@ function shouldSkipFile(relativePath: string, skipPatterns: string[] = []): bool
   });
 }
 
-function runRule(rule: Rule, files: string[]): Violation[] {
+function runRule(rule: Rule, files: string[]) {
   const allViolations: Violation[] = [];
 
   for (const filePath of files) {
@@ -169,7 +169,7 @@ function runRule(rule: Rule, files: string[]): Violation[] {
 
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
-      const violations = rule.check(filePath, content, relativePath);
+      const violations = rule.check({ content, relativePath });
       allViolations.push(...violations);
     } catch (error) {
       console.warn(`⚠️  Warning: Could not read ${relativePath}: ${error}`);
@@ -179,7 +179,7 @@ function runRule(rule: Rule, files: string[]): Violation[] {
   return allViolations;
 }
 
-function reportViolations(rule: Rule, violations: Violation[]): void {
+function reportViolations(rule: Rule, violations: Violation[]) {
   if (violations.length === 0) {
     return;
   }
@@ -201,16 +201,22 @@ function reportViolations(rule: Rule, violations: Violation[]): void {
   console.error(`📖 Why: ${rule.why.trim()}\n`);
 }
 
-function main(): void {
+/** The backend folders whose code must read configuration through `env`. */
+const SOURCE_DIRS = ['src', 'app', 'queue', 'scripts'];
+
+function main() {
   console.log('🔍 Running code validation rules...\n');
 
-  const srcPath = path.resolve(process.cwd(), 'src');
-  if (!fs.existsSync(srcPath)) {
-    console.error(`❌ Source directory not found: ${srcPath}`);
-    process.exit(1);
+  const files: string[] = [];
+  for (const dir of SOURCE_DIRS) {
+    const dirPath = path.resolve(process.cwd(), dir);
+    if (!fs.existsSync(dirPath)) {
+      console.error(`❌ Source directory not found: ${dirPath}`);
+      process.exit(1);
+    }
+    files.push(...findTsFiles(dirPath));
   }
 
-  const files = findTsFiles(srcPath);
   let totalViolations = 0;
   let failedRules = 0;
 

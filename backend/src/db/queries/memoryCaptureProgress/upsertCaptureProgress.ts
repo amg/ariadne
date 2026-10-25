@@ -9,9 +9,9 @@ type UpsertProps = {
 
 /**
  * Records how far a segment's Fact capture has gone. Guarded so two passes
- * racing on the same anchor only ever move the pointer forward.
+ * racing on the same settle row only ever move the pointer forward.
  */
-export async function upsertCaptureProgress({ segmentId, throughAt }: UpsertProps): Promise<void> {
+export async function upsertCaptureProgress({ segmentId, throughAt }: UpsertProps) {
   await db
     .insertInto('memory.memoryCaptureProgress')
     .values({ segmentId, capturedThroughAt: throughAt })
@@ -25,7 +25,7 @@ export async function upsertCaptureProgress({ segmentId, throughAt }: UpsertProp
 }
 
 /** Reads a segment's capture pointer, if capture has reached it once. */
-export async function captureProgressOf(segmentId: string): Promise<Date | null> {
+export async function captureProgressOf(segmentId: string) {
   const row = await db
     .selectFrom('memory.memoryCaptureProgress')
     .select('capturedThroughAt')

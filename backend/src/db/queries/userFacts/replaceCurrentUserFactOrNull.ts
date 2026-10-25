@@ -1,4 +1,4 @@
-import type { NewUserFact, UserFact } from '@db/types';
+import type { NewUserFact } from '@db/types';
 import { NoResultError } from 'kysely';
 import { updateUserFact } from './updateUserFact';
 
@@ -13,9 +13,7 @@ type ReplaceCurrentUserFactProps = {
  * Supersedes a current Fact with a new row. Null, with nothing written,
  * when the Fact is missing or already superseded.
  */
-export async function replaceCurrentUserFactOrNull(
-  props: ReplaceCurrentUserFactProps,
-): Promise<UserFact | null> {
+export async function replaceCurrentUserFactOrNull(props: ReplaceCurrentUserFactProps) {
   try {
     return await updateUserFact(props);
   } catch (error) {

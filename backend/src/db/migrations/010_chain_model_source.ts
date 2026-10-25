@@ -16,7 +16,7 @@ import { type Kysely, sql } from 'kysely';
  * Idempotent: safe to run multiple times (guarded column adds, safe backfills,
  * unique index creation).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await sql`alter table segment_drift_logs add column if not exists model_id text`.execute(db);
   await sql`alter table thread_segments add column if not exists model_id text`.execute(db);
 
@@ -82,7 +82,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.dropIndex('idx_segment_drift_logs_message_model_uq').ifExists().execute();
   await db.schema
     .createIndex('idx_segment_drift_logs_message_id')

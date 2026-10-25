@@ -11,7 +11,7 @@ const AUTH_PATH_PREFIX = '/api/auth/';
  * route-level limit never reaches them; the app's limit is applied to
  * their paths directly.
  */
-function limitAuthRoutes(app: FastifyInstance): void {
+function limitAuthRoutes(app: FastifyInstance) {
   // The plugin decorates the app with `rateLimit` at runtime, but its
   // typings leave it out (and augment the root workspace's copy of
   // fastify, not this one). It answers an exceeded limit by throwing the
@@ -33,12 +33,10 @@ function limitAuthRoutes(app: FastifyInstance): void {
  * in memory (single replica at home, Cloudflare edge limits in prod).
  * Register it before the routes it limits.
  */
-export async function registerRateLimits(app: FastifyInstance): Promise<void> {
-  // Coarse global limit (amp + abuse); the billable chat route tightens its own
-  // window via route `config.rateLimit`. Counts are kept in memory for home
-  // deployments; production uses Cloudflare edge limits instead.
-  // NOTE: must be awaited — @fastify/rate-limit wires routes via onRoute hooks,
-  // which are skipped for routes bound before the plugin finishes registering.
+export async function registerRateLimits(app: FastifyInstance) {
+  // Coarse global limit; the billable chat route tightens its own window via
+  // route `config.rateLimit`. Must be awaited: the plugin attaches limits as
+  // routes are added, so a route added before it finishes goes unlimited.
   await app.register(rateLimit, {
     global: true,
     max: 100,

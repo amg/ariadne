@@ -1,9 +1,13 @@
 import type {
-  ArrivalJudgment,
-  DriftGateJudgeArrivalParams,
+  enqueueDriftGateJudgeArrival,
+  judgeArrival,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { publish } from '@services/events';
-import type { MemoryFeature } from '@services/memory';
+import type { MemoryFeature } from '../../src/types/memory';
+
+type ArrivalJudgment = Awaited<ReturnType<typeof judgeArrival>>;
+
+type DriftGateJudgeArrivalParams = Parameters<typeof enqueueDriftGateJudgeArrival>[0];
 
 /**
  * What a judged arrival means downstream: the verdict is announced, and a
@@ -12,11 +16,9 @@ import type { MemoryFeature } from '@services/memory';
  * through the pause never starves the capture.
  */
 export async function whenArrivalJudged({
-  params,
   judgment,
   memory,
 }: {
-  params: DriftGateJudgeArrivalParams;
   judgment: ArrivalJudgment;
   memory: MemoryFeature;
 }): Promise<void> {
@@ -41,6 +43,6 @@ export async function whenArrivalJudged({
 }
 
 /** A judgment that stops trying on its own leaves its waiting chat telling itself to retry. */
-export function whenJudgmentAbandoned(params: DriftGateJudgeArrivalParams): void {
+export function whenJudgmentAbandoned(params: DriftGateJudgeArrivalParams) {
   publish({ kind: 'gate-failed', ...params });
 }

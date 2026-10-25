@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { ArrivalJudgmentState } from '@db/types';
 
 type FindArrivalJudgmentStateOrNullProps = {
   messageId: string;
@@ -15,7 +14,7 @@ type FindArrivalJudgmentStateOrNullProps = {
 export async function findArrivalJudgmentStateOrNull({
   messageId,
   modelId,
-}: FindArrivalJudgmentStateOrNullProps): Promise<ArrivalJudgmentState | null> {
+}: FindArrivalJudgmentStateOrNullProps) {
   const row = await db
     .selectFrom('analysis.arrivalJudgmentStates')
     .selectAll()

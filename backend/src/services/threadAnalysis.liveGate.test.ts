@@ -1,3 +1,4 @@
+import type { FireChannel, GateVerdict } from '@ari/lib/api/schemas/common/driftGate';
 import { env } from '@config/env';
 import { db } from '@db/db';
 import { listMessageEmbeddingsByMessageIds } from '@queries/messageEmbeddings/listMessageEmbeddingsByMessageIds';
@@ -21,6 +22,7 @@ import {
   buildMockEmbedding,
   startMockInferenceServer,
 } from '../../mock/inferenceServer';
+import { JUDGING_DEFAULTS } from './threadAnalysis/verdict';
 
 /**
  * Real e2e of the LIVE lane against the built-in mock inference server:
@@ -61,36 +63,29 @@ const TOPIC_SPECS: TurnSpec[] = [
   topic('return to sourdough and explain scoring the loaf', 'Deep cuts guide the oven spring.'),
 ];
 
-// The analyzer operates under the single-user placeholder (like every route).
+// The gate runs under the single-user placeholder (like every route).
 const USER_ID = DEFAULT_USER_ID;
 
 // ── The deterministic mirror ──────────────────────────────────────────────
 
-/** Judgment parameters shared with the gate (DEFAULT_ANALYZE_OPTIONS). */
-const PARAMS = {
-  segmentThreshold: 0.52,
-  immediateK: 2,
-  sigmaFloor: 0.02,
-  minSamples: 3,
-  delta: 0,
-  lambda: 0.5,
-} as const;
+/** The judging params the gate itself uses. */
+const PARAMS = JUDGING_DEFAULTS;
 
 /** pgvector stores float4 — simulate the round-trip like the rows do. */
-function toFloat4(vector: number[]): number[] {
+function toFloat4(vector: number[]) {
   return vector.map((value) => Math.fround(value));
 }
 
-function prospectiveText(user: string): string {
+function prospectiveText(user: string) {
   return `User:\n${user}\n\n`;
 }
 
-function turnBlock(user: string, assistant: string): string {
+function turnBlock(user: string, assistant: string) {
   return `User:\n${user}\n\nAssistant:\n${assistant}\n\n`;
 }
 
 /** Folder-private cosine distance, mirrored (drift.ts). */
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: number[], b: number[]) {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -106,7 +101,7 @@ function cosineDistance(a: number[], b: number[]): number {
   return Math.min(2, Math.max(0, 1 - dot / denom));
 }
 
-function unitVector(vector: number[]): number[] {
+function unitVector(vector: number[]) {
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   return vector.map((value) => value / norm);
 }
@@ -119,9 +114,11 @@ interface MirrorState {
   phSum: number;
   phCumulative: number;
   phLowWater: number;
+  /** The arrival (by position in the thread) at the patrol's lowest point. */
+  phLowWaterIndex: number | null;
 }
 
-function freshMirror(): MirrorState {
+function freshMirror() {
   return {
     baselineCount: 0,
     baselineMean: 0,
@@ -130,6 +127,7 @@ function freshMirror(): MirrorState {
     phSum: 0,
     phCumulative: 0,
     phLowWater: 0,
+    phLowWaterIndex: null,
   };
 }
 
@@ -144,6 +142,7 @@ function resetPatrol(state: MirrorState) {
   state.phSum = 0;
   state.phCumulative = 0;
   state.phLowWater = 0;
+  state.phLowWaterIndex = null;
 }
 
 /**
@@ -151,35 +150,54 @@ function resetPatrol(state: MirrorState) {
  * reimplemented for test independence. Returns the channel that fired and
  * the baseline snapshot at judgment — the exact shape the drift log stores.
  */
-function mirrorJudge(
-  state: MirrorState,
-  reading: number,
-): { fire: 'immediate' | 'slow' | null; mu: number | null; sigma: number | null } {
+function mirrorJudge({
+  state,
+  reading,
+  anchorReading,
+  index,
+}: {
+  state: MirrorState;
+  reading: number;
+  anchorReading: number;
+  /** The arrival's position in the thread. */
+  index: number;
+}): {
+  fire: FireChannel | null;
+  mu: number | null;
+  sigma: number | null;
+  slowDriftStartIndex: number | null;
+} {
   const mu = state.baselineCount === 0 ? null : state.baselineMean;
   const sigma =
     state.baselineCount < 2 ? null : Math.sqrt(state.baselineM2 / (state.baselineCount - 1));
   const baselineWarm = mu !== null && sigma !== null && state.baselineCount >= 2;
   const threshold = baselineWarm
-    ? mu + PARAMS.immediateK * Math.max(sigma, PARAMS.sigmaFloor)
-    : PARAMS.segmentThreshold;
+    ? mu + PARAMS.immediate.stdDevs * Math.max(sigma, PARAMS.immediate.minStdDev)
+    : PARAMS.immediate.bootstrapThreshold;
 
   if (reading >= threshold) {
     resetLedger(state);
     resetPatrol(state);
-    return { fire: 'immediate', mu, sigma };
+    return { fire: 'immediate', mu, sigma, slowDriftStartIndex: null };
   }
 
+  // The slow channel watches the Anchor distance, not the Gravity reading.
   state.phCount += 1;
-  state.phSum += reading;
+  state.phSum += anchorReading;
   const mean = state.phSum / state.phCount;
-  state.phCumulative += reading - mean - PARAMS.delta;
-  if (state.phCumulative < state.phLowWater) state.phLowWater = state.phCumulative;
+  state.phCumulative += anchorReading - mean - PARAMS.slow.minRiseRequired;
+  if (state.phCount <= PARAMS.slow.minSamples || state.phCumulative < state.phLowWater) {
+    state.phLowWater = state.phCumulative;
+    state.phLowWaterIndex = index;
+  }
   const slowFired =
-    state.phCount >= PARAMS.minSamples && state.phCumulative - state.phLowWater >= PARAMS.lambda;
+    state.phCount >= PARAMS.slow.minSamples &&
+    state.phCumulative - state.phLowWater >= PARAMS.slow.fireBudget;
   if (slowFired) {
+    const slowDriftStartIndex = state.phLowWaterIndex;
     resetLedger(state);
     resetPatrol(state);
-    return { fire: 'slow', mu, sigma };
+    return { fire: 'slow', mu, sigma, slowDriftStartIndex };
   }
 
   // Accepted: fold into the segment baseline (Welford).
@@ -187,13 +205,14 @@ function mirrorJudge(
   const delta = reading - state.baselineMean;
   state.baselineMean += delta / state.baselineCount;
   state.baselineM2 += delta * (reading - state.baselineMean);
-  return { fire: null, mu, sigma };
+  return { fire: null, mu, sigma, slowDriftStartIndex: null };
 }
 
 interface ExpectedArrival {
-  verdict: 'muted' | 'pass' | 'fire';
-  fireChannel: 'immediate' | 'slow' | null;
-  slowDriftStartMessageId: string | null;
+  verdict: GateVerdict;
+  fireChannel: FireChannel | null;
+  /** The arrival, by position, at the slow patrol's lowest point when a slow fire is expected. */
+  slowDriftStartIndex: number | null;
   driftP: number | null;
   mu: number | null;
   sigma: number | null;
@@ -201,36 +220,54 @@ interface ExpectedArrival {
   segmentStartIndex: number;
 }
 
-type ArrivalJudgment = Pick<ExpectedArrival, 'verdict' | 'fireChannel' | 'driftP' | 'mu' | 'sigma'>;
+type ArrivalJudgment = Pick<
+  ExpectedArrival,
+  'verdict' | 'fireChannel' | 'slowDriftStartIndex' | 'driftP' | 'mu' | 'sigma'
+>;
 
 /**
  * One arrival's mirror verdict: mute while there is nothing to compare,
  * otherwise judge the reading through the two-channel mirror.
  */
-function mirrorArrival(
-  state: MirrorState,
-  reading: number | null,
-  completedTurns: number,
-): ArrivalJudgment {
-  if (reading === null || completedTurns < 1) {
-    return { verdict: 'muted', fireChannel: null, driftP: null, mu: null, sigma: null };
+function mirrorArrival({
+  state,
+  reading,
+  anchorReading,
+  completedTurns,
+  index,
+}: {
+  state: MirrorState;
+  reading: number | null;
+  anchorReading: number | null;
+  completedTurns: number;
+  index: number;
+}): ArrivalJudgment {
+  if (reading === null || anchorReading === null || completedTurns < 1) {
+    return {
+      verdict: 'muted',
+      fireChannel: null,
+      slowDriftStartIndex: null,
+      driftP: null,
+      mu: null,
+      sigma: null,
+    };
   }
-  const judged = mirrorJudge(state, reading);
+  const judged = mirrorJudge({ state, reading, anchorReading, index });
   return {
     verdict: judged.fire === null ? 'pass' : 'fire',
     fireChannel: judged.fire,
+    slowDriftStartIndex: judged.slowDriftStartIndex,
     driftP: reading,
     mu: judged.mu,
     sigma: judged.sigma,
   };
 }
 
+/** How many opening Turns a segment's Anchor sums. */
+const ANCHOR_TURNS = 3;
+
 /** Fold a completed Turn into the segment's running sum (reseed on fire). */
-function foldTurnVector(
-  memberSum: number[] | null,
-  foldedVector: number[],
-  reseed: boolean,
-): number[] {
+function foldTurnVector(memberSum: number[] | null, foldedVector: number[], reseed: boolean) {
   return reseed || memberSum === null
     ? [...foldedVector]
     : memberSum.map((value, index) => value + (foldedVector[index] ?? 0));
@@ -245,24 +282,38 @@ function foldTurnVector(
 function expectedChain(specs: TurnSpec[]): ExpectedArrival[] {
   const state = freshMirror();
   let memberSum: number[] | null = null;
+  let anchorSum: number[] | null = null;
+  let anchorTurns = 0;
   let completedTurns = 0;
   let segmentStartIndex = 0;
   const arrived: ExpectedArrival[] = [];
 
   for (const specRow of specs) {
     if (specRow.assistant === undefined) throw new Error('mirror expects complete turns');
+    const arrivalVector = toFloat4(buildMockEmbedding(prospectiveText(specRow.user)));
     const reading =
-      memberSum === null
-        ? null
-        : cosineDistance(
-            toFloat4(buildMockEmbedding(prospectiveText(specRow.user))),
-            unitVector(memberSum),
-          );
-    const judged = mirrorArrival(state, reading, completedTurns);
-    arrived.push({ ...judged, segmentStartIndex, slowDriftStartMessageId: null });
+      memberSum === null ? null : cosineDistance(arrivalVector, unitVector(memberSum));
+    const anchorReading =
+      anchorSum === null ? null : cosineDistance(arrivalVector, unitVector(anchorSum));
+    const judged = mirrorArrival({
+      state,
+      reading,
+      anchorReading,
+      completedTurns,
+      index: arrived.length,
+    });
+    arrived.push({ ...judged, segmentStartIndex });
     if (judged.verdict === 'fire') segmentStartIndex = arrived.length - 1;
     const foldedVector = toFloat4(buildMockEmbedding(turnBlock(specRow.user, specRow.assistant)));
-    memberSum = foldTurnVector(memberSum, foldedVector, judged.verdict === 'fire');
+    const reseed = judged.verdict === 'fire';
+    memberSum = foldTurnVector(memberSum, foldedVector, reseed);
+    if (reseed || anchorSum === null) {
+      anchorSum = [...foldedVector];
+      anchorTurns = 1;
+    } else if (anchorTurns < ANCHOR_TURNS) {
+      anchorSum = foldTurnVector(anchorSum, foldedVector, false);
+      anchorTurns += 1;
+    }
     completedTurns += 1;
   }
 
@@ -270,6 +321,11 @@ function expectedChain(specs: TurnSpec[]): ExpectedArrival[] {
 }
 
 // ── Seeding + assertions ──────────────────────────────────────────────────
+
+/** The id at a position, or null when the mirror expects none. */
+function idAt(ids: readonly string[], index: number | null) {
+  return index === null ? null : (ids[index] ?? null);
+}
 
 async function seedThread(title: string, specs: TurnSpec[]) {
   await insertUserIfNotExists({ id: USER_ID });
@@ -331,18 +387,6 @@ async function withProviderUnconfigured<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Runs `fn` with the feature flag off, restoring the flag afterward. */
-async function withAnalysisOff<T>(fn: () => Promise<T>): Promise<T> {
-  const saved = process.env.THREAD_ANALYSIS_MODE;
-  process.env.THREAD_ANALYSIS_MODE = 'off';
-  try {
-    return await fn();
-  } finally {
-    if (saved === undefined) process.env.THREAD_ANALYSIS_MODE = 'heuristic';
-    else process.env.THREAD_ANALYSIS_MODE = saved;
-  }
-}
-
 // ── The suite ─────────────────────────────────────────────────────────────
 
 useTestDb();
@@ -374,11 +418,11 @@ describe('runLiveGate — the fill-forward walk', () => {
     const expected = expectedChain(TOPIC_SPECS);
 
     const lastExpected = expected[expected.length - 1];
-    const outcome = assertSuccess(await runLiveGate({ threadId }));
+    const outcome = assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     expect(outcome).toEqual({
       verdict: lastExpected?.verdict ?? null,
       fireChannel: lastExpected?.fireChannel ?? null,
-      slowDriftStartMessageId: lastExpected?.slowDriftStartMessageId ?? null,
+      slowDriftStartMessageId: idAt(userMessageIds, lastExpected?.slowDriftStartIndex ?? null),
       messageId: userMessageIds[userMessageIds.length - 1] ?? null,
     });
 
@@ -398,6 +442,7 @@ describe('runLiveGate — the fill-forward walk', () => {
       expect(log.messageId).toBe(userMessageIds[index]);
       expect(log.verdict).toBe(exp.verdict);
       expect(log.fireChannel).toBe(exp.fireChannel);
+      expect(log.slowDriftStartMessageId).toBe(idAt(userMessageIds, exp.slowDriftStartIndex));
       if (exp.driftP === null) {
         expect(log.driftP).toBeNull();
       } else {
@@ -428,8 +473,8 @@ describe('runLiveGate — the fill-forward walk', () => {
     // thread. Both fire from stale snapshots of the chain — only one walk
     // may write it.
     const [exchange, backfill] = await Promise.all([
-      runLiveGate({ threadId, upToMessageId: thirdArrival }),
-      runLiveGate({ threadId }),
+      runLiveGate({ threadId, upToMessageId: thirdArrival, mode: 'heuristic' }),
+      runLiveGate({ threadId, mode: 'heuristic' }),
     ]);
     assertSuccess(exchange);
     assertSuccess(backfill);
@@ -461,7 +506,7 @@ describe('runLiveGate — the fill-forward walk', () => {
       'agents and cost',
       TOPIC_SPECS,
     );
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const stored = await listMessageEmbeddingsByMessageIds({
       messageIds: [...userMessageIds, ...assistantMessageIds],
@@ -506,13 +551,13 @@ describe('runLiveGate — the fill-forward walk', () => {
   it('never re-embeds or re-logs on replay — the chain is the truth', async () => {
     const { threadId } = await seedThread('replay', TOPIC_SPECS);
     const before = mock.embeddings.requestCount();
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const afterFirst = mock.embeddings.requestCount();
     // One arrival embed plus one completed-Turn embed per arrival.
     expect(afterFirst - before).toBe(TOPIC_SPECS.length * 2);
 
     const { logs, segments } = await readChain(threadId);
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     expect(mock.embeddings.requestCount()).toBe(afterFirst);
 
     const replayed = await readChain(threadId);
@@ -525,11 +570,11 @@ describe('runLiveGate — the fill-forward walk', () => {
     const secondArrival = userMessageIds[1];
     if (!secondArrival) throw new Error('seed too short');
 
-    assertSuccess(await runLiveGate({ threadId, upToMessageId: secondArrival }));
+    assertSuccess(await runLiveGate({ threadId, upToMessageId: secondArrival, mode: 'heuristic' }));
     const partial = await readChain(threadId);
     expect(partial.logs.map((log) => log.messageId)).toEqual(userMessageIds.slice(0, 2));
 
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const full = await readChain(threadId);
     expect(full.logs.map((log) => log.messageId)).toEqual(userMessageIds);
     // The partial rows kept their identities across the backfill.
@@ -541,15 +586,18 @@ describe('runLiveGate — the fill-forward walk', () => {
     const firstAssistant = assistantMessageIds[0];
     if (!firstAssistant) throw new Error('seed too short');
     // Turn rows are not arrivals: the walk cannot judge toward one.
-    expect(assertError(await runLiveGate({ threadId, upToMessageId: firstAssistant })).code).toBe(
-      'thread_not_found',
-    );
+    expect(
+      assertError(await runLiveGate({ threadId, upToMessageId: firstAssistant, mode: 'heuristic' }))
+        .code,
+    ).toBe('thread_not_found');
   });
 
   it('returns the empty outcome for threads with no arrivals', async () => {
     const empty = await seedThread('empty', []);
     const unanswered = await seedThread('user only', [{ user: `a question with no reply${PAD}` }]);
-    expect(assertSuccess(await runLiveGate({ threadId: empty.threadId }))).toEqual({
+    expect(
+      assertSuccess(await runLiveGate({ threadId: empty.threadId, mode: 'heuristic' })),
+    ).toEqual({
       verdict: null,
       slowDriftStartMessageId: null,
       fireChannel: null,
@@ -557,7 +605,9 @@ describe('runLiveGate — the fill-forward walk', () => {
     });
     // A user-only thread owns exactly one arrival — judged from scratch,
     // muted against an empty segment, and never folded into anything.
-    const single = assertSuccess(await runLiveGate({ threadId: unanswered.threadId }));
+    const single = assertSuccess(
+      await runLiveGate({ threadId: unanswered.threadId, mode: 'heuristic' }),
+    );
     expect(single.verdict).toBe('muted');
     expect(single.messageId).toBe(unanswered.userMessageIds[0]);
     const stored = await listMessageEmbeddingsByMessageIds({
@@ -574,7 +624,9 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
     // arrival 1 (req +1) + turn 1 fold (req +2) land; arrival 2's embed
     // (req +3) fails — the walk reports the failure with arrival 1 kept.
     mock.embeddings.failFrom(mock.embeddings.requestCount() + 3);
-    expect(assertError(await runLiveGate({ threadId })).code).toBe('embed_failed');
+    expect(assertError(await runLiveGate({ threadId, mode: 'heuristic' })).code).toBe(
+      'embed_failed',
+    );
 
     const { logs, segments } = await readChain(threadId);
     expect(logs.map((log) => log.messageId)).toEqual([userMessageIds[0]]);
@@ -584,11 +636,11 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
   it('resumes from the first missing signal after the provider recovers', async () => {
     const { threadId, userMessageIds } = await seedThread('resume', TOPIC_SPECS);
     mock.embeddings.failFrom(mock.embeddings.requestCount() + 3);
-    assertError(await runLiveGate({ threadId }));
+    assertError(await runLiveGate({ threadId, mode: 'heuristic' }));
     mock.embeddings.clearFailures();
 
     const beforeResume = mock.embeddings.requestCount();
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     // The injected failure landed on arrival 2's embed, so arrival 1's
     // embed and turn 1's fold both already persisted on the failed run.
     // Resume re-embeds only the missing arrivals 2..5 plus folds 2..5:
@@ -601,13 +653,15 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
 
   it('reports provider_not_configured when nothing is wired', async () => {
     const { threadId } = await seedThread('unconfigured', TOPIC_SPECS);
-    const outcome = await withProviderUnconfigured(() => runLiveGate({ threadId }));
+    const outcome = await withProviderUnconfigured(() =>
+      runLiveGate({ threadId, mode: 'heuristic' }),
+    );
     expect(assertError(outcome).code).toBe('provider_not_configured');
   });
 
   it('writes through the off switch: no pipeline, no rows, no failures', async () => {
     const { threadId } = await seedThread('off switch', TOPIC_SPECS);
-    const outcome = await withAnalysisOff(() => runLiveGate({ threadId }));
+    const outcome = await runLiveGate({ threadId, mode: 'off' });
     expect(outcome).toEqual({
       type: 'success',
       data: { verdict: null, slowDriftStartMessageId: null, fireChannel: null, messageId: null },
@@ -621,7 +675,7 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
 describe('edit forks — the abandoned arrival keeps its chain', () => {
   it('an edit abandons its arrival intact; the refill judges the forked arrival', async () => {
     const { threadId, userMessageIds } = await seedThread('edit chain', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const lastUser = userMessageIds[userMessageIds.length - 1];
     if (!lastUser) throw new Error('seed too short');
     const originalContent = TOPIC_SPECS[TOPIC_SPECS.length - 1]?.user ?? '';
@@ -660,7 +714,7 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
 
     // Reply again and the refill judges the forked arrival end-to-end.
     await insertMessage({ threadId, role: 'assistant', content: `revised reply${PAD}` });
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const { logs: logsAfterRefill } = await readChain(threadId);
     expect(logsAfterRefill.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
     const forkedRows = await listMessageEmbeddingsByMessageIds({
@@ -669,14 +723,18 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     });
     expect(forkedRows).toHaveLength(1);
 
-    const messages = await getMessages({ userId: USER_ID, threadId });
+    const messages = await getMessages({
+      userId: USER_ID,
+      threadId,
+      threadAnalysisMode: 'heuristic',
+    });
     // The old text stays with its arrival; the forked row carries the edit.
     expect(messages?.find((message) => message.id === lastUser)?.content).toBe(originalContent);
     expect(messages?.find((message) => message.id === forkedId)?.content).toBe(editedContent);
 
     // The live reading drops the abandoned arrival but keeps the forked one:
     // the topic story follows the live conversation, not the debris.
-    const view = await buildLiveAnalysisView(threadId);
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     expect(view.type).toBe('success');
     if (view.type !== 'success') throw new Error('expected success');
     const pointIds = view.data.points.map((point) => point.messageId);
@@ -715,7 +773,7 @@ describe('gate checkpoints — the newest two, kept honest', () => {
       'keep two',
       TOPIC_SPECS,
     );
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     expect(await statesOf(threadId)).toEqual(userMessageIds.slice(-2));
     expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([4, 5]);
@@ -725,7 +783,7 @@ describe('gate checkpoints — the newest two, kept honest', () => {
 
   it('rebuilds from scratch when the checkpoints go stale, landing on the same chain verbatim', async () => {
     const { threadId, userMessageIds } = await seedThread('stale checkpoints', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const { logs: before } = await readChain(threadId);
     expect(before).toHaveLength(TOPIC_SPECS.length);
 
@@ -741,7 +799,7 @@ describe('gate checkpoints — the newest two, kept honest', () => {
 
     const target = userMessageIds[3];
     if (!target) throw new Error('seed too short');
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     // The rebuilt judgments are the same ones, floats included: the
     // walk's replayed state and the fast path's hydrated state run the
@@ -758,7 +816,7 @@ describe('gate checkpoints — the newest two, kept honest', () => {
 
   it('draws the stored criterion, not one recomputed from today’s params', async () => {
     const { threadId, userMessageIds } = await seedThread('stored criterion', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const firstArrival = userMessageIds[1];
     if (!firstArrival) throw new Error('seed too short');
     // A value no formula would produce: if the chart recomputed the line,
@@ -769,7 +827,7 @@ describe('gate checkpoints — the newest two, kept honest', () => {
       .where('messageId', '=', firstArrival)
       .execute();
 
-    const view = await buildLiveAnalysisView(threadId);
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('expected success');
     const point = view.data.points.find((row) => row.messageId === firstArrival);
     expect(point?.immediateThreshold).toBe(0.47);
@@ -784,20 +842,20 @@ describe('the analysis surface reads the persisted chain', () => {
     const secondArrival = userMessageIds[1];
     if (!secondArrival) throw new Error('seed too short');
 
-    const unfilled = await buildLiveAnalysisView(threadId);
+    const unfilled = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     expect(unfilled.type).toBe('success');
     if (unfilled.type !== 'success') throw new Error('expected success');
     expect(unfilled.data.pending).toBe(true);
     expect(unfilled.data.points).toHaveLength(0);
 
-    assertSuccess(await runLiveGate({ threadId, upToMessageId: secondArrival }));
-    const partial = await buildLiveAnalysisView(threadId);
+    assertSuccess(await runLiveGate({ threadId, upToMessageId: secondArrival, mode: 'heuristic' }));
+    const partial = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (partial.type !== 'success') throw new Error('expected success');
     expect(partial.data.pending).toBe(true);
     expect(partial.data.points.map((point) => point.messageId)).toEqual(userMessageIds.slice(0, 2));
 
-    assertSuccess(await runLiveGate({ threadId }));
-    const full = await buildLiveAnalysisView(threadId);
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
+    const full = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (full.type !== 'success') throw new Error('expected success');
     expect(full.data.pending).toBe(false);
     expect(full.data.points).toHaveLength(TOPIC_SPECS.length);
@@ -818,8 +876,8 @@ describe('the analysis surface reads the persisted chain', () => {
 
   it('carries the fire semantics onto the segment table', async () => {
     const { threadId } = await seedThread('segment table', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
-    const view = await buildLiveAnalysisView(threadId);
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('expected success');
     // Every pivot fires in this corpus: each segment ends in a flame.
     expect(view.data.points.filter((point) => point.verdict === 'fire').length).toBe(
@@ -831,8 +889,8 @@ describe('the analysis surface reads the persisted chain', () => {
 
   it('lists a boundary arrival under the segment it opens, not the one it burned', async () => {
     const { threadId } = await seedThread('boundary attribution', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
-    const view = await buildLiveAnalysisView(threadId);
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('expected success');
 
     // Membership follows the segment span: the Boundary turn closes the
@@ -861,11 +919,11 @@ describe('the analysis surface reads the persisted chain', () => {
 
   it('the off switch erases the view without touching the store', async () => {
     const { threadId } = await seedThread('off view', TOPIC_SPECS);
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
     const { logs: logsBefore } = await readChain(threadId);
     expect(logsBefore.length).toBeGreaterThan(0);
 
-    const offView = await withAnalysisOff(() => buildLiveAnalysisView(threadId));
+    const offView = await buildLiveAnalysisView({ threadId, mode: 'off' });
     if (offView.type !== 'success') throw new Error('expected success');
     expect(offView.data.mode).toBe('off');
     expect(offView.data.points).toHaveLength(0);
@@ -881,9 +939,13 @@ describe('the analysis surface reads the persisted chain', () => {
       'colors',
       TOPIC_SPECS,
     );
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
 
-    const messages = await getMessages({ userId: USER_ID, threadId });
+    const messages = await getMessages({
+      userId: USER_ID,
+      threadId,
+      threadAnalysisMode: 'heuristic',
+    });
     const userRows = TOPIC_SPECS.map((_, index) => ({
       expectedId: userMessageIds[index],
       row: messages?.find((message) => message.id === userMessageIds[index]),
@@ -897,7 +959,7 @@ describe('the analysis surface reads the persisted chain', () => {
     }
 
     // Off: the bubbles go plain while the store keeps its signals.
-    const offMessages = await withAnalysisOff(() => getMessages({ userId: USER_ID, threadId }));
+    const offMessages = await getMessages({ userId: USER_ID, threadId, threadAnalysisMode: 'off' });
     for (const id of userMessageIds) {
       expect(offMessages?.find((message) => message.id === id)?.driftVerdict).toBeNull();
     }
@@ -927,7 +989,7 @@ describe('runLiveGate — topic-marked conversations', () => {
     ];
     const { threadId } = await seedThread('topic-marked', specs);
 
-    assertSuccess(await runLiveGate({ threadId }));
+    assertSuccess(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const { logs } = await readChain(threadId);
     expect(logs.map((log) => log.verdict)).toEqual(['muted', ...Array(9).fill('pass'), 'fire']);

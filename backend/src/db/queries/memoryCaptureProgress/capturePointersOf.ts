@@ -5,7 +5,7 @@ import { db } from '@db/db';
  * reached are absent. Owed rows there keep their maybe-unwritten pointer
  * null.
  */
-export async function capturePointersOf(segmentIds: string[]): Promise<Map<string, Date>> {
+export async function capturePointersOf(segmentIds: string[]) {
   if (segmentIds.length === 0) return new Map();
   const rows = await db
     .selectFrom('memory.memoryCaptureProgress')

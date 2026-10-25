@@ -1,22 +1,15 @@
 import { db } from '@db/db';
 
-export type ResumeDraft = {
-  messageId: string;
-  content: string;
-};
-
 /**
- * The resume draft of a thread: the newest user row's text when that
- * arrival was abandoned and the exchange was never completed afterwards —
- * interrupted/failed exchanges hand their text back to the input; a
- * completed exchange has already settled the draft. A handed-over arrival
+ * The resume draft of a thread: the newest user row's text when that row
+ * is abandoned and no exchange completed after it. A handed-over arrival
  * owes nothing here: it lives on in its fresh Thread.
  */
 export async function findResumeDraft({
   threadId,
 }: {
   threadId: string;
-}): Promise<ResumeDraft | undefined> {
+}) {
   const newestUser = await db
     .selectFrom('chat.messages')
     .select(['id', 'content', 'abandoned', 'createdAt'])

@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { NewThreadSegment, ThreadSegment } from '@db/types';
+import type { NewThreadSegment } from '@db/types';
 
 /**
  * Opens a live-chain segment under the chain's embedding model: one row
@@ -7,7 +7,7 @@ import type { NewThreadSegment, ThreadSegment } from '@db/types';
  * every segment's end (the next segment's start), so nothing else is
  * stored.
  */
-export async function insertThreadSegment(row: NewThreadSegment): Promise<ThreadSegment> {
+export async function insertThreadSegment(row: NewThreadSegment) {
   const inserted = await db
     .insertInto('analysis.threadSegments')
     .values({

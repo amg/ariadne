@@ -24,7 +24,7 @@ afterAll(async () => {
 });
 
 /** A job held by `workerId` since `lockedSecondsAgo`, as a worker mid-task leaves it. */
-async function jobHeldBy(workerId: string, lockedSecondsAgo: number): Promise<string> {
+async function jobHeldBy(workerId: string, lockedSecondsAgo: number) {
   const job = await utils.addJob('probeHeld', {});
   await sql`
     update queues._private_jobs
@@ -35,7 +35,7 @@ async function jobHeldBy(workerId: string, lockedSecondsAgo: number): Promise<st
   return job.id;
 }
 
-async function holderOf(jobId: string): Promise<string | null> {
+async function holderOf(jobId: string) {
   const row = await db
     .selectFrom('queues.jobs')
     .select('lockedBy')

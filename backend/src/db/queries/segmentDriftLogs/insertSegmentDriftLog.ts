@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { NewSegmentDriftLog, SegmentDriftLog } from '@db/types';
+import type { NewSegmentDriftLog } from '@db/types';
 
 /**
  * Logs one judged arrival into the live chain: the composite reading
@@ -10,7 +10,7 @@ import type { NewSegmentDriftLog, SegmentDriftLog } from '@db/types';
  * either: a racing writer owns the survivor and the collision collapses
  * onto it.
  */
-export async function insertSegmentDriftLog(row: NewSegmentDriftLog): Promise<SegmentDriftLog> {
+export async function insertSegmentDriftLog(row: NewSegmentDriftLog) {
   const inserted = await db
     .insertInto('analysis.segmentDriftLogs')
     .values({

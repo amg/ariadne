@@ -7,7 +7,7 @@ import { EMBEDDING_MODEL_ID } from './config';
  * else enters the Thread: the newest live row is a user Message the gate
  * fired on, with no reply grown beneath it. Null when there is none.
  */
-export async function pausedArrivalOrNull(rows: Message[]): Promise<Message | null> {
+export async function pausedArrivalOrNull(rows: Message[]) {
   const newestLive = rows.filter((row) => !row.abandoned).at(-1);
   if (!newestLive || newestLive.role !== 'user') return null;
   const logged = await findSegmentDriftLogByMessageId({

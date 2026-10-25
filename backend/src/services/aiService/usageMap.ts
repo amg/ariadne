@@ -4,11 +4,7 @@ import { type Tiktoken, encodingForModel } from 'js-tiktoken';
 import { getModelConfig } from '../modelConfigService';
 import { computeCostUsd } from './cost';
 
-/**
- * Maps a provider usage report onto a `billing.message_usage` insert row.
- * Fields the provider didn't report are simply omitted (nullable columns).
- */
-
+/** Whether the provider reported any token counts at all. */
 export function hasUsageReport(usage: LanguageModelUsage | undefined): usage is LanguageModelUsage {
   return (
     usage !== undefined && (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
@@ -23,7 +19,7 @@ let encoder: Tiktoken | null = null;
  * stand-in for Qwen, Llama, and other modern models). No tokenizer
  * available: falls back to the rough 1-token-per-4-characters ratio.
  */
-export function countTextTokens(text: string): number {
+export function countTextTokens(text: string) {
   if (text === '') return 0;
   try {
     encoder ??= encodingForModel('gpt-4'); // cl100k_base encoding
@@ -38,7 +34,7 @@ export function countTextTokens(text: string): number {
  * Estimates reasoning token count from reasoning content using tiktoken.
  * Returns NULL when no reasoning content is provided.
  */
-function countReasoningTokens(reasoningContent: string | undefined): number | null {
+function countReasoningTokens(reasoningContent: string | undefined) {
   if (!reasoningContent || reasoningContent.trim() === '') return null;
   return countTextTokens(reasoningContent);
 }
@@ -49,7 +45,13 @@ function countReasoningTokens(reasoningContent: string | undefined): number | nu
  * text with no chat-template overhead. Used as the estimate when a
  * provider usage report never arrives.
  */
-export function estimateChatPromptTokens(systemPrompt: string, messages: ModelMessage[]): number {
+export function estimateChatPromptTokens({
+  systemPrompt,
+  messages,
+}: {
+  systemPrompt: string;
+  messages: ModelMessage[];
+}) {
   let tokens = countTextTokens(systemPrompt);
   for (const message of messages) {
     const text =
@@ -62,12 +64,9 @@ export function estimateChatPromptTokens(systemPrompt: string, messages: ModelMe
 /**
  * Reads cache telemetry from the provider's raw usage block.
  * DeepInfra returns `usage.prompt_tokens_details { cached_tokens, cache_write_tokens }`.
- * The AI SDK normalizes these to inputTokenDetails, but we also check raw for compatibility.
+ * Used when the normalized usage carries no cache counts.
  */
-function readRawCacheTokens(usage: LanguageModelUsage): {
-  cacheReadTokens: number | null;
-  cacheWriteTokens: number | null;
-} {
+function readRawCacheTokens(usage: LanguageModelUsage) {
   // Check raw provider response for OpenAI-style prompt_tokens_details
   const raw = usage.raw as { prompt_tokens_details?: unknown } | undefined;
   const details = raw?.prompt_tokens_details;
@@ -81,6 +80,10 @@ function readRawCacheTokens(usage: LanguageModelUsage): {
   return { cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite };
 }
 
+/**
+ * Maps a provider usage report onto a `billing.message_usage` insert row.
+ * Fields the provider didn't report are left out (nullable columns).
+ */
 export async function buildUsageRow(args: {
   messageId: string;
   model: string;
@@ -91,14 +94,11 @@ export async function buildUsageRow(args: {
   latencyMs: number | null;
   /** Reasoning content for token estimation. */
   reasoningContent?: string;
-}): Promise<NewMessageUsage> {
-  // Note: DeepInfra includes reasoning tokens in completionTokens (billed as output).
-  // reasoningTokens field will be 0 even when model thinks - this is their API limitation.
+}) {
   const promptTokens = args.usage.inputTokens ?? 0;
   const completionTokens = args.usage.outputTokens ?? 0;
 
-  // Cache tokens: AI SDK normalizes to inputTokenDetails, fall back to raw response.
-  // Note: AI SDK v4+ uses inputTokenDetails.{cacheReadTokens,cacheWriteTokens}
+  // Cache tokens: the normalized counts first, the raw response otherwise.
   const sdkCacheRead = args.usage.inputTokenDetails?.cacheReadTokens;
   const sdkCacheWrite = args.usage.inputTokenDetails?.cacheWriteTokens;
   const rawCache = readRawCacheTokens(args.usage);
@@ -128,11 +128,9 @@ export async function buildUsageRow(args: {
   const cacheWrite = sdkCacheWrite ?? rawCache.cacheWriteTokens;
   if (typeof cacheWrite === 'number') row.cacheWriteTokens = cacheWrite;
 
-  // Reasoning tokens: AI SDK normalizes to outputTokenDetails.reasoningTokens.
-  // IMPORTANT: DeepInfra lumps reasoning tokens into textTokens instead of separating them.
-  // The reasoning token count will be 0 even when the model thinks - this is a DeepInfra API
-  // limitation, not a code issue. Cost calculation is still correct (reasoning tokens are
-  // included in completionTokens and billed as output tokens).
+  // DeepInfra counts reasoning tokens inside completionTokens and reports a
+  // reasoning count of 0, so cost stays correct while the reported count is
+  // missing. The estimate below fills that gap from the reasoning text.
   const sdkReasoning = args.usage.outputTokenDetails?.reasoningTokens;
 
   // Check raw response for provider-specific fields (OpenAI style)
@@ -192,7 +190,7 @@ export async function buildEstimatedUsageRow(args: {
   streamedText: string;
   finishReason: MessageFinishReason;
   latencyMs: number | null;
-}): Promise<NewMessageUsage> {
+}) {
   const promptTokens = args.promptTokens;
   const completionTokens = countTextTokens(args.streamedText);
   const pricing = await resolveModelPricing(args.model);

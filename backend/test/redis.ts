@@ -14,7 +14,7 @@ const FOUND_REDIS_URL_ENV = 'VITEST_TEST_REDIS_URL';
 const REDIS_PORT = 6379;
 
 /** Whether a Redis answers at `url` within a second. */
-async function redisAnswers(url: string): Promise<boolean> {
+async function redisAnswers(url: string) {
   const client = new Redis(url, {
     lazyConnect: true,
     connectTimeout: 1_000,
@@ -37,7 +37,7 @@ async function redisAnswers(url: string): Promise<boolean> {
  * default port of each host given, tried in order. Hands it to the
  * workers, or says the suites that need one will be skipped.
  */
-export async function findTestRedis(hosts: string[]): Promise<void> {
+export async function findTestRedis(hosts: string[]) {
   const explicit = process.env[TEST_REDIS_URL_ENV];
   const candidates = explicit ? [explicit] : hosts.map((host) => `redis://${host}:${REDIS_PORT}`);
   for (const url of candidates) {
@@ -55,6 +55,6 @@ export async function findTestRedis(hosts: string[]): Promise<void> {
 }
 
 /** The Redis this run tests against, or null when none was found. */
-export function testRedisUrlOrNull(): string | null {
+export function testRedisUrlOrNull() {
   return process.env[FOUND_REDIS_URL_ENV] || null;
 }

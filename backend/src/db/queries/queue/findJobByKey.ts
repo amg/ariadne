@@ -1,23 +1,8 @@
 import { db } from '@db/db';
-import type { QueueJobsView } from '@db/types';
-import { type JobErrorClass, jobErrorClassOrNull, jobKeyOf } from './jobError';
+import type { QueueJobsView, QueuedJob } from '@db/types';
+import { jobErrorClassOrNull, jobKeyOf } from './jobError';
 
-/**
- * Where a job stands. `queued` covers a job waiting for its first run and
- * one waiting out the pause before its next attempt; `dead` means it has
- * no attempts left.
- */
-export type JobState = 'queued' | 'running' | 'dead';
-
-export interface QueuedJob {
-  id: string;
-  state: JobState;
-  /** The class of the last failure; null while the job has not failed. */
-  errorClass: JobErrorClass | null;
-  lastError: string | null;
-}
-
-function jobStateOf(job: Pick<QueueJobsView, 'lockedAt' | 'attempts' | 'maxAttempts'>): JobState {
+function jobStateOf(job: Pick<QueueJobsView, 'lockedAt' | 'attempts' | 'maxAttempts'>) {
   if (job.lockedAt !== null) return 'running';
   return job.attempts >= job.maxAttempts ? 'dead' : 'queued';
 }
@@ -26,7 +11,7 @@ function jobStateOf(job: Pick<QueueJobsView, 'lockedAt' | 'attempts' | 'maxAttem
  * The job a task holds for a key, or null when there is none: never
  * queued, or finished successfully (a finished job leaves no row).
  */
-export async function findJobByKeyOrNull({
+export async function findJobByKey({
   task,
   key,
 }: {

@@ -11,11 +11,7 @@ type IsLiveArrivalProps = {
  * and the Thread belongs to the user. Deleted, abandoned, foreign and
  * unknown Messages all read false.
  */
-export async function isLiveArrival({
-  userId,
-  threadId,
-  messageId,
-}: IsLiveArrivalProps): Promise<boolean> {
+export async function isLiveArrival({ userId, threadId, messageId }: IsLiveArrivalProps) {
   const row = await db
     .selectFrom('chat.messages as msg')
     .innerJoin('chat.threads as thread', 'thread.id', 'msg.threadId')

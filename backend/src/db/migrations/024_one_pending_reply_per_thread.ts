@@ -11,7 +11,7 @@ import { type Kysely, sql } from 'kysely';
  * Raw `sql` because the lock and this backfill are statements the schema
  * builder cannot express.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   // Holds off writers still running on an older backend between the
   // backfill and the index, which would otherwise fail on what they wrote.
   await sql`lock table chat.messages in share row exclusive mode`.execute(db);
@@ -38,6 +38,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.withSchema('chat').dropIndex('messages_one_pending_reply_per_thread').execute();
 }

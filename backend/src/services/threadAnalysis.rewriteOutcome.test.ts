@@ -48,12 +48,12 @@ const REWRITE = 'What about a sourdough starter made with rice flour?';
 const REFUSAL = "I can't assist with this request so I cannot provide that information.";
 
 /** The deterministic mock embed of a Prospective reading. */
-function readingVector(reading: string): number[] {
+function readingVector(reading: string) {
   return buildMockEmbedding(formattedProspectiveTurn(reading));
 }
 
 /** Cosine similarity of two unit vectors; -1 when the stored one is absent. */
-function cosineSimilarity(stored: number[] | null, expected: number[]): number {
+function cosineSimilarity(stored: number[] | null, expected: number[]) {
   if (stored === null) return -1;
   let dot = 0;
   for (let i = 0; i < expected.length; i += 1) {
@@ -62,7 +62,7 @@ function cosineSimilarity(stored: number[] | null, expected: number[]): number {
   return dot;
 }
 
-async function seedRewriteThread(): Promise<{ threadId: string; arrivalId: string }> {
+async function seedRewriteThread() {
   await insertUserIfNotExists({ id: USER_ID });
   const thread = await insertThread({ userId: USER_ID, title: 'refusal echo' });
   await insertMessage({ threadId: thread.id, role: 'user', content: FIRST_CONTENT });
@@ -119,7 +119,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const rewritesBefore = mock.rewrites.requestCount();
     const embeddingsBefore = mock.embeddings.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('accepted');
@@ -143,7 +143,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(1);
     // Turn 1 embeds twice (arrival + folded Turn), the arrival itself once.
     expect(mock.embeddings.requestCount() - embeddingsBefore).toBe(3);
-    const view = await buildLiveAnalysisView(threadId);
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('view failed');
     const arrivalPoint = view.data.points.find((point) => point.messageId === arrivalId);
     expect(arrivalPoint?.expandOutcome).toBe('accepted');
@@ -155,7 +155,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const { threadId, arrivalId } = await seedRewriteThread();
     const rewritesBefore = mock.rewrites.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed_refused');
@@ -168,7 +168,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     // The budget held: the first attempt plus exactly one retry.
     expect(mock.rewrites.requestCount() - rewritesBefore).toBe(2);
 
-    const view = await buildLiveAnalysisView(threadId);
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('view failed');
     const arrivalPoint = view.data.points.find((point) => point.messageId === arrivalId);
     expect(arrivalPoint?.expandOutcome).toBe('failed_refused');
@@ -180,7 +180,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const { threadId, arrivalId } = await seedRewriteThread();
     const rewritesBefore = mock.rewrites.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('accepted');
@@ -194,7 +194,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const { threadId, arrivalId } = await seedRewriteThread();
     const rewritesBefore = mock.rewrites.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed');
@@ -208,7 +208,7 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     const { threadId, arrivalId } = await seedRewriteThread();
     const rewritesBefore = mock.rewrites.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
 
     const row = await readArrivalRow(arrivalId);
     expect(row.expandOutcome).toBe('failed_inference');
@@ -230,13 +230,57 @@ describe('runLiveGate — the rewrite step records its outcomes', () => {
     mock.rewrites.forceReply(REWRITE);
     const { threadId } = await seedRewriteThread();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
     const embeddingsAfterFirst = mock.embeddings.requestCount();
     const rewritesAfterFirst = mock.rewrites.requestCount();
 
-    assertGateOk(await runLiveGate({ threadId }));
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
     expect(mock.embeddings.requestCount()).toBe(embeddingsAfterFirst);
     // The rewrite step short-circuits on its stored row — no second loop.
     expect(mock.rewrites.requestCount()).toBe(rewritesAfterFirst);
+  });
+});
+
+describe('runLiveGate — the mode picks when a rewrite is tried', () => {
+  // Past the trigger length, so neither the anaphora heuristic nor the
+  // judge's second look applies; only the `always` mode rewrites it.
+  const LONG_ARRIVAL =
+    'now please explain, at the same level of detail, how a beginner should keep a rye starter healthy, covering the feeding schedule, the hydration and the temperature of the kitchen';
+
+  async function seedLongArrivalThread() {
+    await insertUserIfNotExists({ id: USER_ID });
+    const thread = await insertThread({ userId: USER_ID, title: 'long follow-up' });
+    await insertMessage({ threadId: thread.id, role: 'user', content: FIRST_CONTENT });
+    await insertMessage({ threadId: thread.id, role: 'assistant', content: FIRST_REPLY });
+    const arrival = await insertMessage({
+      threadId: thread.id,
+      role: 'user',
+      content: LONG_ARRIVAL,
+    });
+    return { threadId: thread.id, arrivalId: arrival.id };
+  }
+
+  it('leaves a long arrival unrewritten in heuristic mode', async () => {
+    mock.rewrites.forceReply(REWRITE);
+    const { threadId, arrivalId } = await seedLongArrivalThread();
+    const rewritesBefore = mock.rewrites.requestCount();
+
+    assertGateOk(await runLiveGate({ threadId, mode: 'heuristic' }));
+
+    expect((await readArrivalRow(arrivalId)).expandOutcome).toBe('not_needed');
+    expect(mock.rewrites.requestCount() - rewritesBefore).toBe(0);
+  });
+
+  it('rewrites a long arrival in always mode', async () => {
+    mock.rewrites.forceReply(REWRITE);
+    const { threadId, arrivalId } = await seedLongArrivalThread();
+    const rewritesBefore = mock.rewrites.requestCount();
+
+    assertGateOk(await runLiveGate({ threadId, mode: 'always' }));
+
+    const row = await readArrivalRow(arrivalId);
+    expect(row.expandOutcome).toBe('accepted');
+    expect(row.expandedText).toBe(REWRITE);
+    expect(mock.rewrites.requestCount() - rewritesBefore).toBe(1);
   });
 });

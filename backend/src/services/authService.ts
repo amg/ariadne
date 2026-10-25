@@ -4,9 +4,23 @@ import supertokens from 'supertokens-node';
 import EmailPassword from 'supertokens-node/recipe/emailpassword';
 import Session from 'supertokens-node/recipe/session';
 
+/** The origin auth falls back to when `CORS_ORIGINS` names none. */
+const LOCAL_ORIGIN = 'http://localhost:5173';
+
+/**
+ * The website origin auth works for on one request: the request's own
+ * `Origin` when it is one the app serves, otherwise the first served
+ * origin. A caller can therefore never name an origin of its own choosing,
+ * such as one for the links in auth emails.
+ */
+export function authOriginFor(requestOrigin: string | undefined) {
+  const served = env.CORS_ORIGINS;
+  if (requestOrigin !== undefined && served.includes(requestOrigin)) return requestOrigin;
+  return served[0] ?? LOCAL_ORIGIN;
+}
+
 export function initAuth() {
-  // CORS_ORIGINS is required for SuperTokens to know which origins to accept
-  const websiteDomain = env.CORS_ORIGINS.split(',')[0]?.trim() ?? 'http://localhost:5173';
+  const websiteDomain = env.CORS_ORIGINS[0] ?? LOCAL_ORIGIN;
   // The browser reaches the API through the website's own origin (/api is
   // proxied), so session cookies are first-party: SameSite=Lax, and Secure
   // whenever the site is served over https.
@@ -26,10 +40,7 @@ export function initAuth() {
       appName: 'Ari',
       apiDomain: apiDomain,
       websiteDomain: websiteDomain,
-      origin: (request) => {
-        const origin = request.request?.getHeaderValue('origin');
-        return origin !== undefined ? origin : websiteDomain;
-      },
+      origin: ({ request }) => authOriginFor(request?.getHeaderValue('origin')),
       apiBasePath: '/api/auth',
       websiteBasePath: '/auth',
     },

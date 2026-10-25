@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { insertMessage } from '@queries/messages/insertMessage';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertThreadSegment } from '@queries/threadSegments/insertThreadSegment';
+import { deleteThread } from '@queries/threads/deleteThread';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -48,7 +50,7 @@ useTestDb();
 /** Canned `chat.completion` endpoint; records bodies for request-shape asserts. */
 async function startProvider(args: {
   title: string;
-  onRequest?: (body: unknown) => void;
+  onRequest?: (body: unknown) => unknown;
   rejectWhen?: (body: unknown) => boolean;
 }) {
   const server = http.createServer((req, res) => {
@@ -56,31 +58,37 @@ async function startProvider(args: {
     req.on('data', (chunk) => {
       raw += chunk;
     });
-    req.on('end', () => {
-      const body: unknown = JSON.parse(raw || '{}');
-      args.onRequest?.(body);
-      if (args.rejectWhen?.(body)) {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'enable_thinking is not supported' } }));
-        return;
+    req.on('end', async () => {
+      try {
+        const body: unknown = JSON.parse(raw || '{}');
+        await args.onRequest?.(body);
+        if (args.rejectWhen?.(body)) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'enable_thinking is not supported' } }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'chatcmpl-test',
+            object: 'chat.completion',
+            created: 0,
+            model: 'test-model',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: args.title },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+      } catch {
+        // A failing callback answers 500, so the test fails instead of waiting on a reply.
+        res.writeHead(500);
+        res.end();
       }
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          id: 'chatcmpl-test',
-          object: 'chat.completion',
-          created: 0,
-          model: 'test-model',
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: args.title },
-              finish_reason: 'stop',
-            },
-          ],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      );
     });
   });
   await new Promise<void>((resolve) => {
@@ -173,12 +181,12 @@ async function seedDriftedThread(threadId: string) {
 }
 
 /** The prompt text of a captured chat-completion request. */
-function promptOf(body: unknown): string {
+function promptOf(body: unknown) {
   const messages = (body as { messages?: Array<{ content?: string }> })?.messages ?? [];
   return messages.map((m) => m.content ?? '').join('\n');
 }
 
-async function titleOf(userId: string, threadId: string): Promise<string | null> {
+async function titleOf(userId: string, threadId: string) {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) throw new Error('thread vanished');
   return thread.title;
@@ -375,6 +383,94 @@ describe('autoTitleThread', () => {
   });
 });
 
+describe('autoTitleThread message selection', () => {
+  it('leaves out text the user edited away', async () => {
+    const { userId, threadId } = await createThread();
+    const edited = await insertMessage({
+      threadId,
+      role: 'user',
+      content: 'Tell me about volcanoes',
+    });
+    const staleReply = await insertMessage({
+      threadId,
+      role: 'assistant',
+      content: 'Volcanoes erupt molten rock.',
+    });
+    await setMessagesAbandoned({ messageIds: [edited.id, staleReply.id], abandoned: true });
+    await seedExchange(threadId);
+
+    let requestBody: unknown;
+    const stop = await startProvider({
+      title: 'Steam Engine Basics',
+      onRequest: (body) => {
+        requestBody = body;
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId);
+
+      expect(outcome.type).toBe('titled');
+      const prompt = promptOf(requestBody);
+      expect(prompt).toContain('steam engines');
+      expect(prompt).not.toContain('volcano');
+    } finally {
+      await stop();
+    }
+  });
+
+  it('settles while the reply is still an empty row', async () => {
+    const { userId, threadId } = await createThread();
+    await insertMessage({ threadId, role: 'user', content: 'How do steam engines work?' });
+    await insertMessage({ threadId, role: 'assistant', content: '' });
+
+    const outcome = await autoTitleThread(userId, threadId);
+
+    expect(outcome).toEqual({ type: 'settled' });
+  });
+});
+
+describe('autoTitleThread title storage', () => {
+  it('cuts a title longer than a Thread title may be', async () => {
+    const { userId, threadId } = await createThread();
+    await seedExchange(threadId);
+
+    const stop = await startProvider({ title: 'A very long title that goes on and on '.repeat(3) });
+    try {
+      const outcome = await autoTitleThread(userId, threadId);
+
+      expect(outcome.type).toBe('titled');
+      const stored = await titleOf(userId, threadId);
+      expect(stored).toBe('A very long title that goes on and on A very long');
+      expect(outcome).toEqual({ type: 'titled', title: stored });
+    } finally {
+      await stop();
+    }
+  });
+
+  it('reports thread_not_found when the Thread is deleted while the title is generated', async () => {
+    const { userId, threadId } = await createThread();
+    await seedExchange(threadId);
+
+    const stop = await startProvider({
+      title: 'Steam Engine Basics',
+      onRequest: async () => {
+        await deleteThread({ userId, threadId });
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId);
+
+      expect(outcome).toEqual({
+        type: 'failed',
+        code: ErrorCodes.THREAD_NOT_FOUND,
+        message: expect.any(String),
+      });
+    } finally {
+      await stop();
+    }
+  });
+});
+
 describe('autoTitleThread message window', () => {
   it('auto keeps learning from the first exchange on a drifted thread', async () => {
     const { userId, threadId } = await createThread();
@@ -404,7 +500,7 @@ describe('autoTitleThread message window', () => {
     const { userId, threadId } = await createThread();
     const { pivot } = await seedDriftedThread(threadId);
     // Drift cuts a second segment at the pasta question — the first
-    // segment (the anchor) ends right before it.
+    // segment ends right before it.
     await insertThreadSegment({ threadId, startMessageId: pivot, modelId: EMBEDDING_MODEL_ID });
 
     let requestBody: unknown;
@@ -428,9 +524,34 @@ describe('autoTitleThread message window', () => {
     }
   });
 
+  it('forced regeneration still ends at a segment that starts at an edited-away message', async () => {
+    const { userId, threadId } = await createThread();
+    const { pivot } = await seedDriftedThread(threadId);
+    await insertThreadSegment({ threadId, startMessageId: pivot, modelId: EMBEDDING_MODEL_ID });
+    await setMessagesAbandoned({ messageIds: [pivot], abandoned: true });
+
+    let requestBody: unknown;
+    const stop = await startProvider({
+      title: 'Steam Engine Basics',
+      onRequest: (body) => {
+        requestBody = body;
+      },
+    });
+    try {
+      const outcome = await autoTitleThread(userId, threadId, true);
+
+      expect(outcome.type).toBe('titled');
+      const prompt = promptOf(requestBody);
+      expect(prompt).toContain('steam engines');
+      expect(prompt).not.toContain('spaghetti');
+    } finally {
+      await stop();
+    }
+  });
+
   it('forced regeneration uses the whole thread while no drift boundary exists', async () => {
     const { userId, threadId } = await createThread();
-    // Only the anchor segment — the thread has not drifted, so it is still
+    // Only the first segment — the thread has not drifted, so it is still
     // one segment and the whole conversation names it.
     await seedDriftedThread(threadId);
 

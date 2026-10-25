@@ -1,7 +1,7 @@
 import { listUnansweredArrivalsByUser } from '@queries/messages/listUnansweredArrivalsByUser';
 import { findDriftGateJudgeArrivalJobOrNull } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { judgmentFailed, storedGateOutcomeOrNull } from '@services/aiService/arrivalGate';
-import type { ServerEvent } from './serverEvent';
+import type { ServerEvent } from '../../types/events';
 
 /**
  * Where each of the user's arrivals stands right now, as ordinary events:

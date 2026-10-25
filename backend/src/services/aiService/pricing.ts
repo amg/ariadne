@@ -1,16 +1,13 @@
-import { getFallbackPricing, getModelConfig } from '@services/modelConfigService';
-import { EMBEDDING_MODEL_ID } from './config';
-import { type UsagePricing, computeCostUsd } from './cost';
-
 /**
  * Prices side calls (analysis, memory) through the same seam chat usage
  * uses: the DB pricing table, falling through to the central fallback
  * pricing, so no caller keeps a private rate table.
  */
+import { getFallbackPricing, getModelConfig } from '@services/modelConfigService';
+import { EMBEDDING_MODEL_ID } from './config';
+import { computeCostUsd, round10 } from './cost';
 
-function round10(value: number): number {
-  return Number(value.toFixed(10));
-}
+type UsagePricing = NonNullable<Parameters<typeof computeCostUsd>[0]['pricing']>;
 
 /**
  * Embedding-model pricing fallback: $0.01 per 1M prompt tokens. Used
@@ -32,7 +29,7 @@ let embeddingPricePerMillionUsd: number | null = null;
  * the actual model being called, falling through to the central fallback
  * pricing for models the billing table doesn't know.
  */
-async function resolveCallPricing(modelId: string): Promise<UsagePricing> {
+async function resolveCallPricing(modelId: string) {
   const cached = callPricingCache.get(modelId);
   if (cached) return cached;
   const row = await getModelConfig(modelId);
@@ -49,7 +46,7 @@ async function resolveCallPricing(modelId: string): Promise<UsagePricing> {
   return pricing;
 }
 
-export async function computeEmbeddingCostUsd(promptTokens: number): Promise<number> {
+export async function computeEmbeddingCostUsd(promptTokens: number) {
   if (embeddingPricePerMillionUsd === null) {
     const row = await getModelConfig(EMBEDDING_MODEL_ID);
     embeddingPricePerMillionUsd = row?.inputPricePerMillion ?? EMBEDDING_COST_PER_MILLION_USD;
@@ -61,7 +58,7 @@ export async function computeInferenceCostUsd(
   modelId: string,
   promptTokens: number,
   completionTokens: number,
-): Promise<number> {
+) {
   const pricing = await resolveCallPricing(modelId);
   return computeCostUsd({ pricing, promptTokens, completionTokens });
 }

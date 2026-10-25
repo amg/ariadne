@@ -7,15 +7,17 @@
  *        ENV_FILE=.env.prod npm run queue:retry-failed
  */
 import '@config/dotenv';
-import type { DeadJob } from '@queries/queue/listDeadJobs';
 import { requeueDeadJobs } from '@queue/deadJobs';
+import type { listDeadJobs } from '../src/db/queries/queue/listDeadJobs';
 
-function describedJob(job: DeadJob): string {
+type DeadJob = Awaited<ReturnType<typeof listDeadJobs>>[number];
+
+function describedJob(job: DeadJob) {
   const subject = job.key ?? `${job.task} (job ${job.id})`;
   return `  ${subject}, ${job.attempts} attempts: ${job.lastError ?? 'no error recorded'}`;
 }
 
-async function retryFailedJobs(): Promise<void> {
+async function retryFailedJobs() {
   const { requeued, superseded } = await requeueDeadJobs();
   console.log(`Re-queued ${requeued.length} dead job(s).`);
   for (const job of requeued) console.log(describedJob(job));

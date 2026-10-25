@@ -15,9 +15,7 @@ export const STALE_LOCK_SECONDS = TASK_TIME_LIMIT_SECONDS + 60;
 const SWEEP_INTERVAL_MS = 30_000;
 
 /** Frees every abandoned job, so it runs again now instead of hours later. */
-export async function releaseStaleLocks(
-  utils: Pick<WorkerUtils, 'forceUnlockWorkers'>,
-): Promise<void> {
+export async function releaseStaleLocks(utils: Pick<WorkerUtils, 'forceUnlockWorkers'>) {
   const workerIds = await listStaleLockerIds({ olderThanSeconds: STALE_LOCK_SECONDS });
   if (workerIds.length === 0) return;
   await utils.forceUnlockWorkers(workerIds);
@@ -25,9 +23,7 @@ export async function releaseStaleLocks(
 }
 
 /** Frees abandoned jobs now and periodically; returns a function that stops the sweep. */
-export function keepReleasingStaleLocks(
-  utils: Pick<WorkerUtils, 'forceUnlockWorkers'>,
-): () => void {
+export function keepReleasingStaleLocks(utils: Pick<WorkerUtils, 'forceUnlockWorkers'>) {
   const sweep = () =>
     releaseStaleLocks(utils).catch((error: unknown) => {
       logger.warn({ err: error }, 'could not release abandoned queue jobs');

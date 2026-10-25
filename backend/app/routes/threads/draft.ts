@@ -1,38 +1,27 @@
+import { threadDraft } from '@ari/lib/api/schemas/threads/draft';
 import { findResumeDraft } from '@queries/messages/findResumeDraft';
-import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-
-type DraftParams = {
-  id: string;
-};
+import type { RouteOf } from '../contract';
+import { ownedThreadIdOrReject, userIdOf } from '../request';
 
 /**
- * The resume draft of a thread: when its newest exchange was abandoned
- * (interrupted or failed) and never completed, its arrival text comes back
- * for the input to prefill — 204 when nothing is owed.
+ * The resume draft of a thread: the text of its newest user Message when
+ * that Message is abandoned and no Exchange completed after it, for the
+ * input to prefill. 204 when nothing is owed.
  */
-export async function setupThreadDraftRoute(fastify: FastifyInstance) {
-  fastify.get(
-    '/api/threads/:id/draft',
-    { preHandler: verifySession() },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id: threadId } = request.params as DraftParams;
-      if (!isValidUuid(threadId)) {
-        return reply.code(400).send({ error: 'Invalid thread id' });
-      }
-      const thread = await findThreadByIdAndUser({ userId: userId, threadId });
-      if (!thread) {
-        return reply.code(404).send({ error: 'Thread not found' });
-      }
+export function setupThreadDraftRoute(fastify: FastifyInstance) {
+  fastify.route<RouteOf<typeof threadDraft>>({
+    method: threadDraft.method,
+    url: threadDraft.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const threadId = await ownedThreadIdOrReject({ request, reply, userId });
+      if (threadId === null) return reply;
       const draft = await findResumeDraft({ threadId });
-      if (!draft) {
-        return reply.code(204).send();
-      }
-      return reply.send({ messageId: draft.messageId, text: draft.content });
+      if (!draft) return reply.code(204).send();
+      return reply.code(200).send({ messageId: draft.messageId, text: draft.content });
     },
-  );
+  });
 }

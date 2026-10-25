@@ -1,3 +1,4 @@
+import type { RequestRecord } from '@ari/lib/api/schemas/appRecords/records';
 import { env } from '@config/env';
 /**
  * The app-wide pino singleton — the one place the logger is built.
@@ -8,13 +9,13 @@ import { env } from '@config/env';
  * Color scheme (computed inside pino-pretty's `messageFormat`, so it degrades
  * to plain text automatically when `colorize` is off):
  *
- *   Request line — one per request (server entry point onResponse hook):
- *     POST /api/threads/.../generate-title → 502 5666ms
- *       method+URL   bright cyan
+ *   Request line — one per request, from its request record:
+ *     POST /api/threads/:threadId/generate-title → 502 5666ms
+ *       method+route bright cyan
  *       → 2xx green · 3xx blue · 4xx yellow · 5xx bright red
  *       latency      dim gray
  *
- *   Provider exchange — DEBUG=true only, the payloads of external calls:
+ *   Provider call — DEBUG=true only, the payloads of external calls:
  *     ▼ generate-title 1/3 request     yellow  = input sent
  *     ▲ generate-title 1/3 response    green   = output received
  *     ✖ generate-title 1/3 error       red     = failure detail
@@ -23,7 +24,7 @@ import { env } from '@config/env';
  * pino-pretty's defaults (level-colored label, cyan message).
  *
  * Verbose mode: `DEBUG=true` in `.env` drops the level to `debug`
- * (titling's sent prompt + returned text get logged as the exchange
+ * (titling's sent prompt + returned text get logged as the provider call
  * above). Strictly non-prod — production ignores the flag, payloads never
  * land in deployed logs.
  *
@@ -37,13 +38,13 @@ import pino from 'pino';
 import type { PrettyOptions } from 'pino-pretty';
 import pinoPretty from 'pino-pretty';
 
-export const isProduction = env.NODE_ENV === 'production';
+const isProduction = env.NODE_ENV === 'production';
 
 const TRUTHY = /^(1|true|yes|on)$/i;
 const debugRequested = TRUTHY.test(env.DEBUG ? 'true' : 'false');
 
 /** Verbose provider-payload logging: honored outside production only. */
-export const debugEnabled = !isProduction && debugRequested;
+const debugEnabled = !isProduction && debugRequested;
 
 // Standard color conventions (also read by colorette itself): npm's dev
 // scripts set FORCE_COLOR=1 so the pretty stream survives concurrently's
@@ -53,7 +54,7 @@ const colorDisabled = forceColor === '0' || env.NO_COLOR !== undefined;
 const prettyRequested = process.stdout.isTTY || (forceColor !== undefined && forceColor !== '0');
 
 /** Shapes consumed by `messageFormat`; suppresses the default key:value dump. */
-const PRETTY_IGNORED_KEYS = 'pid,hostname,req,res,responseTime,exchange';
+const PRETTY_IGNORED_KEYS = 'pid,hostname,providerCall';
 
 /** The color helpers we use from pino-pretty's colorette passthrough. */
 type Colorette = Record<
@@ -68,14 +69,14 @@ type MessageFormatter = Extract<
   (...args: never[]) => string
 >;
 
-type Exchange = {
+type ProviderCall = {
   label?: unknown;
   request?: unknown;
   response?: unknown;
   error?: unknown;
 };
 
-function statusTone(code: number, colors: Colorette): (input: string) => string {
+function statusTone(code: number, colors: Colorette) {
   if (code >= 500) return colors.redBright;
   if (code >= 400) return colors.yellow;
   if (code >= 300) return colors.blue;
@@ -84,27 +85,17 @@ function statusTone(code: number, colors: Colorette): (input: string) => string 
 }
 
 /** `POST /api/... → 502 5666ms` — colored by status class, dim latency. */
-function formatRequestLine(
-  req: { method?: string; url?: string },
-  res: { statusCode?: number },
-  latencyMs: unknown,
-  colors: Colorette,
-): string {
-  const parts: string[] = [];
-  if (req.method && req.url) {
-    parts.push(colors.bold(colors.cyanBright(`${req.method} ${req.url}`)));
-  }
-  if (res.statusCode !== undefined) {
-    parts.push(statusTone(res.statusCode, colors)(`→ ${res.statusCode}`));
-  }
-  if (typeof latencyMs === 'number') {
-    parts.push(colors.gray(`${Math.round(latencyMs)}ms`));
-  }
-  return parts.join(' ');
+function formatRequestRecord(request: RequestRecord, colors: Colorette) {
+  const route = request.route ?? 'no route';
+  return [
+    colors.bold(colors.cyanBright(`${request.method} ${route}`)),
+    statusTone(request.statusCode, colors)(`→ ${request.statusCode}`),
+    colors.gray(`${Math.round(request.durationMs)}ms`),
+  ].join(' ');
 }
 
 /** Multi-line payload body: objects pretty-printed, strings indented as-is. */
-function renderBody(value: unknown): string {
+function renderBody(value: unknown) {
   const text =
     typeof value === 'string' ? value : (JSON.stringify(value, null, 2) ?? String(value));
   return text
@@ -119,7 +110,7 @@ function paintBlock(
   body: unknown,
   tone: (input: string) => string,
   colors: Colorette,
-): string {
+) {
   const bodyLines = renderBody(body)
     .split('\n')
     .map((line) => tone(line))
@@ -128,40 +119,43 @@ function paintBlock(
 }
 
 /** ▼/▲/✖ blocks — input yellow, output green, error red. */
-function formatExchange(exchange: Exchange, colors: Colorette): string {
-  const label = typeof exchange.label === 'string' ? exchange.label : 'provider';
+function formatProviderCall(call: ProviderCall, colors: Colorette) {
+  const label = typeof call.label === 'string' ? call.label : 'provider';
   const blocks: string[] = [];
-  if (exchange.request !== undefined) {
-    blocks.push(paintBlock(`▼ ${label} request`, exchange.request, colors.yellow, colors));
+  if (call.request !== undefined) {
+    blocks.push(paintBlock(`▼ ${label} request`, call.request, colors.yellow, colors));
   }
-  if (exchange.response !== undefined) {
-    blocks.push(paintBlock(`▲ ${label} response`, exchange.response, colors.greenBright, colors));
+  if (call.response !== undefined) {
+    blocks.push(paintBlock(`▲ ${label} response`, call.response, colors.greenBright, colors));
   }
-  if (exchange.error !== undefined) {
-    blocks.push(paintBlock(`✖ ${label} error`, exchange.error, colors.redBright, colors));
+  if (call.error !== undefined) {
+    blocks.push(paintBlock(`✖ ${label} error`, call.error, colors.redBright, colors));
   }
   return blocks.join('\n');
 }
 
-function isRequestLog(log: Record<string, unknown>): boolean {
-  const req = log.req as { method?: string } | undefined;
-  const res = log.res as { statusCode?: number } | undefined;
-  return typeof req?.method === 'string' && typeof res?.statusCode === 'number';
+/** Whether a logged `appRecord` is the record of a request. */
+function isRequestRecord(value: unknown): value is RequestRecord {
+  return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'request';
 }
 
 const messageFormat: MessageFormatter = (log, messageKey, _levelLabel, { colors }) => {
-  if (isRequestLog(log)) {
-    const req = log.req as { method?: string; url?: string };
-    const res = log.res as { statusCode?: number };
-    return formatRequestLine(req, res, log.responseTime, colors);
-  }
-  const exchange = log.exchange as Exchange | undefined;
-  if (exchange && typeof exchange === 'object') {
-    return formatExchange(exchange, colors);
+  if (isRequestRecord(log.appRecord)) return formatRequestRecord(log.appRecord, colors);
+  const call = log.providerCall as ProviderCall | undefined;
+  if (call && typeof call === 'object') {
+    return formatProviderCall(call, colors);
   }
   const message = log[messageKey];
   return typeof message === 'string' ? message : '';
 };
+
+// pino-pretty drops a field whose prettifier answers undefined and keeps any other answer as
+// it is, though its type allows only text, so the function is cast to that type.
+/** Shows every field of a record as it is, except a request record, which has none to show. */
+const fieldsShownOfAppRecord = ((record: unknown) =>
+  isRequestRecord(record) ? undefined : record) as unknown as NonNullable<
+  PrettyOptions['customPrettifiers']
+>[string];
 
 function prettyOptions(): PrettyOptions {
   return {
@@ -171,10 +165,12 @@ function prettyOptions(): PrettyOptions {
     ignore: PRETTY_IGNORED_KEYS,
     singleLine: true,
     messageFormat,
+    // A request record is shown by its line alone; the other records show their fields.
+    customPrettifiers: { appRecord: fieldsShownOfAppRecord },
   };
 }
 
-function createLogger(): pino.Logger {
+function createLogger() {
   const options: pino.LoggerOptions = { level: debugEnabled ? 'debug' : 'info' };
   if (isProduction || !prettyRequested) return pino(options);
   return pino(options, pinoPretty({ ...prettyOptions(), colorize: !colorDisabled }));
@@ -186,23 +182,29 @@ if (isProduction && debugRequested) {
   logger.info('DEBUG was requested but is ignored in production');
 }
 
-/** Renders an error as a compact one-line detail for exchange/log fields. */
-export function errorReason(error: unknown): string {
+/** Renders an error as a compact one-line detail for provider-call and log fields. */
+export function errorReason(error: unknown) {
   if (error instanceof Error) return error.message;
   return typeof error === 'string' ? error : String(error ?? 'unknown');
 }
 
 /** Payload sent to a provider (DEBUG-only; noop otherwise via level filter). */
-export function logExchangeRequest(label: string, request: unknown): void {
-  logger.debug({ exchange: { label, request } }, 'provider request');
+export function logProviderRequest({ label, request }: { label: string; request: unknown }) {
+  logger.debug({ providerCall: { label, request } }, 'provider request');
 }
 
 /** Payload returned by a provider (DEBUG-only). */
-export function logExchangeResponse(label: string, response: unknown): void {
-  logger.debug({ exchange: { label, response } }, 'provider response');
+export function logProviderResponse({
+  label,
+  response,
+}: {
+  label: string;
+  response: unknown;
+}) {
+  logger.debug({ providerCall: { label, response } }, 'provider response');
 }
 
 /** Provider-call failure detail (DEBUG-only; the summary still gets a warn). */
-export function logExchangeError(label: string, error: unknown): void {
-  logger.debug({ exchange: { label, error: errorReason(error) } }, 'provider error');
+export function logProviderError({ label, error }: { label: string; error: unknown }) {
+  logger.debug({ providerCall: { label, error: errorReason(error) } }, 'provider error');
 }

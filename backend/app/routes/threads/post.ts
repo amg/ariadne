@@ -1,21 +1,23 @@
-import type { MemoryFeature } from '@services/memory';
+import { createThread as createThreadEndpoint } from '@ari/lib/api/schemas/threads/thread';
 import { ThreadValidationError, createThread } from '@services/threadService';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
+import type { MemoryFeature } from '../../../src/types/memory';
+import type { RouteOf } from '../contract';
+import { userIdOf } from '../request';
 
-export async function setupThreadsPostRoute(
+export function setupThreadsPostRoute(
   fastify: FastifyInstance,
   { memory }: { memory: MemoryFeature },
 ) {
-  fastify.post(
-    '/api/threads',
-    { preHandler: verifySession() },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      const userId = (_request as SessionRequest).session?.getUserId() as string;
+  fastify.route<RouteOf<typeof createThreadEndpoint>>({
+    method: createThreadEndpoint.method,
+    url: createThreadEndpoint.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
       try {
-        const thread = await createThread({ userId: userId, memory });
-        return reply.send(thread);
+        return reply.code(200).send(await createThread({ userId, memory }));
       } catch (err) {
         if (err instanceof ThreadValidationError) {
           return reply.code(400).send({ error: err.message });
@@ -23,5 +25,5 @@ export async function setupThreadsPostRoute(
         throw err;
       }
     },
-  );
+  });
 }

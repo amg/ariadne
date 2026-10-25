@@ -7,7 +7,7 @@ import { type Kysely, sql } from 'kysely';
  * Constraints are renamed with it; the primary key's index follows its
  * constraint.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema.alterTable('message_expansion_costs').renameTo('message_side_costs').execute();
   // Constraint renames have no builder form.
   await sql`
@@ -24,7 +24,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`
     alter table message_side_costs
       rename constraint message_side_costs_kind_check to message_expansion_costs_kind_check

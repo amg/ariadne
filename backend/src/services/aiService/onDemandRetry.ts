@@ -12,11 +12,11 @@ import { type Result, err } from '../../types/result';
  * fails over immediately — backoff only ever rides the provider's own
  * busy hint.
  */
-export const ON_DEMAND_MAX_ATTEMPTS = 5;
-export const ON_DEMAND_RETRY_DELAY_MS = 4000;
-export const ON_DEMAND_BUSY_MARKER = 'Model busy';
+const ON_DEMAND_MAX_ATTEMPTS = 5;
+const ON_DEMAND_RETRY_DELAY_MS = 4000;
+const ON_DEMAND_BUSY_MARKER = 'Model busy';
 
-export function sleepMs(ms: number): Promise<void> {
+function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

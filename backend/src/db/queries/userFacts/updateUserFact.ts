@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { NewUserFact, UserFact } from '@db/types';
+import type { NewUserFact } from '@db/types';
 import { toVectorText } from '@queries/messageEmbeddings/embeddingMapping';
 import { sql } from 'kysely';
 
@@ -38,7 +38,7 @@ const USER_FACT_COLUMNS = [
  * the new one in its place (never overwrites); it throws when the Fact is
  * missing or already superseded. Suppression toggles the flag in place.
  */
-export async function updateUserFact(props: UpdateUserFactProps): Promise<UserFact> {
+export async function updateUserFact(props: UpdateUserFactProps) {
   if ('replacement' in props) {
     const { factId, userId, replacement } = props;
     return db.transaction().execute(async (trx) => {

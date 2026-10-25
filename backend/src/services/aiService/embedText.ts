@@ -1,5 +1,5 @@
 import { embed } from 'ai';
-import { type Result, err, ok } from '../../types/result';
+import { err, ok } from '../../types/result';
 import {
   NOT_CONFIGURED_MESSAGE,
   createEmbeddingModel,
@@ -7,20 +7,7 @@ import {
   resolveInferenceConfig,
 } from './config';
 
-/**
- * The embed export of the provider boundary.
- * Built on the DeepInfra provider's embedding model, inheriting the
- * established provider config resolution (mock switch, configured check)
- * exactly like the chat path — callers never hand-roll provider config.
- */
-
-export interface EmbedTextData {
-  embedding: number[];
-  /** Provider-reported prompt tokens for this call (embedding-cost accounting input). */
-  promptTokens: number;
-}
-
-export async function embedText(value: string): Promise<Result<EmbedTextData>> {
+export async function embedText(value: string) {
   const config = resolveInferenceConfig();
   if (!isInferenceConfigured(config)) {
     return err('provider_not_configured', NOT_CONFIGURED_MESSAGE);

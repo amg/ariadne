@@ -12,13 +12,13 @@ import {
   judgeArrival,
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { queueTasks } from '@queue/worker';
-import { EMBEDDING_MODEL_ID } from '@services/aiService';
-import { type ServerEvent, subscribe } from '@services/events';
+import { subscribe } from '@services/events';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
+import type { ServerEvent } from '../../src/types/events';
 
 /**
  * The mock embeds every distinct text far apart, so a second arrival after
@@ -87,7 +87,10 @@ describe('judgeArrival', () => {
     const { id: threadId } = await insertThread({ userId });
     const opening = await insertMessage({ threadId, role: 'user', content: 'Hello there' });
 
-    const judgment = await judgeArrival({ userId, threadId, messageId: opening.id });
+    const judgment = await judgeArrival({
+      arrival: { userId, threadId, messageId: opening.id },
+      threadAnalysisMode: 'heuristic',
+    });
 
     expect(judgment).toMatchObject({ kind: 'judged', verdict: 'muted', closedSegment: null });
   });
@@ -95,7 +98,10 @@ describe('judgeArrival', () => {
   it('fires on a shifted arrival and names the closed segment', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
 
-    const judgment = await judgeArrival({ userId, threadId, messageId: shiftId });
+    const judgment = await judgeArrival({
+      arrival: { userId, threadId, messageId: shiftId },
+      threadAnalysisMode: 'heuristic',
+    });
 
     expect(judgment).toMatchObject({ kind: 'judged', verdict: 'fire' });
     expect(judgment.kind === 'judged' && judgment.verdict === 'fire').toBe(true);
@@ -110,11 +116,11 @@ describe('judgeArrival', () => {
   it('leaves the database as it was when judging a second time', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };
-    await judgeArrival(params);
+    await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
     const once = await chainRowCounts(threadId);
     const embedsOnce = mock.embeddings.requestCount();
 
-    const again = await judgeArrival(params);
+    const again = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
 
     expect(await chainRowCounts(threadId)).toEqual(once);
     expect(mock.embeddings.requestCount()).toBe(embedsOnce);
@@ -129,16 +135,14 @@ describe('judgeArrival', () => {
 
     expect(
       await judgeArrival({
-        userId: first.userId,
-        threadId: first.threadId,
-        messageId: first.shiftId,
+        arrival: { userId: first.userId, threadId: first.threadId, messageId: first.shiftId },
+        threadAnalysisMode: 'heuristic',
       }),
     ).toEqual({ kind: 'gone' });
     expect(
       await judgeArrival({
-        userId: second.userId,
-        threadId: second.threadId,
-        messageId: second.shiftId,
+        arrival: { userId: second.userId, threadId: second.threadId, messageId: second.shiftId },
+        threadAnalysisMode: 'heuristic',
       }),
     ).toEqual({ kind: 'gone' });
     expect(await chainRowCounts(first.threadId)).toMatchObject({ logs: '0' });
@@ -148,9 +152,10 @@ describe('judgeArrival', () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     mock.embeddings.failFrom(mock.embeddings.requestCount() + 1);
     try {
-      const failure = await judgeArrival({ userId, threadId, messageId: shiftId }).catch(
-        (error: unknown) => error,
-      );
+      const failure = await judgeArrival({
+        arrival: { userId, threadId, messageId: shiftId },
+        threadAnalysisMode: 'heuristic',
+      }).catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(TaskFailure);
       expect(classifyTaskError(failure)).toBe('recoverable');
@@ -173,7 +178,7 @@ describe('driftGateJudgeArrival on the worker', () => {
     process.env.DEEPINFRA_API_KEY = '';
     try {
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
     } finally {
       process.env.MOCK_AI_BASE_URL = savedUrl ?? '';
       process.env.DEEPINFRA_API_KEY = savedKey ?? '';
@@ -196,7 +201,7 @@ describe('driftGateJudgeArrival on the worker', () => {
     try {
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
       await enqueueDriftGateJudgeArrival({ userId, threadId, messageId: shiftId });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
     } finally {
       unsubscribe();
     }

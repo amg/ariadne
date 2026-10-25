@@ -4,6 +4,9 @@
   "ignoreBinaries": ["hadolint"],
   "ignore": [".pi/agent/extensions/**"],
   "workspaces": {
+    "lib": {
+      "project": ["api/**/*.ts", "metrics/**/*.ts"]
+    },
     "backend": {
       "entry": ["app/server.aws.ts"],
       "ignore": ["src/db/migrations/**"]

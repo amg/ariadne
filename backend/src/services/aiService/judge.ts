@@ -2,6 +2,7 @@ import { env } from '@config/env';
 import { generateText } from 'ai';
 import { type Result, err, ok } from '../../types/result';
 import {
+  type InferenceConfig,
   NOT_CONFIGURED_MESSAGE,
   createModel,
   isInferenceConfigured,
@@ -18,18 +19,16 @@ import { withOnDemandBackoff } from './onDemandRetry';
  * prior exchange, or does it stand on its own? The verdict only ever
  * ADDS rewrite candidates — the heuristic's own picks never touch this
  * path, and a failed or unreadable verdict fails open to the raw fast
- * path, exactly like the heuristic said no. Crawling on the configured
- * judge model (`env.JUDGE_MODEL`); inherits the established provider config
- * resolution (mock switch, configured check) exactly like the chat,
- * embedding and rewrite paths, and the shared on-demand busy-backoff
- * (`onDemandRetry`) that absorbs the provider's instance-loading stall.
+ * path, exactly like the heuristic said no. The call runs on the
+ * configured judge model and waits out a provider that is still loading
+ * that model.
  */
 
 // The judge contract: classification, never conversation. The output is
 // one of two labels and nothing else — the output feeds a branch, not
 // an embedding. The system prompt's opening sentence is a marker the
 // mock server keys its deterministic verdict on.
-export const JUDGE_SYSTEM_PROMPT = `You classify chat follow-ups; you never answer them. Given a prior exchange and a follow-up, output exactly one label:
+const JUDGE_SYSTEM_PROMPT = `You classify chat follow-ups; you never answer them. Given a prior exchange and a follow-up, output exactly one label:
 - CONTEXT_DEPENDENT — the follow-up only makes sense with the prior exchange (pronoun, bare ellipsis, "for this/that", implied topic like "records?" after a lifting question).
 - SELF_CONTAINED — the follow-up names its own topic and makes sense on its own, or is a genuine topic switch.
 Output only the label. Never answer, explain or add anything.
@@ -52,9 +51,7 @@ Label: SELF_CONTAINED`;
  * Generous on purpose: DeepInfra serves the tiny judge model on-demand
  * and every cold start takes up to ~15s — aborting a loading instance
  * kills the warm-up in flight, so the next call re-colds. A verdict is
- * one label; the timeout is bounded by model load, not by tokens. The
- * production plan is a local judge behind the same seam, where this
- * budget shrinks back to seconds.
+ * one label; the timeout is bounded by model load, not by tokens.
  */
 const JUDGE_TIMEOUT_MS = 20000;
 
@@ -62,9 +59,9 @@ const JUDGE_TIMEOUT_MS = 20000;
  * stray decoration ("Label: …") while keeping anything longer out. */
 const JUDGE_MAX_OUTPUT_TOKENS = 32;
 
-export type ContextDependenceVerdict = 'context-dependent' | 'self-contained';
+type ContextDependenceVerdict = 'context-dependent' | 'self-contained';
 
-export interface JudgeContextDependenceInput {
+interface JudgeContextDependenceInput {
   /** Prior Turn's user content — already capped by the caller. */
   contextUserText: string;
   /** Prior Turn's assistant content — already capped by the caller. */
@@ -73,12 +70,12 @@ export interface JudgeContextDependenceInput {
   followUpText: string;
 }
 
-export interface JudgeContextDependenceData {
+interface JudgeContextDependenceData {
   verdict: ContextDependenceVerdict;
   usage: { promptTokens: number; completionTokens: number };
 }
 
-export function buildJudgePrompt(input: JudgeContextDependenceInput): string {
+function buildJudgePrompt(input: JudgeContextDependenceInput) {
   return (
     `Prior exchange:\nUser: ${input.contextUserText}\n` +
     `Assistant: ${input.contextAssistantText}\n\n` +
@@ -87,7 +84,7 @@ export function buildJudgePrompt(input: JudgeContextDependenceInput): string {
 }
 
 /** Maps raw model output onto a verdict; null when the label is unreadable. */
-export function parseJudgeLabel(raw: string): ContextDependenceVerdict | null {
+export function parseJudgeLabel(raw: string) {
   const normalized = raw.toUpperCase();
   if (normalized.includes('CONTEXT_DEPENDENT')) return 'context-dependent';
   if (normalized.includes('SELF_CONTAINED')) return 'self-contained';
@@ -95,7 +92,7 @@ export function parseJudgeLabel(raw: string): ContextDependenceVerdict | null {
 }
 
 async function judgeOnce(
-  config: ReturnType<typeof resolveInferenceConfig>,
+  config: InferenceConfig,
   input: JudgeContextDependenceInput,
 ): Promise<Result<JudgeContextDependenceData>> {
   const controller = new AbortController();

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { env } from '@config/env';
+import type { FireChannel, GateVerdict } from '@ari/lib/api/schemas/common/driftGate';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import type {
   ArrivalJudgmentState,
   Message,
@@ -9,67 +10,45 @@ import type {
 } from '@db/types';
 import { findArrivalJudgmentStateOrNull } from '@queries/arrivalJudgmentStates/findArrivalJudgmentStateOrNull';
 import { recordMessageEmbedding } from '@queries/messageEmbeddings/recordMessageEmbedding';
-import {
-  type KeptCheckpoints,
-  type OpenedSegment,
-  appendArrivalVerdict,
-} from '@queries/segmentDriftLogs/appendArrivalVerdict';
+import { appendArrivalVerdict } from '@queries/segmentDriftLogs/appendArrivalVerdict';
 import { findTurnFoldOrNull } from '@queries/turnFolds/findTurnFoldOrNull';
 import { insertTurnFoldIfAbsent } from '@queries/turnFolds/insertTurnFoldIfAbsent';
 import { type Result, err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, computeEmbeddingCostUsd, embedText } from '../../aiService';
-import { cosineDistance } from '../drift';
 import { type Turn, formattedTurn } from '../turns';
-import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from '../types';
+import type { JudgingParams, LiveArrival, LiveChain } from '../types';
+import { cosineDistance } from '../vectors';
 import {
-  type JudgingParams,
-  type JudgmentStateSnapshot,
+  JUDGING_DEFAULTS,
   createVerdictState,
   evaluateAndRecord,
   isColdStart,
   snapshotOfVerdictState,
 } from '../verdict';
 import {
-  type LiveChain,
   isArrivalFinished,
   readLiveChain,
   readStoredJudgments,
-  storedVectorOrNull,
+  storedVectorAndChainOrNull,
   withEmbedding,
+  withEveryVector,
   withJudgment,
 } from './liveChain';
-import type { LiveTurnRow } from './liveTurns';
 import type { MessageStep } from './messageStep';
+
+type JudgmentStateSnapshot = NonNullable<ReturnType<typeof snapshotOfVerdictState>>;
+
+type KeptCheckpoints = Parameters<typeof appendArrivalVerdict>[0]['keep'];
+
+type OpenedSegment = Parameters<typeof appendArrivalVerdict>[0]['openedSegments'][number];
 
 /**
  * Verdict-and-fold step: judges the arrival against the current segment's
  * Gravity point, starts a fresh segment on a fire, and folds completed
- * turns into that Gravity point.
- *
- * Judging is checkpointed. Every arrival's verdict commit stores the
- * judgment state its judgment leaves behind — the segment baseline and
- * the slow patrol — and every folded Turn stores its fold: the segment's
- * summed geometry, its segment, and the count of Turns folded. The next
- * judgment starts from the previous arrival's two rows instead of
- * rebuilding the whole chain, so a judgment costs the same on the
- * hundredth arrival of a Thread as on the first. The keep-two rule prunes
- * every other checkpoint of the Thread and model in the verdict's own
- * transaction; abandoned arrivals keep theirs.
- *
- * Checkpoints that are missing or stale — a Thread from before the
- * checkpoints existed, a fold task that never ran, an arrival abandoned
- * beneath a stored fold's Turn count — fall back to the rebuild: the
- * walk replays stored rows from the first arrival, judges what is
- * missing, and writes the checkpoints keep-two keeps on its way out, so
- * a rebuild heals the chain it walked. A verdict another pass wrote first
- * still wins: the commit is one transaction, and the loser rereads what
- * is stored and fills forward again.
- *
- * The queue folds each Turn when its reply completes; a judgment that
- * finds that task has not run folds the Turn inline — the same routine,
- * the same values. This step cannot fail open: an arrival whose
- * embedding is missing means the transformer has not finished, and the
- * exchange surfaces the failure so the retry resumes the pass.
+ * Turns into that Gravity point. A judgment starts from the previous
+ * arrival's stored checkpoints, so it costs the same however long the
+ * Thread grows. The step cannot fail open: a missing embedding fails the
+ * exchange, and the retry resumes the pass.
  */
 
 /**
@@ -127,7 +106,7 @@ interface FoldedTurn {
 interface ArrivedJudgment {
   muted: boolean;
   fired: boolean;
-  fireChannel: 'immediate' | 'slow' | null;
+  fireChannel: FireChannel | null;
   slowDriftStartMessageId: string | null;
   driftP: number | null;
   segmentMu: number | null;
@@ -158,7 +137,7 @@ function segmentStartingAt(
 }
 
 /** The fold values a stored fold row carries. */
-function valuesOf(fold: TurnFold): TurnFoldValues {
+function foldValuesOfRow(fold: TurnFold) {
   return {
     gravitySum: fold.gravitySum,
     anchorSum: fold.anchorSum,
@@ -188,7 +167,7 @@ function judgmentStateRow(
 }
 
 /** The judgment state a stored checkpoint row holds. */
-function snapshotOfStateRow(row: ArrivalJudgmentState): JudgmentStateSnapshot {
+function snapshotOfStateRow(row: ArrivalJudgmentState) {
   return {
     baseline: { count: row.baselineCount, mean: row.baselineMean, m2: row.baselineM2 },
     patrol: {
@@ -202,7 +181,13 @@ function snapshotOfStateRow(row: ArrivalJudgmentState): JudgmentStateSnapshot {
 }
 
 /** The keep-two survivors for the verdict of the arrival at `arrivalIndex`. */
-function keepFor(chain: LiveChain, arrivalIndex: number): KeptCheckpoints {
+function checkpointsToKeep({
+  chain,
+  arrivalIndex,
+}: {
+  chain: LiveChain;
+  arrivalIndex: number;
+}): KeptCheckpoints {
   const stateMessageIds: string[] = [];
   const foldMessageIds: string[] = [];
   for (const index of [arrivalIndex - 1, arrivalIndex]) {
@@ -215,13 +200,13 @@ function keepFor(chain: LiveChain, arrivalIndex: number): KeptCheckpoints {
 }
 
 /**
- * Judge the arrival against the gravity point as it stands BEFORE this
- * arrival folds. Doesn't mutate the fold or the gate's geometry — folding
- * happens afterwards.
+ * Judges the arrival against the gravity point as it stands before this
+ * arrival folds. The fold is left unchanged. The judgment does update the
+ * segment's verdict state: its baseline and its slow patrol.
  */
 function evaluateArrivalAgainstRunningState(
   state: RunningGateState,
-  vector: number[],
+  vector: readonly number[],
   sampleId: string,
 ): ArrivedJudgment {
   const gravity = state.memberSum === null ? null : unitVector(state.memberSum);
@@ -234,13 +219,13 @@ function evaluateArrivalAgainstRunningState(
   let fired = false;
   let judgment: ReturnType<typeof evaluateAndRecord>['judgment'] | null = null;
   if (!muted && driftP !== null && anchorDriftP !== null) {
-    ({ judgment, fired } = evaluateAndRecord(
-      state.verdictState,
-      state.judging,
-      driftP,
-      anchorDriftP,
+    ({ judgment, fired } = evaluateAndRecord({
+      state: state.verdictState,
+      params: state.judging,
+      reading: driftP,
+      anchorReading: anchorDriftP,
       sampleId,
-    ));
+    }));
   }
   let arrivedVerdict: GateVerdict = 'pass';
   if (muted) arrivedVerdict = 'muted';
@@ -294,10 +279,10 @@ async function resolveTurnVector(input: {
   chain: LiveChain;
   text: string;
   assistantMessage: Message;
-}): Promise<Result<{ vector: number[]; chain: LiveChain }>> {
+}) {
   const { chain, assistantMessage } = input;
-  const storedVector = storedVectorOrNull(chain.embeddings.get(assistantMessage.id));
-  if (storedVector !== null) return ok({ vector: storedVector, chain });
+  const stored = await storedVectorAndChainOrNull(chain, assistantMessage.id);
+  if (stored !== null) return ok(stored);
   const embedded = await embedText(input.text);
   if (embedded.type === 'error') return embedded;
   const row = await recordMessageEmbedding({
@@ -310,15 +295,18 @@ async function resolveTurnVector(input: {
   return ok({ vector: row.embedding, chain: withEmbedding(chain, row) });
 }
 
-/** Formats a completed turn. Returns null while the turn is still open. */
-function completeTurnOrNull(row: LiveTurnRow): { text: string; assistantMessage: Message } | null {
-  if (!row.assistantReply) return null;
+/**
+ * The arrival's completed Turn: its formatted text and the reply that
+ * completed it. Null while the Turn is still open.
+ */
+function completedTurnOf(arrival: LiveArrival) {
+  if (!arrival.assistantReply) return null;
   const turn: Turn = {
-    turnNumber: row.turnNumber,
-    userMessage: row.userMessage,
-    assistantMessage: row.assistantReply,
+    turnNumber: arrival.turnNumber,
+    userMessage: arrival.userMessage,
+    assistantMessage: arrival.assistantReply,
   };
-  return { text: formattedTurn(turn), assistantMessage: row.assistantReply };
+  return { text: formattedTurn(turn), assistantMessage: arrival.assistantReply };
 }
 
 /**
@@ -329,11 +317,11 @@ function completeTurnOrNull(row: LiveTurnRow): { text: string; assistantMessage:
  */
 function foldValues(input: {
   prev: TurnFoldValues | null;
-  vector: number[];
+  vector: readonly number[];
   segmentId: string;
   /** Thread-wide Turn count after this one — kept across a fire. */
   completedTurns: number;
-}): TurnFoldValues {
+}) {
   // No previous fold — a fire shredded the segment, or this is the
   // Thread's first Turn — either way the sums start from this vector.
   if (input.prev === null) {
@@ -380,7 +368,7 @@ async function foldTurnOfArrival(input: {
     messageId: reply.id,
     modelId: EMBEDDING_MODEL_ID,
   });
-  if (storedFold !== null) return ok({ fold: valuesOf(storedFold), chain });
+  if (storedFold !== null) return ok({ fold: foldValuesOfRow(storedFold), chain });
 
   const verdict = chain.verdicts.get(arrival.userMessage.id);
   if (!verdict) return ok({ fold: null, chain });
@@ -395,7 +383,7 @@ async function foldTurnOfArrival(input: {
       messageId: prevArrival.assistantReply.id,
       modelId: EMBEDDING_MODEL_ID,
     });
-    if (prevFold !== null) prev = valuesOf(prevFold);
+    if (prevFold !== null) prev = foldValuesOfRow(prevFold);
   }
   // A fire reseeds; so does the Thread's first Turn. Anything else with
   // no previous fold cannot be accumulated honestly.
@@ -408,7 +396,7 @@ async function foldTurnOfArrival(input: {
   const segmentId = chain.segmentIdByStart.get(arrival.userMessage.id) ?? prev?.segmentId ?? null;
   if (segmentId === null) return ok({ fold: null, chain });
 
-  const completion = completeTurnOrNull(arrival);
+  const completion = completedTurnOf(arrival);
   if (completion === null) return ok({ fold: null, chain });
   const resolved = await resolveTurnVector({
     chain,
@@ -438,7 +426,7 @@ async function foldTurnOfArrival(input: {
       completedTurns: values.completedTurns,
     },
   });
-  return ok({ fold: valuesOf(stored), chain: withVector });
+  return ok({ fold: foldValuesOfRow(stored), chain: withVector });
 }
 
 /**
@@ -452,7 +440,7 @@ async function commitJudgment(input: {
   openedSegments: OpenedSegment[];
   judgmentState: NewArrivalJudgmentState;
   keep: KeptCheckpoints;
-}): Promise<LiveChain | null> {
+}) {
   const { chain, messageId, verdict, openedSegments, judgmentState, keep } = input;
   if (verdict === null && openedSegments.length === 0) return chain;
   const appended = await appendArrivalVerdict({
@@ -495,23 +483,24 @@ type FillEnded = { kind: 'filled'; chain: LiveChain } | { kind: 'written-by-anot
 async function judgeAndCommit(input: {
   state: RunningGateState;
   chain: LiveChain;
-  row: LiveTurnRow;
+  arrival: LiveArrival;
   arrivalIndex: number;
 }): Promise<Result<FillEnded>> {
-  const { state, chain, row } = input;
-  const userMessageId = row.userMessage.id;
+  const { state, arrival } = input;
+  const userMessageId = arrival.userMessage.id;
 
-  const chainOpening =
-    state.currentSegmentId === null ? segmentStartingAt(chain, userMessageId) : null;
-  if (chainOpening !== null) state.currentSegmentId = chainOpening.id;
-
-  const vector = storedVectorOrNull(chain.embeddings.get(userMessageId));
-  if (vector === null) {
+  const stored = await storedVectorAndChainOrNull(input.chain, userMessageId);
+  if (stored === null) {
     return err(
       'arrival_signal_missing',
       'The arriving message has no embedding: the transformer has not finished.',
     );
   }
+  const { vector, chain } = stored;
+
+  const chainOpening =
+    state.currentSegmentId === null ? segmentStartingAt(chain, userMessageId) : null;
+  if (chainOpening !== null) state.currentSegmentId = chainOpening.id;
 
   const judged = evaluateArrivalAgainstRunningState(state, vector, userMessageId);
   const verdict = verdictRowOrNull(state, chain, userMessageId, judged);
@@ -532,7 +521,7 @@ async function judgeAndCommit(input: {
       (segment): segment is OpenedSegment => segment != null,
     ),
     judgmentState: judgmentStateRow(userMessageId, snapshotOfVerdictState(state.verdictState)),
-    keep: keepFor(chain, input.arrivalIndex),
+    keep: checkpointsToKeep({ chain, arrivalIndex: input.arrivalIndex }),
   });
   if (committed === null) return ok({ kind: 'written-by-another-pass' });
   return ok({ kind: 'filled', chain: committed });
@@ -544,13 +533,13 @@ async function judgeAndCommit(input: {
  * ends. On fire, the segment re-seeds from this turn's own vector instead
  * of accumulating. Returns the chain holding the turn's embedding.
  */
-async function completeTurn(input: {
+async function foldTurnIntoWalk(input: {
   state: RunningGateState & { lastFolds: FoldedTurn[] };
   chain: LiveChain;
-  row: LiveTurnRow;
+  arrival: LiveArrival;
   reseed: boolean;
-}): Promise<Result<LiveChain>> {
-  const completion = completeTurnOrNull(input.row);
+}) {
+  const completion = completedTurnOf(input.arrival);
   if (completion === null) return ok(input.chain);
   const resolved = await resolveTurnVector({
     chain: input.chain,
@@ -599,32 +588,32 @@ async function completeTurn(input: {
 async function processArrival(input: {
   state: RunningGateState & { lastFolds: FoldedTurn[] };
   chain: LiveChain;
-  row: LiveTurnRow;
+  arrival: LiveArrival;
   arrivalIndex: number;
 }): Promise<Result<FillEnded>> {
   const judged = await judgeAndCommit({
     state: input.state,
     chain: input.chain,
-    row: input.row,
+    arrival: input.arrival,
     arrivalIndex: input.arrivalIndex,
   });
   if (judged.type === 'error') return judged;
   if (judged.data.kind === 'written-by-another-pass') return judged;
-  const folded = await completeTurn({
+  const folded = await foldTurnIntoWalk({
     state: input.state,
     chain: judged.data.chain,
-    row: input.row,
+    arrival: input.arrival,
     // The committed chain holds the verdict whether this pass judged it
     // or replayed it from the store; a fire's Turn reseeds either way.
-    reseed: wasFired(judged.data.chain, input.row),
+    reseed: wasFired({ chain: judged.data.chain, arrival: input.arrival }),
   });
   if (folded.type === 'error') return folded;
   return ok({ kind: 'filled', chain: folded.data });
 }
 
 /** Whether the arrival's stored-or-just-judged verdict fired. */
-function wasFired(chain: LiveChain, row: LiveTurnRow): boolean {
-  return chain.verdicts.get(row.userMessage.id)?.verdict === 'fire';
+function wasFired({ chain, arrival }: { chain: LiveChain; arrival: LiveArrival }) {
+  return chain.verdicts.get(arrival.userMessage.id)?.verdict === 'fire';
 }
 
 /**
@@ -641,7 +630,7 @@ async function fillForwardToArrival(
   chain: LiveChain,
   targetIndex: number,
 ): Promise<Result<FillEnded>> {
-  const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
+  const judging = JUDGING_DEFAULTS;
   const state: RunningGateState & { lastFolds: FoldedTurn[] } = {
     judging,
     verdictState: createVerdictState(judging),
@@ -653,11 +642,12 @@ async function fillForwardToArrival(
     lastFolds: [],
   };
 
-  let current = chain;
+  // The walk measures every arrival and folds every Turn, so it reads every vector at once.
+  let current = await withEveryVector(chain);
   for (let i = 0; i <= targetIndex; i += 1) {
-    const row = current.arrivals[i];
-    if (!row) continue;
-    const processed = await processArrival({ state, chain: current, row, arrivalIndex: i });
+    const arrival = current.arrivals[i];
+    if (!arrival) continue;
+    const processed = await processArrival({ state, chain: current, arrival, arrivalIndex: i });
     if (processed.type === 'error') return processed;
     if (processed.data.kind === 'written-by-another-pass') return processed;
     current = processed.data.chain;
@@ -695,7 +685,7 @@ async function judgeFromCheckpoints(
     return ok({ kind: 'rebuild' });
   }
 
-  const judging: JudgingParams = { ...DEFAULT_ANALYZE_OPTIONS };
+  const judging = JUDGING_DEFAULTS;
   const prev = previous[previous.length - 1] ?? null;
 
   // The Thread's first arrival judges from scratch: no checkpoint exists
@@ -710,7 +700,7 @@ async function judgeFromCheckpoints(
       completedTurns: 0,
       currentSegmentId: null,
     };
-    return judgeAndCommit({ state, chain, row: target, arrivalIndex: targetIndex });
+    return judgeAndCommit({ state, chain, arrival: target, arrivalIndex: targetIndex });
   }
 
   if (!prev.assistantReply) return ok({ kind: 'rebuild' });
@@ -740,7 +730,7 @@ async function judgeFromCheckpoints(
   return judgeAndCommit({
     state,
     chain: inlineFold.data.chain,
-    row: target,
+    arrival: target,
     arrivalIndex: targetIndex,
   });
 }
@@ -812,13 +802,17 @@ export const verdictAndFoldStep: MessageStep = {
  * a provider failure fails the call; the fold is worth retrying, and the
  * embedding it pays for is worth recording.
  */
-export async function foldTurnOfReply(input: {
+export async function foldTurnOfReply({
+  threadId,
+  replyMessageId,
+  mode,
+}: {
   threadId: string;
   /** The Turn's assistant Message. */
   replyMessageId: string;
-}): Promise<Result<null>> {
-  if (env.THREAD_ANALYSIS_MODE === 'off') return ok(null);
-  const { threadId, replyMessageId } = input;
+  mode: ThreadAnalysisMode;
+}) {
+  if (mode === 'off') return ok(null);
   const chain = await readLiveChain(threadId);
   const arrivalIndex = chain.arrivals.findIndex(
     (arrival) => arrival.assistantReply?.id === replyMessageId,
@@ -833,14 +827,14 @@ export async function foldTurnOfReply(input: {
 }
 
 /** Adds a vector to the segment's elementwise running sum. */
-function accumulate(sum: number[], vector: number[]): number[] {
+function accumulate(sum: number[], vector: readonly number[]) {
   for (let i = 0; i < sum.length; i += 1) {
     sum[i] = (sum[i] ?? 0) + (vector[i] ?? 0);
   }
   return sum;
 }
 
-function unitVector(vector: number[]): number[] {
+function unitVector(vector: number[]) {
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   if (norm === 0) throw new Error('gravity vector collapsed to zero');
   return vector.map((value) => value / norm);

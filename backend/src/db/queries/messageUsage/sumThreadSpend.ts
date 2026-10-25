@@ -2,23 +2,6 @@ import { db } from '@db/db';
 import { sql } from 'kysely';
 
 /**
- * The one address for a thread's spend totals: the assistant exchanges'
- * chat telemetry, plus every side call billed against the thread's
- * messages — the arrival pipeline's embeddings, rewrites, and judges,
- * and the Fact capture its Boundary arrivals triggered. Adding a spend
- * source means adding it here (and its test), so totals cannot silently
- * under-count.
- */
-export interface ThreadSpendTotals {
-  chat: string;
-  embedding: string;
-  rewrite: string;
-  judge: string;
-  /** Fact extraction, duplicate checks, and Fact embeddings. */
-  memory: string;
-}
-
-/**
  * Totals the thread's spend per source. Sources without spend coalesce to
  * exact zero sums; results are decimal strings cast to the same
  * numeric(14,10) precision the rows store.
@@ -27,7 +10,7 @@ export async function sumThreadSpend({
   threadId,
 }: {
   threadId: string;
-}): Promise<ThreadSpendTotals> {
+}) {
   // The numeric(14,10) cast has no builder literal, so it rides a raw
   // fragment around the typed aggregates.
   const [chat, sides] = await Promise.all([

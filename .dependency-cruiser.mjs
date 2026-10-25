@@ -72,5 +72,13 @@ export default {
       from: { path: '^backend/queue/', pathNot: '\\.test\\.ts$' },
       to: { path: '(^|/)kysely|^@db/db$|^backend/src/db/db(\\.ts)?$' },
     },
+    {
+      name: 'lib-imports-no-app',
+      comment:
+        'The shared library holds the API contract every app reads, so it depends on none of them.',
+      severity: 'error',
+      from: { path: '^lib/' },
+      to: { path: '^(frontend|backend|load|infra)/' },
+    },
   ],
 };

@@ -8,7 +8,7 @@ import { type Kysely, sql } from 'kysely';
  * Existing rows are told apart by shape: a stated date is always stored
  * at midnight, a message timestamp practically never is.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('user_facts')
     .alterColumn('valid_at', (col) => col.dropNotNull())
@@ -19,7 +19,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   // DML backfill: an unstated date falls back to when the Fact was stored.
   await sql`update user_facts set valid_at = created_at where valid_at is null`.execute(db);
   await db.schema

@@ -37,19 +37,19 @@ const PAD =
   ' cases, and explain your reasoning step by step so a beginner can follow along clearly';
 
 /** pgvector stores float4 — simulate the round-trip like the rows do. */
-function toFloat4(vector: number[]): number[] {
+function toFloat4(vector: number[]) {
   return vector.map((value) => Math.fround(value));
 }
 
-function prospectiveText(user: string): string {
+function prospectiveText(user: string) {
   return `User:\n${user}\n\n`;
 }
 
-function turnBlock(user: string, assistant: string): string {
+function turnBlock(user: string, assistant: string) {
   return `User:\n${user}\n\nAssistant:\n${assistant}\n\n`;
 }
 
-function cosineDistance(a: number[], b: number[]): number {
+function cosineDistance(a: number[], b: number[]) {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -65,7 +65,7 @@ function cosineDistance(a: number[], b: number[]): number {
   return Math.min(2, Math.max(0, 1 - dot / denom));
 }
 
-function unitVector(vector: number[]): number[] {
+function unitVector(vector: number[]) {
   const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
   return vector.map((value) => value / norm);
 }
@@ -90,7 +90,7 @@ useTestDb();
  */
 async function exchange(threadId: string, user: string, assistant: string) {
   const arrival = await insertMessage({ threadId, role: 'user', content: `${user}${PAD}` });
-  const judged = await runLiveGate({ threadId, upToMessageId: arrival.id });
+  const judged = await runLiveGate({ threadId, upToMessageId: arrival.id, mode: 'heuristic' });
   expect(judged.type).toBe('success');
   const reply = await insertMessage({ threadId, role: 'assistant', content: `${assistant}${PAD}` });
   return { arrivalId: arrival.id, replyId: reply.id };
@@ -127,7 +127,10 @@ describe('foldTurn', () => {
     // Turn's fold is queue work — its reply landed after its judgment.
     expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([1]);
 
-    await foldTurn({ threadId, messageId: second.replyId });
+    await foldTurn({
+      turn: { threadId, messageId: second.replyId },
+      threadAnalysisMode: 'heuristic',
+    });
 
     expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([1, 2]);
     expect(first.arrivalId).not.toBe(second.arrivalId);
@@ -143,7 +146,10 @@ describe('foldTurn', () => {
       'How do jet turbines compress air',
       'Through axial stages',
     );
-    await foldTurn({ threadId, messageId: fired.replyId });
+    await foldTurn({
+      turn: { threadId, messageId: fired.replyId },
+      threadAnalysisMode: 'heuristic',
+    });
 
     // The mock embeds distinct texts far apart, so the second arrival
     // fired: the fast-path judgment of the third reads this task's fold,
@@ -180,13 +186,19 @@ describe('foldTurn', () => {
       'Through axial stages',
     );
     await exchange(threadId, 'How do sailboats stay upright', 'Ballast and trim');
-    await foldTurn({ threadId, messageId: second.replyId });
+    await foldTurn({
+      turn: { threadId, messageId: second.replyId },
+      threadAnalysisMode: 'heuristic',
+    });
     // Turn one's fold left the keep-two window; the task must not
     // resurrect a checkpoint nothing reads.
     await db.deleteFrom('analysis.turnFolds').where('messageId', '=', first.replyId).execute();
     const before = await foldsOf(threadId);
 
-    await foldTurn({ threadId, messageId: first.replyId });
+    await foldTurn({
+      turn: { threadId, messageId: first.replyId },
+      threadAnalysisMode: 'heuristic',
+    });
 
     expect(await foldsOf(threadId)).toEqual(before);
   });
@@ -203,8 +215,14 @@ describe('foldTurn', () => {
     await setMessagesAbandoned({ messageIds: [turn.replyId], abandoned: true });
     const before = await foldsOf(threadId);
 
-    await foldTurn({ threadId, messageId: turn.replyId });
-    await foldTurn({ threadId, messageId: randomUUID() });
+    await foldTurn({
+      turn: { threadId, messageId: turn.replyId },
+      threadAnalysisMode: 'heuristic',
+    });
+    await foldTurn({
+      turn: { threadId, messageId: randomUUID() },
+      threadAnalysisMode: 'heuristic',
+    });
 
     expect(await foldsOf(threadId)).toEqual(before);
   });
@@ -220,9 +238,10 @@ describe('foldTurn', () => {
     );
     mock.embeddings.failFrom(mock.embeddings.requestCount() + 1);
     try {
-      const failure = await foldTurn({ threadId, messageId: turn.replyId }).catch(
-        (error: unknown) => error,
-      );
+      const failure = await foldTurn({
+        turn: { threadId, messageId: turn.replyId },
+        threadAnalysisMode: 'heuristic',
+      }).catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(TaskFailure);
       expect(classifyTaskError(failure)).toBe('recoverable');
@@ -246,7 +265,7 @@ describe('driftGateFoldTurn on the worker', () => {
 
     await enqueueDriftGateFoldTurn({ threadId, messageId: second.replyId });
     await enqueueDriftGateFoldTurn({ threadId, messageId: second.replyId });
-    await drainQueue(queueTasks(memoryOff));
+    await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
     expect((await foldsOf(threadId)).map((fold) => fold.completedTurns)).toEqual([1, 2]);
     expect(await findDriftGateFoldTurnJobOrNull(second.replyId)).toBeNull();

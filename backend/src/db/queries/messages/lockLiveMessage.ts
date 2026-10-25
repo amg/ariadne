@@ -9,7 +9,7 @@ import type { DbExecutor } from '@db/types';
 export async function lockLiveMessage(
   { threadId, messageId }: { threadId: string; messageId: string },
   trx: DbExecutor,
-): Promise<boolean> {
+) {
   const row = await trx
     .selectFrom('chat.messages')
     .select('id')

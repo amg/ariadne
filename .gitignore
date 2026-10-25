@@ -38,9 +38,6 @@ bower_components
 # Compiled binary addons
 build/Release
 
-# Generated thread-analysis reports (npm run analyze:thread)
-/build/
-
 # Dependency directories
 node_modules/
 jspm_packages/

@@ -2,7 +2,7 @@ import {
   enqueueMemoryCaptureSegment,
   findMemoryCaptureSegmentJobOrNull,
 } from '@queue/tasks/memoryCaptureSegmentTask';
-import type { MemoryFeature } from '@services/memory';
+import type { MemoryFeature } from '../src/types/memory';
 
 /** A deployment running Memory, capturing through the real queue. */
 export const memoryOn: MemoryFeature = {

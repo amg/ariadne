@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { Message, SeedLine, Thread } from '@db/types';
+import type { SeedLine } from '@db/types';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { seedLinesJson } from '@queries/threadSeeds/insertThreadSeed';
 
@@ -11,12 +11,6 @@ type MoveArrivalToFreshThreadProps = {
   seed: { lines: SeedLine[]; factCount: number };
 };
 
-export interface MovedArrival {
-  thread: Thread;
-  /** The arrival's copy, the fresh Thread's first message. */
-  message: Message;
-}
-
 /**
  * Moves an arrival into a fresh Thread in one transaction: the arrival is
  * abandoned in its old Thread, and the fresh Thread opens with its Seed and
@@ -24,12 +18,12 @@ export interface MovedArrival {
  * when the arrival is no longer the newest live user Message of its
  * Thread: another handover or a reply got there first.
  */
-export async function moveArrivalToFreshThreadOrNull({
+export async function moveArrivalToFreshThread({
   userId,
   fromThreadId,
   messageId,
   seed,
-}: MoveArrivalToFreshThreadProps): Promise<MovedArrival | null> {
+}: MoveArrivalToFreshThreadProps) {
   return db.transaction().execute(async (trx) => {
     // Locked first, so the claim below starts after whatever held the
     // arrival has committed, and its check for later rows sees what that

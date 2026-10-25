@@ -13,13 +13,13 @@ import type { Kysely } from 'kysely';
  * default backfills every existing assistant row — they all represented
  * finished exchanges at the moment this column landed.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('messages')
     .addColumn('exchange_status', 'varchar(16)', (col) => col.notNull().defaultTo('completed'))
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.alterTable('messages').dropColumn('exchange_status').execute();
 }

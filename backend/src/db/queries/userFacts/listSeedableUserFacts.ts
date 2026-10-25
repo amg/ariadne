@@ -1,14 +1,6 @@
 import { db } from '@db/db';
 import type { FactCategory } from '@db/types';
 
-export interface SeedableUserFact {
-  content: string;
-  category: FactCategory;
-  validAt: Date | null;
-  /** When the Fact was noted — the fallback date in Seed lines. */
-  createdAt: Date;
-}
-
 type ListSeedableUserFactsProps = {
   userId: string;
   /** Categories kept out of Seeds. */
@@ -26,7 +18,7 @@ export async function listSeedableUserFacts({
   userId,
   blockedCategories,
   limit,
-}: ListSeedableUserFactsProps): Promise<SeedableUserFact[]> {
+}: ListSeedableUserFactsProps) {
   let query = db
     .selectFrom('memory.userFacts')
     .select(['content', 'category', 'validAt', 'createdAt'])

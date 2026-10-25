@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 /** An app allowing one request per bucket per minute. */
-async function appAllowingOneRequest(): Promise<FastifyInstance> {
+async function appAllowingOneRequest() {
   app = Fastify({ logger: false });
   await app.register(rateLimit, {
     global: true,

@@ -41,7 +41,7 @@ afterAll(async () => {
 });
 
 useTestDb();
-useTestQueue({ memory: memoryOn });
+useTestQueue({ memory: memoryOn, threadAnalysisMode: 'heuristic' });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 /** This suite asserts arrival states, not titles: settlement never asks for one. */
@@ -55,7 +55,7 @@ async function freshThread() {
 }
 
 /** One more thread for an existing user. */
-async function freshThreadWithUser(userId: string): Promise<string> {
+async function freshThreadWithUser(userId: string) {
   const { id: threadId } = await insertThread({ userId, title: 'Arrival states' });
   return threadId;
 }
@@ -72,7 +72,7 @@ async function drained(result: Awaited<ReturnType<typeof submitChat>>): Promise<
 }
 
 /** Resolves once the arrival's judgment has finished, successfully or not. */
-async function judgmentSettled(messageId: string): Promise<void> {
+async function judgmentSettled(messageId: string) {
   const deadline = Date.now() + 10_000;
   for (;;) {
     const job = await findDriftGateJudgeArrivalJobOrNull(messageId);
@@ -82,7 +82,7 @@ async function judgmentSettled(messageId: string): Promise<void> {
   }
 }
 
-async function newestArrivalId(threadId: string): Promise<string> {
+async function newestArrivalId(threadId: string) {
   const rows = await listMessagesByThread({ threadId });
   const row = rows.filter((r) => r.role === 'user' && !r.abandoned).at(-1);
   if (!row) throw new Error('no arrival found');
@@ -100,6 +100,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         judging,
         titling,
         memory: memoryOn,
+        threadAnalysisMode: 'heuristic',
       }),
     );
 
@@ -117,6 +118,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       judging,
       titling,
       memory: memoryOn,
+      threadAnalysisMode: 'heuristic',
     });
     expect(pending).toMatchObject({ type: 'error', code: 'gate_pending' });
 
@@ -138,6 +140,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         judging,
         titling,
         memory: memoryOn,
+        threadAnalysisMode: 'heuristic',
       }),
     );
     const shift = await submitChat({
@@ -147,6 +150,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       judging,
       titling,
       memory: memoryOn,
+      threadAnalysisMode: 'heuristic',
     });
     if (shift.type !== 'success' || !isDriftPause(shift.data)) {
       throw new Error('the second arrival must pause');
@@ -199,6 +203,7 @@ describe('the current state of a user\u2019s arrivals', () => {
         judging,
         titling,
         memory: memoryOn,
+        threadAnalysisMode: 'heuristic',
       }),
     );
     await submitChat({
@@ -208,6 +213,7 @@ describe('the current state of a user\u2019s arrivals', () => {
       judging,
       titling,
       memory: memoryOn,
+      threadAnalysisMode: 'heuristic',
     });
 
     const { userId } = await freshThread();

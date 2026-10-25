@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { Thread } from '@db/types';
 
 type UpdateThreadTitleProps = {
   userId: string;
@@ -12,11 +11,7 @@ type UpdateThreadTitleProps = {
  * when the thread is unknown or belongs to someone else (no information
  * leakage either way).
  */
-export async function updateThreadTitle({
-  userId,
-  threadId,
-  title,
-}: UpdateThreadTitleProps): Promise<Thread | undefined> {
+export async function updateThreadTitle({ userId, threadId, title }: UpdateThreadTitleProps) {
   return db
     .updateTable('chat.threads')
     .set({ title })

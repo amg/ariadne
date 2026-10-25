@@ -48,7 +48,7 @@ const PAD =
 
 type TurnSpec = { user: string; assistant: string };
 
-function topic(user: string, assistant: string): TurnSpec {
+function topic(user: string, assistant: string) {
   return { user: `${user}${PAD}`, assistant: `${assistant}${PAD}` };
 }
 
@@ -115,7 +115,7 @@ describe('the live chain runs one per embedding model', () => {
     const { threadId, userMessageIds } = await seedThread('model change', TOPIC_SPECS);
 
     modelState.current = PRIMARY;
-    const first = await runLiveGate({ threadId });
+    const first = await runLiveGate({ threadId, mode: 'heuristic' });
     expect(first.type).toBe('success');
     const chainA = await readChain(threadId, PRIMARY);
     expect(chainA.logs.map((log) => log.messageId)).toEqual(userMessageIds);
@@ -123,7 +123,7 @@ describe('the live chain runs one per embedding model', () => {
     expect(chainA.segments.length).toBe(TOPIC_SPECS.length);
 
     modelState.current = SECONDARY;
-    const second = await runLiveGate({ threadId });
+    const second = await runLiveGate({ threadId, mode: 'heuristic' });
     expect(second.type).toBe('success');
     const chainB = await readChain(threadId, SECONDARY);
 
@@ -156,20 +156,24 @@ describe('the live chain runs one per embedding model', () => {
     const { threadId, userMessageIds } = await seedThread('surfaces', TOPIC_SPECS);
 
     modelState.current = PRIMARY;
-    const seeded = await runLiveGate({ threadId });
+    const seeded = await runLiveGate({ threadId, mode: 'heuristic' });
     expect(seeded.type).toBe('success');
     modelState.current = SECONDARY;
-    const rebuilt = await runLiveGate({ threadId });
+    const rebuilt = await runLiveGate({ threadId, mode: 'heuristic' });
     expect(rebuilt.type).toBe('success');
 
-    const view = await buildLiveAnalysisView(threadId);
+    const view = await buildLiveAnalysisView({ threadId, mode: 'heuristic' });
     if (view.type !== 'success') throw new Error('expected success');
     // The rebuilt chain alone — no second model's rows bleed in.
     expect(view.data.pending).toBe(false);
     expect(view.data.points.map((point) => point.messageId)).toEqual(userMessageIds);
     expect(view.data.segments.length).toBe(TOPIC_SPECS.length);
 
-    const messages = await getMessages({ userId: USER_ID, threadId });
+    const messages = await getMessages({
+      userId: USER_ID,
+      threadId,
+      threadAnalysisMode: 'heuristic',
+    });
     const bubbleOf = (messageId: string) =>
       messages?.find((message) => message.id === messageId)?.driftVerdict;
     expect(bubbleOf(userMessageIds[0] as string)?.verdict).toBe('muted');
@@ -180,9 +184,9 @@ describe('the live chain runs one per embedding model', () => {
     const { threadId, userMessageIds } = await seedThread('cross-model edit', TOPIC_SPECS);
 
     modelState.current = PRIMARY;
-    expect((await runLiveGate({ threadId })).type).toBe('success');
+    expect((await runLiveGate({ threadId, mode: 'heuristic' })).type).toBe('success');
     modelState.current = SECONDARY;
-    expect((await runLiveGate({ threadId })).type).toBe('success');
+    expect((await runLiveGate({ threadId, mode: 'heuristic' })).type).toBe('success');
 
     const lastUser = userMessageIds[userMessageIds.length - 1];
     if (!lastUser) throw new Error('seed too short');
@@ -210,7 +214,7 @@ describe('the live chain runs one per embedding model', () => {
       role: 'assistant',
       content: `revised reply${PAD}`,
     });
-    expect((await runLiveGate({ threadId })).type).toBe('success');
+    expect((await runLiveGate({ threadId, mode: 'heuristic' })).type).toBe('success');
     const { logs: refilled } = await readChain(threadId, SECONDARY);
     expect(refilled.map((log) => log.messageId)).toEqual([...userMessageIds, forkedId]);
     // …while the retired chain keeps it out until its own model walks again.

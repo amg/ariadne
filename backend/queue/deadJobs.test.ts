@@ -1,5 +1,5 @@
 import { enqueueJob } from '@queries/queue/enqueueJob';
-import { findJobByKeyOrNull } from '@queries/queue/findJobByKey';
+import { findJobByKey } from '@queries/queue/findJobByKey';
 import { listDeadJobs } from '@queries/queue/listDeadJobs';
 import { requeueDeadJobs } from '@queue/deadJobs';
 import { registeredTask } from '@queue/worker';
@@ -52,7 +52,7 @@ describe('requeueDeadJobs', () => {
       'probeRevive:fatal',
     ]);
     expect(superseded).toEqual([]);
-    expect(await findJobByKeyOrNull({ task: 'probeRevive', key: 'fatal' })).toMatchObject({
+    expect(await findJobByKey({ task: 'probeRevive', key: 'fatal' })).toMatchObject({
       state: 'queued',
     });
     await drainQueue(probe.tasks);

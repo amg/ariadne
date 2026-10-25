@@ -1,5 +1,5 @@
 import { db } from '@db/db';
-import type { SeedLine, ThreadSeed } from '@db/types';
+import type { SeedLine } from '@db/types';
 import { sql } from 'kysely';
 
 type InsertThreadSeedProps = {
@@ -10,10 +10,7 @@ type InsertThreadSeedProps = {
 };
 
 /** Freezes a Thread's Seed; a Thread carries at most one. */
-export async function insertThreadSeed({
-  lines,
-  ...row
-}: InsertThreadSeedProps): Promise<ThreadSeed> {
+export async function insertThreadSeed({ lines, ...row }: InsertThreadSeedProps) {
   return db
     .insertInto('memory.threadSeeds')
     .values({ ...row, lines: seedLinesJson(lines) })

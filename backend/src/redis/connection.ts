@@ -11,25 +11,8 @@ const COMMAND_TIMEOUT_MS = 250;
 /** The longest startup waits for Redis before carrying on without it. */
 const STARTUP_WAIT_MS = 5_000;
 
-/** The connections one backend copy holds to the shared Redis. */
-export interface RedisConnection {
-  /**
-   * For commands that answer at once or fail: counting and publishing.
-   * While Redis is unreachable they fail straight away instead of
-   * waiting for it to come back.
-   */
-  commands: Redis;
-  /**
-   * Held in subscriber mode for the channels this copy listens to. What
-   * it is asked while Redis is away is sent once it is back, and the
-   * channels it already held are taken up again.
-   */
-  subscriber: Redis;
-  close(): Promise<void>;
-}
-
 /** Logs a connection going down once, and coming back once, instead of every retry. */
-function reportHealth(client: Redis, name: string): void {
+function reportHealth(client: Redis, name: string) {
   let healthy = true;
   client.on('ready', () => {
     if (!healthy) logger.info({ redis: name }, 'redis connection restored');
@@ -43,7 +26,7 @@ function reportHealth(client: Redis, name: string): void {
 }
 
 /** Resolves once the client is connected, has failed to connect, or the wait is over. */
-async function readyOrGivenUp(client: Redis): Promise<void> {
+async function readyOrGivenUp(client: Redis) {
   if (client.status === 'ready') return;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(done, STARTUP_WAIT_MS);
@@ -63,7 +46,7 @@ async function readyOrGivenUp(client: Redis): Promise<void> {
  * Waits briefly for the connection, then returns either way: a backend
  * copy starts without Redis and uses it once it is reachable.
  */
-export async function connectRedis(url: string): Promise<RedisConnection> {
+export async function connectRedis(url: string) {
   const commands = new Redis(url, {
     commandTimeout: COMMAND_TIMEOUT_MS,
     enableOfflineQueue: false,

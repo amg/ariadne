@@ -1,4 +1,5 @@
-import { env } from '@config/env';
+import type { FireChannel, GateVerdict } from '@ari/lib/api/schemas/common/driftGate';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import type { ExpandOutcome } from '@db/types';
 import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
@@ -6,8 +7,8 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { type Result, ok } from '../../types/result';
 import { EMBEDDING_MODEL_ID } from '../aiService';
-import { DEFAULT_ANALYZE_OPTIONS, type GateVerdict } from './types';
-import type { JudgingParams } from './verdict';
+import type { JudgingParams } from './types';
+import { JUDGING_DEFAULTS } from './verdict';
 
 /**
  * The Analysis tab's data contract: a plain read of the thread's live
@@ -20,7 +21,7 @@ import type { JudgingParams } from './verdict';
  */
 
 /** One arrival as the Analysis tab reads it. */
-export interface LiveAnalysisPoint {
+interface LiveAnalysisPoint {
   messageId: string;
   /** The arrival's user-message text — the segment table's rows. */
   messageText: string;
@@ -35,7 +36,7 @@ export interface LiveAnalysisPoint {
    */
   segmentIndex: number;
   verdict: GateVerdict;
-  fireChannel: 'immediate' | 'slow' | null;
+  fireChannel: FireChannel | null;
   /** The composite reading judged; null on muted arrivals. */
   driftP: number | null;
   /** Baseline snapshot at judgment — BEFORE the arrival joined it. */
@@ -53,8 +54,8 @@ export interface LiveAnalysisPoint {
   /** The self-contained rewrite behind the reading, when one landed. */
   rewrittenText: string | null;
   /**
-   * The recorded end of the arrival's try at a rewrite. `accepted` renders
-   * the rewrite cell as today; any `failed_*` marks the cell so the tab can
+   * The recorded end of the arrival's try at a rewrite. `accepted` shows
+   * the rewrite; any `failed_*` marks the cell so the tab can
    * surface why the arrival fell back to its raw text; null means no rewrite
    * was attempted and the raw message stood on its own.
    */
@@ -62,7 +63,7 @@ export interface LiveAnalysisPoint {
 }
 
 /** One live-chain segment as the Analysis tab lists it. */
-export interface LiveAnalysisSegment {
+interface LiveAnalysisSegment {
   /** 1-based segment index in the live chain. */
   index: number;
   segmentId: string;
@@ -71,14 +72,14 @@ export interface LiveAnalysisSegment {
   /** Number of arrivals that landed in the segment's span (muted included). */
   arrivalCount: number;
   /** True when a fired arrival closed this segment. */
-  closedByChannel: 'immediate' | 'slow' | null;
+  closedByChannel: FireChannel | null;
   createdAt: string;
 }
 
 /** The thread's live reading: exactly what the store has persisted. */
-export interface LiveAnalysisView {
+interface LiveAnalysisView {
   threadId: string;
-  mode: 'off' | 'heuristic' | 'always';
+  mode: ThreadAnalysisMode;
   params: JudgingParams & { embeddingModelId: string };
   segments: LiveAnalysisSegment[];
   points: LiveAnalysisPoint[];
@@ -92,7 +93,7 @@ async function analyzeModeOffView(threadId: string): Promise<LiveAnalysisView> {
     threadId,
     mode: 'off',
     params: {
-      ...DEFAULT_ANALYZE_OPTIONS,
+      ...JUDGING_DEFAULTS,
       embeddingModelId: EMBEDDING_MODEL_ID,
     },
     segments: [],
@@ -107,12 +108,17 @@ async function analyzeModeOffView(threadId: string): Promise<LiveAnalysisView> {
  * surface (a failed pipeline, a pre-feature thread, a fresh `off` period)
  * left them unfilled.
  */
-export async function buildLiveAnalysisView(threadId: string): Promise<Result<LiveAnalysisView>> {
-  const mode = env.THREAD_ANALYSIS_MODE;
+export async function buildLiveAnalysisView({
+  threadId,
+  mode,
+}: {
+  threadId: string;
+  mode: ThreadAnalysisMode;
+}): Promise<Result<LiveAnalysisView>> {
   if (mode === 'off') return ok(await analyzeModeOffView(threadId));
 
   const params = {
-    ...DEFAULT_ANALYZE_OPTIONS,
+    ...JUDGING_DEFAULTS,
     embeddingModelId: EMBEDDING_MODEL_ID,
   };
 
@@ -213,7 +219,7 @@ export async function buildLiveAnalysisView(threadId: string): Promise<Result<Li
       segmentId: segment.id,
       startMessageId: segment.startMessageId,
       arrivalCount: arrivalCountBySegment.get(index + 1) ?? 0,
-      closedByChannel: next ? (nextLog?.fireChannel as 'immediate' | 'slow') : null,
+      closedByChannel: next ? (nextLog?.fireChannel ?? null) : null,
       createdAt: segment.createdAt.toISOString(),
     };
   });

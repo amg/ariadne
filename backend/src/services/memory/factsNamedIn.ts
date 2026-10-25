@@ -10,7 +10,7 @@ const POSSESSIVE_ENDING = /['’]s$/u;
  * The names a Fact sentence mentions, lowercased. The opening word is
  * capitalised only because it opens the sentence, so it does not count.
  */
-export function namesInFact(sentence: string): string[] {
+export function namesInFact(sentence: string) {
   const names: string[] = [];
   for (const match of sentence.matchAll(CAPITALISED_RUN)) {
     const words = match[0].split(/\s+/);
@@ -21,12 +21,12 @@ export function namesInFact(sentence: string): string[] {
   return names;
 }
 
-function escapedForRegExp(text: string): string {
+function escapedForRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** True when `name` sits in `text` as whole words, not inside a longer word. */
-function mentionsName(text: string, name: string): boolean {
+function mentionsName(text: string, name: string) {
   const words = name.split(' ').map(escapedForRegExp).join('\\s+');
   return new RegExp(`(?<![\\p{L}\\p{N}\\p{M}])${words}(?![\\p{L}\\p{N}\\p{M}])`, 'u').test(text);
 }
@@ -35,7 +35,7 @@ function mentionsName(text: string, name: string): boolean {
  * The Fact sentences that name someone or something the text mentions,
  * in the order given. Case does not matter on either side.
  */
-export function factsNamedIn(sentences: readonly string[], text: string): string[] {
+export function factsNamedIn(sentences: readonly string[], text: string) {
   const lowered = text.toLowerCase();
   return sentences.filter((sentence) =>
     namesInFact(sentence).some((name) => mentionsName(lowered, name)),

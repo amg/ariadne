@@ -42,6 +42,9 @@ services:
     environment:
       POSTGRESQL_CONNECTION_URI: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}"
       POSTGRESQL_TABLE_SCHEMA: auth
+      # Five minutes, so everyday use and every load run exercise session
+      # refresh. Production keeps the core's default.
+      ACCESS_TOKEN_VALIDITY: "300"
     networks:
       - chat-network-dev
     restart: unless-stopped

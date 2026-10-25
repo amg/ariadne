@@ -1,0 +1,37 @@
+{
+  "dialect": "postgres",
+  "envFile": "../.env",
+  "camelCase": true,
+  "includePattern": "+(chat|analysis|memory|billing).*",
+  "outFile": "./src/db/schema.generated.ts",
+  "typeMapping": {
+    "numeric": "string",
+    "timestamp": "Date",
+    "timestamptz": "Date"
+  },
+  "customImports": {
+    "MessageRole": "@ari/lib/api/schemas/messages/message#MessageRole",
+    "ExchangeStatus": "@ari/lib/api/schemas/messages/message#ExchangeStatus",
+    "FinishReason": "@ari/lib/api/schemas/messages/message#FinishReason",
+    "ExpandOutcome": "@ari/lib/api/schemas/threads/analysis#ExpandOutcome",
+    "GateVerdict": "@ari/lib/api/schemas/common/driftGate#GateVerdict",
+    "FireChannel": "@ari/lib/api/schemas/common/driftGate#FireChannel",
+    "FactCategory": "@ari/lib/api/schemas/settings/facts#FactCategory"
+  },
+  "overrides": {
+    "columns": {
+      "chat.messages.role": "MessageRole",
+      "chat.messages.exchange_status": "Generated<ExchangeStatus>",
+      "analysis.message_expansions.expand_outcome": "ExpandOutcome",
+      "analysis.segment_drift_logs.verdict": "GateVerdict",
+      "analysis.segment_drift_logs.fire_channel": "FireChannel | null",
+      "memory.user_facts.category": "FactCategory",
+      "memory.thread_seeds.lines": "{ category: FactCategory; text: string }[]",
+      "memory.user_settings.settings": "Generated<unknown>",
+      "billing.message_usage.finish_reason": "FinishReason",
+      "billing.message_side_costs.kind": "'rewrite' | 'judge' | 'fact_extraction' | 'fact_duplicate_check' | 'fact_embedding' | 'embedding'",
+      "billing.daily_spend.day": "ColumnType<Date, string, never>",
+      "billing.daily_spend.slot": "ColumnType<number, number | undefined, never>"
+    }
+  }
+}

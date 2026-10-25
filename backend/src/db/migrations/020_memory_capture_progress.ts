@@ -10,7 +10,7 @@ import { type Kysely, sql } from 'kysely';
  * so the first capture pass may re-read turns it read before (the
  * duplicate check keeps them from landing twice).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .createTable('memory_capture_progress')
     .addColumn('segment_id', 'uuid', (col) => col.primaryKey())
@@ -25,7 +25,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema.alterTable('thread_segments').dropColumn('facts_captured_at').execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.dropTable('memory_capture_progress').execute();
   await db.schema
     .alterTable('thread_segments')

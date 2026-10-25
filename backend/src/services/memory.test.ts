@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
-import type { FactCategory, Message } from '@db/types';
+import type { FactCategory } from '@db/types';
 import { captureProgressOf } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
@@ -63,11 +63,7 @@ async function createUserAndThread(): Promise<{ userId: string; threadId: string
   return { userId, threadId: thread.id };
 }
 
-async function addTurn(
-  threadId: string,
-  userText: string,
-  assistantText = 'Noted.',
-): Promise<{ user: Message; assistant: Message }> {
+async function addTurn(threadId: string, userText: string, assistantText = 'Noted.') {
   const user = await insertMessage({ threadId, role: 'user', content: userText });
   const assistant = await insertMessage({ threadId, role: 'assistant', content: assistantText });
   return { user, assistant };
@@ -120,7 +116,7 @@ async function threadWithClosedSegment(turnTexts: string[]) {
   return { userId, threadId, turns, boundary, segmentId: segment.id, secondSegmentId: second.id };
 }
 
-async function capturedThrough(segmentId: string): Promise<Date | null> {
+async function capturedThrough(segmentId: string) {
   return captureProgressOf(segmentId);
 }
 
@@ -200,6 +196,31 @@ describe('readFacts', () => {
     expect(await factsOf(userId)).toEqual([]);
     const costs = await costsOf(second.user.id);
     expect(costs.map((cost) => cost.kind)).toEqual(['fact_embedding', 'fact_extraction']);
+  });
+
+  it('attributes facts strictly to user messages and ignores statements in assistant replies', async () => {
+    const { userId, threadId } = await createUserAndThread();
+    const turn = await addTurn(
+      threadId,
+      'I love reading books',
+      'I love playing chess and I work as a doctor.',
+    );
+
+    const read = await readFacts({
+      userId,
+      turns: [{ userMessage: turn.user, assistantReply: turn.assistant }],
+      blockedCategories: [],
+      spendMessageId: turn.user.id,
+      capturedThroughAt: null,
+    });
+
+    const facts = readOutcome(read);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      content: 'The user loves reading books.',
+      sourceMessageId: turn.user.id,
+    });
+    expect(facts[0]?.sourceMessageId).not.toBe(turn.assistant.id);
   });
 
   it('replaces a Fact said again, keeping its suppression, without a duplicate check', async () => {
@@ -929,7 +950,7 @@ describe('Seed', () => {
     await insertUserIfNotExists({ id: userId });
     await storeFact(userId, 'The user loves jazz.');
 
-    const unseeded = await createThread({ userId, memory: memoryOff });
+    await createThread({ userId, memory: memoryOff });
     const seeded = await createThread({ userId, memory: memoryOn });
 
     const seeds = await db.selectFrom('memory.threadSeeds').select('threadId').execute();

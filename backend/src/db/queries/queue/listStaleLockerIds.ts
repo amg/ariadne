@@ -10,7 +10,7 @@ export async function listStaleLockerIds({
   olderThanSeconds,
 }: {
   olderThanSeconds: number;
-}): Promise<string[]> {
+}) {
   const rows = await db
     .selectFrom('queues.jobs')
     .select('lockedBy')

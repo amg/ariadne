@@ -1,37 +1,22 @@
 import { db } from '@db/db';
-import type { DbExecutor, Message } from '@db/types';
+import { tagQuery } from '@db/queryTag';
+import type { DbExecutor } from '@db/types';
 
 type ListMessagesByThreadProps = {
   threadId: string;
 };
 
 /**
- * A `chat.messages` row flattened with its optional chat-spend columns. All
- * `usage*` fields are null when the message has no usage row yet (user
- * messages, in-flight assistant messages). The CamelCasePlugin maps
- * `usageModel` → `usage_model` etc. in SQL and maps the result row back
- * to camelCase.
+ * A thread's messages, oldest first, each flattened with its optional chat-spend
+ * columns. All `usage*` fields are null when the message has no usage row yet
+ * (user messages, in-flight assistant messages).
  */
-export type MessageWithUsageRow = Message & {
-  usageModel: string | null;
-  usageProviderId: string | null;
-  usagePromptTokens: number | null;
-  usageCompletionTokens: number | null;
-  usageCachedInputTokens: number | null;
-  usageCacheWriteTokens: number | null;
-  usageReasoningTokens: number | null;
-  usageEstimatedReasoningTokens: number | null;
-  usageCostUsd: string | null;
-  usageFinishReason: string | null;
-  usageLatencyMs: number | null;
-  usageEstimated: boolean | null;
-};
-
 export async function listMessagesByThread(
   { threadId }: ListMessagesByThreadProps,
   executor: DbExecutor = db,
-): Promise<MessageWithUsageRow[]> {
+) {
   return executor
+    .withPlugin(tagQuery('messages/listMessagesByThread'))
     .selectFrom('chat.messages')
     .leftJoin('billing.messageUsage', 'billing.messageUsage.messageId', 'chat.messages.id')
     .selectAll('chat.messages')

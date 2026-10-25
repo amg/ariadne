@@ -14,10 +14,7 @@ import {
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { enqueueThreadGenerateTitle } from '@queue/tasks/threadGenerateTitleTask';
 import {
-  type ChatStreamHandle,
   EMBEDDING_MODEL_ID,
-  type EmbedTextData,
-  type RetryChoice,
   computeCostUsd,
   embedText,
   isDriftPause,
@@ -26,6 +23,7 @@ import {
 } from '@services/aiService';
 import { editMessage } from '@services/messageService';
 import { getModelConfig } from '@services/modelConfigService';
+import { useAppRecordCapture } from '@test/appRecords';
 import { memoryOn } from '@test/memory';
 import { useTestQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
@@ -35,10 +33,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   MOCK_CACHE,
   MOCK_EMBEDDINGS,
+  MOCK_REASONING_PARTS,
   type MockInferenceServer,
   buildMockEmbedding,
   startMockInferenceServer,
 } from '../../mock/inferenceServer';
+import { metricFieldsOf } from '../appRecords/metrics';
+import type { ChatStreamHandle, RetryChoice } from '../types/aiService';
+import { countTextTokens } from './aiService/usageMap';
 
 /**
  * e2e against the built-in mock inference server (documented deviation:
@@ -101,21 +103,9 @@ async function readEstimatedSpend(messageId: string) {
   return usage;
 }
 
-async function drain(handle: ChatStreamHandle): Promise<void> {
+async function drain(handle: ChatStreamHandle) {
   for await (const _message of readUIMessageStream({ stream: handle.stream })) {
     // Consuming the stream lets the exchange settle its persistence.
-  }
-}
-
-/** The abandon flag lands in an async outcome hook; wait for it. */
-async function waitForAbandonedUserRow(threadId: string): Promise<string> {
-  const deadline = Date.now() + 2000;
-  for (;;) {
-    const rows = await listMessagesByThread({ threadId });
-    const userRow = rows.find((row) => row.role === 'user' && row.abandoned);
-    if (userRow) return userRow.id;
-    if (Date.now() > deadline) throw new Error('the arrival was never abandoned');
-    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
@@ -149,17 +139,30 @@ async function assertSuccess(
 // Single lifecycle hook for the whole file: useTestDb() destroys the pool in
 // its afterAll, so a per-describe call would kill the DB before later suites.
 useTestDb();
-useTestQueue({ memory: memoryOn });
+useTestQueue({ memory: memoryOn, threadAnalysisMode: 'heuristic' });
 
 const judging = { enqueueDriftGateJudgeArrival, findDriftGateJudgeArrivalJobOrNull };
 const titling = { enqueueThreadGenerateTitle };
 
 function submit(props: { userId: string; threadId: string; content: string }) {
-  return submitChat({ ...props, judging, titling, memory: memoryOn });
+  return submitChat({
+    ...props,
+    judging,
+    titling,
+    memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
+  });
 }
 
 function retryExchange(props: { userId: string; threadId: string }, choice: RetryChoice = 'retry') {
-  return retryLastExchange({ ...props, choice, judging, titling, memory: memoryOn });
+  return retryLastExchange({
+    ...props,
+    choice,
+    judging,
+    titling,
+    memory: memoryOn,
+    threadAnalysisMode: 'heuristic',
+  });
 }
 
 describe('submitChat', () => {
@@ -261,6 +264,19 @@ describe('submitChat', () => {
   it('turns the thinking phase off when reasoning is disabled', async () => {
     const request = await chatRequestWithReasoning('false');
     expect(request?.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it('estimates reasoning tokens from the streamed reasoning text', async () => {
+    const { userId, threadId } = await createRandomThread();
+
+    const handle = await assertSuccess(
+      await submit({ userId, threadId, content: 'THINK: why is the sky blue?' }),
+    );
+    await drain(handle);
+    await handle.outcome;
+
+    const usage = await getMessageUsageByMessageId({ messageId: handle.assistantMessageId });
+    expect(usage?.estimatedReasoningTokens).toBe(countTextTokens(MOCK_REASONING_PARTS.join('')));
   });
 
   it('persists partial text with finish state "interrupted" when stopped early', async () => {
@@ -591,6 +607,10 @@ describe('exchange in-flight guard', () => {
       expect(rows[1]?.abandoned).toBe(true);
       expect(rows[2]?.exchangeStatus).toBe('completed');
       expect(rows.some((row) => row.id === orphan.id)).toBe(true);
+      // The crashed exchange still accounts its spend, as an estimate.
+      const orphanUsage = await getMessageUsageByMessageId({ messageId: orphan.id });
+      expect(orphanUsage?.estimated).toBe(true);
+      expect(orphanUsage?.finishReason).toBe('interrupted');
     } finally {
       setStalenessMs(savedStalenessMs);
     }
@@ -751,7 +771,7 @@ describe('daily spend budget', () => {
 });
 
 describe('embedText', () => {
-  function assertEmbedSuccess(result: Awaited<ReturnType<typeof embedText>>): EmbedTextData {
+  function assertEmbedSuccess(result: Awaited<ReturnType<typeof embedText>>) {
     expect(result.type).toBe('success');
     if (result.type !== 'success') throw new Error('expected success');
     return result.data;
@@ -786,5 +806,105 @@ describe('computeCostUsd', () => {
 
   it('returns 0 when pricing is unknown (null)', () => {
     expect(computeCostUsd({ pricing: null, promptTokens: 10, completionTokens: 10 })).toBe(0);
+  });
+});
+
+describe('the Exchange record', () => {
+  const capture = useAppRecordCapture();
+
+  /** The record is written as the outcome settles, ahead of anything awaiting that outcome. */
+  const exchangeRecords = async () => capture.written('exchange');
+
+  it('says when the request arrived, what the gate answered, when the first token streamed and how it ended', async () => {
+    const { userId, threadId } = await createRandomThread();
+
+    const handle = await assertSuccess(
+      await submit({ userId, threadId, content: 'Private words about my day' }),
+    );
+    await drain(handle);
+    await handle.outcome;
+
+    const lines = await exchangeRecords();
+    expect(lines).toHaveLength(1);
+    const [line] = lines;
+    expect(line).toMatchObject({
+      userId,
+      trigger: 'submit',
+      outcome: 'completed',
+      errorCode: null,
+      assistantMessageId: handle.assistantMessageId,
+    });
+    expect(['muted', 'pass', 'off']).toContain(line?.verdict);
+    expect(line?.verdictAfterMs).not.toBeNull();
+    expect(line?.firstTokenAfterMs).toBeGreaterThanOrEqual(line?.verdictAfterMs ?? Number.NaN);
+    expect(line?.endedAfterMs).toBeGreaterThanOrEqual(line?.firstTokenAfterMs ?? Number.NaN);
+    expect(JSON.stringify(lines)).not.toContain('Private words');
+    expect(JSON.stringify(lines)).not.toContain('Mock reply');
+  });
+
+  it('records a reply the user stopped as interrupted', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const handle = await assertSuccess(
+      await submit({ userId, threadId, content: 'hold still PAUSE:20000' }),
+    );
+    const reader = handle.stream.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done || value?.type === 'text-delta') break;
+    }
+
+    handle.abort();
+    await handle.outcome;
+
+    expect(await exchangeRecords()).toMatchObject([
+      { outcome: 'interrupted', assistantMessageId: handle.assistantMessageId },
+    ]);
+  });
+
+  it('records a request refused before anything started, with its code', async () => {
+    const { userId } = await createRandomThread();
+
+    await submit({ userId, threadId: randomUUID(), content: 'hi' });
+
+    expect(await exchangeRecords()).toMatchObject([
+      { userId, outcome: 'refused', errorCode: 'thread_not_found', firstTokenAfterMs: null },
+    ]);
+  });
+
+  it('records a retry as a retry, with the verdict the arrival already had', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const first = await assertSuccess(await submit({ userId, threadId, content: 'retry me' }));
+    await drain(first);
+    await first.outcome;
+    const firstVerdict = (await exchangeRecords())[0]?.verdict;
+
+    const retry = await assertSuccess(await retryExchange({ userId, threadId }));
+    await drain(retry);
+    await retry.outcome;
+
+    const lines = await exchangeRecords();
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({
+      trigger: 'retry',
+      outcome: 'completed',
+      assistantMessageId: retry.assistantMessageId,
+    });
+    expect(lines[1]?.verdict).toBe(firstVerdict);
+  });
+
+  it('publishes the verdict once, though a retry replays it', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const first = await assertSuccess(await submit({ userId, threadId, content: 'count me once' }));
+    await drain(first);
+    await first.outcome;
+    const retry = await assertSuccess(await retryExchange({ userId, threadId }));
+    await drain(retry);
+    await retry.outcome;
+
+    const lines = await exchangeRecords();
+    const published = lines.map((line) => metricFieldsOf(line, new Date()).GateVerdicts ?? 0);
+
+    expect(lines.map((line) => line.verdictReplayed)).toEqual([false, true]);
+    expect(published).toEqual([1, 0]);
   });
 });

@@ -74,8 +74,8 @@ beforeAll(async () => {
   mock = await startMockInferenceServer();
   provider = await startHookedProvider(mock.baseUrl.replace(/\/v1$/, ''));
   app = Fastify({ logger: false });
-  await setupMemoryFactsPatchRoute(app);
-  await setupMemoryFactsDeleteRoute(app);
+  setupMemoryFactsPatchRoute(app);
+  setupMemoryFactsDeleteRoute(app);
   await app.ready();
 });
 

@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { TurnFold } from '@db/types';
 
 type FindTurnFoldOrNullProps = {
   /** The Turn's assistant Message. */
@@ -14,10 +13,7 @@ type FindTurnFoldOrNullProps = {
  * Null when the Turn has no fold: a lagging fold task, or a Turn the
  * keep-two rule already retired.
  */
-export async function findTurnFoldOrNull({
-  messageId,
-  modelId,
-}: FindTurnFoldOrNullProps): Promise<TurnFold | null> {
+export async function findTurnFoldOrNull({ messageId, modelId }: FindTurnFoldOrNullProps) {
   const row = await db
     .selectFrom('analysis.turnFolds')
     .selectAll()

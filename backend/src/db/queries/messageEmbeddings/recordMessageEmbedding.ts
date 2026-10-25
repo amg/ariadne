@@ -1,10 +1,11 @@
 import { db } from '@db/db';
-import type { MessageEmbedding, NewMessageEmbedding } from '@db/types';
+import { tagQuery } from '@db/queryTag';
+import type { NewMessageEmbedding } from '@db/types';
 import { addSideCost } from '@queries/messageSideCosts/addSideCost';
 import { sql } from 'kysely';
 import { toMessageEmbedding, toVectorText } from './embeddingMapping';
 
-export interface RecordMessageEmbeddingProps extends NewMessageEmbedding {
+interface RecordMessageEmbeddingProps extends NewMessageEmbedding {
   /**
    * This call's spend in USD. Recorded whatever the row's fate — a pass
    * that pays for an embedding another pass stored first still counts —
@@ -24,10 +25,9 @@ export interface RecordMessageEmbeddingProps extends NewMessageEmbedding {
  * and a model switch starts its own row instead of overwriting. Returns
  * the stored row, whichever pass wrote it.
  */
-export async function recordMessageEmbedding(
-  props: RecordMessageEmbeddingProps,
-): Promise<MessageEmbedding> {
+export async function recordMessageEmbedding(props: RecordMessageEmbeddingProps) {
   const inserted = await db
+    .withPlugin(tagQuery('messageEmbeddings/recordMessageEmbedding'))
     .insertInto('analysis.messageEmbeddings')
     .values({
       messageId: props.messageId,

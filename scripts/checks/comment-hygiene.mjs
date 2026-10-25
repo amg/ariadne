@@ -29,11 +29,15 @@ const SCAN_DIRS = [
   'backend/smoke',
   'backend/test',
   'frontend/src',
+  'lib/api',
+  'lib/metrics',
   'scripts/checks',
 ].map((d) => join(ROOT, d));
 
 const isScannable = (path) =>
-  /\.(tsx?|mjs)$/.test(path) && SCAN_DIRS.some((d) => path.startsWith(`${d}/`));
+  /\.(tsx?|mjs)$/.test(path) &&
+  !path.endsWith('.generated.ts') &&
+  SCAN_DIRS.some((d) => path.startsWith(`${d}/`));
 
 /**
  * The gross classes. A pattern fires only when designed to: word-boundary

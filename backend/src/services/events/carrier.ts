@@ -1,12 +1,16 @@
-import type { ServerEvent } from './serverEvent';
+import { z } from 'zod';
+import { serverEventSchema } from '../../types/events';
 
 /** What crosses from one backend copy to the others, always about one user. */
-export type CarriedMessage =
-  | { kind: 'event'; event: ServerEvent }
-  | { kind: 'stop'; userId: string; threadId: string };
+export const carriedMessageSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('event'), event: serverEventSchema }),
+  z.object({ kind: z.literal('stop'), userId: z.string(), threadId: z.string() }),
+]);
+
+export type CarriedMessage = z.infer<typeof carriedMessageSchema>;
 
 /** The user a carried message is about. */
-export function userOfMessage(message: CarriedMessage): string {
+export function userOfMessage(message: CarriedMessage) {
   return message.kind === 'event' ? message.event.userId : message.userId;
 }
 

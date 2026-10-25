@@ -9,9 +9,7 @@ type DeleteMessageProps = {
  * matched. The 1:1 `message_usage` row cascades via the FK, so callers never
  * have to clean up telemetry themselves.
  */
-export async function deleteMessage({
-  messageId,
-}: DeleteMessageProps): Promise<string | undefined> {
+export async function deleteMessage({ messageId }: DeleteMessageProps) {
   const row = await db
     .deleteFrom('chat.messages')
     .where('id', '=', messageId)

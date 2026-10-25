@@ -27,7 +27,7 @@ import { type Kysely, sql } from 'kysely';
  * builder DDL/DML; the rest is builder too.
  */
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<any>) {
   // 1. The criterion each verdict was judged against.
   await db.schema
     .withSchema('analysis')
@@ -125,7 +125,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down(db: Kysely<any>) {
   await db.schema.withSchema('analysis').dropIndex('turn_folds_segment_id_idx').execute();
   await db.schema
     .withSchema('analysis')

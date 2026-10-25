@@ -5,7 +5,7 @@ import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listThreadSegmentsByThread } from './listThreadSegmentsByThread';
 
 /** A segment that owes a Fact capture, and where that capture should stop. */
-export interface SegmentNeedingCapture {
+interface SegmentNeedingCapture {
   segmentId: string;
   /** First user Message of the segment. */
   startMessageId: string;
@@ -18,15 +18,15 @@ export interface SegmentNeedingCapture {
    * up to it (not including it) and records its `created_at` as the
    * segment's `captured_through_at` pointer.
    */
-  anchorMessageId: string;
-  anchorAt: Date;
+  settleMessageId: string;
+  settleMessageAt: Date;
 }
 
-type AnchoredRows = { messageId: string; at: Date };
+type SettleCandidate = { messageId: string; at: Date };
 
 interface ThreadChain {
   segments: ThreadSegment[];
-  firesBySegment: Map<string, AnchoredRows[]>;
+  firesBySegment: Map<string, SettleCandidate[]>;
   messageById: Map<string, Message>;
   /** `captured_through_at` per segment that has been captured before. */
   pointerBySegment: Map<string, Date>;
@@ -39,7 +39,7 @@ type ListProps = {
 };
 
 /** The live fires judged into each segment of the chain. */
-async function firesBySegmentOf(segmentIds: string[]): Promise<Map<string, AnchoredRows[]>> {
+async function firesBySegmentOf(segmentIds: string[]) {
   const rows = await db
     .selectFrom('analysis.segmentDriftLogs as l')
     .innerJoin('chat.messages as m', 'm.id', 'l.messageId')
@@ -48,7 +48,7 @@ async function firesBySegmentOf(segmentIds: string[]): Promise<Map<string, Ancho
     .where('m.abandoned', '=', false)
     .select(['l.segmentId', 'm.id as messageId', 'm.createdAt as at'])
     .execute();
-  const map = new Map<string, AnchoredRows[]>();
+  const map = new Map<string, SettleCandidate[]>();
   for (const row of rows) {
     const fires = map.get(row.segmentId) ?? [];
     fires.push({ messageId: row.messageId, at: row.at });
@@ -63,17 +63,21 @@ async function firesBySegmentOf(segmentIds: string[]): Promise<Map<string, Ancho
  * fire still counts through its cut, because the cut itself is the proof
  * the segment is over. Null while the segment is still drawing turns.
  */
-function anchorOrNull(
-  segment: ThreadSegment,
-  successor: ThreadSegment | null,
-  chain: ThreadChain,
-): AnchoredRows | null {
-  const candidates: AnchoredRows[] = [...(chain.firesBySegment.get(segment.id) ?? [])];
+function settleRowOf({
+  segment,
+  successor,
+  chain,
+}: {
+  segment: ThreadSegment;
+  successor: ThreadSegment | null;
+  chain: ThreadChain;
+}) {
+  const candidates: SettleCandidate[] = [...(chain.firesBySegment.get(segment.id) ?? [])];
   if (successor) {
     const opener = chain.messageById.get(successor.startMessageId);
     if (opener) candidates.push({ messageId: opener.id, at: opener.createdAt });
   }
-  const latest = candidates.reduce<AnchoredRows | null>(
+  const latest = candidates.reduce<SettleCandidate | null>(
     (top, row) => (top === null || row.at.getTime() > top.at.getTime() ? row : top),
     null,
   );
@@ -84,14 +88,11 @@ function anchorOrNull(
 
 /**
  * The thread's segments whose Fact capture is still owed, oldest first. A
- * segment owes one once it is settled (see `anchorOrNull`) and its settle
+ * segment owes one once it is settled (see `settleRowOf`) and its settle
  * row sits past the pointer Memory keeps for it; later turns reopen the
  * owing through the next settle row, and only they get read.
  */
-export async function listSegmentsNeedingCapture({
-  threadId,
-  modelId,
-}: ListProps): Promise<SegmentNeedingCapture[]> {
+export async function listSegmentsNeedingCapture({ threadId, modelId }: ListProps) {
   const segments = await listThreadSegmentsByThread({ threadId, modelId });
   if (segments.length === 0) return [];
 
@@ -108,14 +109,14 @@ export async function listSegmentsNeedingCapture({
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i];
     if (!segment) break;
-    const anchor = anchorOrNull(segment, segments[i + 1] ?? null, chain);
-    if (!anchor) continue;
+    const settle = settleRowOf({ segment, successor: segments[i + 1] ?? null, chain });
+    if (!settle) continue;
     results.push({
       segmentId: segment.id,
       startMessageId: segment.startMessageId,
       capturedThroughAt: chain.pointerBySegment.get(segment.id) ?? null,
-      anchorMessageId: anchor.messageId,
-      anchorAt: anchor.at,
+      settleMessageId: settle.messageId,
+      settleMessageAt: settle.at,
     });
   }
   return results;

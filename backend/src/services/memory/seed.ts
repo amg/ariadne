@@ -1,23 +1,22 @@
 import type { SeedLine } from '@db/types';
-import { findThreadSeedByThreadIdOrNull } from '@queries/threadSeeds/findThreadSeedByThreadId';
+import { findThreadSeedByThreadId } from '@queries/threadSeeds/findThreadSeedByThreadId';
 import { insertThreadSeed } from '@queries/threadSeeds/insertThreadSeed';
-import {
-  type SeedableUserFact,
-  listSeedableUserFacts,
-} from '@queries/userFacts/listSeedableUserFacts';
+import { listSeedableUserFacts } from '@queries/userFacts/listSeedableUserFacts';
 import { countTextTokens } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
-import type { MemoryFeature } from './memoryFeature';
+import type { MemoryFeature } from '../../types/memory';
+
+type SeedableUserFact = Awaited<ReturnType<typeof listSeedableUserFacts>>[number];
 
 /** The most prompt tokens a Seed's memory block may take. */
-export const SEED_TOKEN_BUDGET = 800;
+const SEED_TOKEN_BUDGET = 800;
 /** Facts read per snapshot; well past what the budget can hold. */
 const SEED_CANDIDATE_LIMIT = 200;
 
 const SEED_HEADER =
   'What you know about the user from earlier conversations, newest first. A date before a fact is when it became true, or when it was noted if no such date is known; when two facts disagree, the newer one wins. The list may be incomplete. Use these facts when they help, without mentioning that you remember them.';
 
-export interface RenderedSeed {
+interface RenderedSeed {
   lines: SeedLine[];
   factCount: number;
 }
@@ -34,7 +33,7 @@ export const EMPTY_SEED: RenderedSeed = { lines: [], factCount: 0 };
 export function renderedSeedOrNull(
   facts: SeedableUserFact[],
   tokenBudget: number = SEED_TOKEN_BUDGET,
-): RenderedSeed | null {
+) {
   const lines: SeedLine[] = [];
   let tokens = countTextTokens(SEED_HEADER);
   for (const fact of facts) {
@@ -53,7 +52,7 @@ export function renderedSeedOrNull(
  * The Seed a Thread opened now would freeze: what the Memory knows about
  * the user, rendered. Empty while memory is off or holds nothing seedable.
  */
-export async function currentSeed({ userId }: { userId: string }): Promise<RenderedSeed> {
+export async function currentSeed({ userId }: { userId: string }) {
   const settings = await getUserSettings({ userId });
   const facts = settings.memoryEnabled
     ? await listSeedableUserFacts({
@@ -76,7 +75,7 @@ export async function seedThread({
 }: {
   userId: string;
   threadId: string;
-}): Promise<void> {
+}) {
   const seed = await currentSeed({ userId });
   if (seed.factCount === 0) return;
   await insertThreadSeed({ threadId, ...seed, handoverMessageId: null });
@@ -98,9 +97,9 @@ export async function assembledSystemPrompt({
   threadId: string;
   basePrompt: string;
   memory: MemoryFeature;
-}): Promise<string> {
+}) {
   if (memory.kind === 'off') return basePrompt;
-  const seed = await findThreadSeedByThreadIdOrNull({ threadId });
+  const seed = await findThreadSeedByThreadId({ threadId });
   if (seed === null || seed.lines.length === 0) return basePrompt;
   const settings = await getUserSettings({ userId });
   if (!settings.memoryEnabled) return basePrompt;

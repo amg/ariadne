@@ -13,7 +13,7 @@ import { type Kysely, sql } from 'kysely';
  * - The `fact_dedupe` cost kind is renamed `fact_duplicate_check`, which
  *   needs a wider `kind` column.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('thread_seeds')
     .addColumn('lines', 'jsonb', (col) => col.notNull().defaultTo(sql`'[]'::jsonb`))
@@ -72,7 +72,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await sql`
     alter table message_expansion_costs
       drop constraint message_expansion_costs_kind_check

@@ -2,17 +2,15 @@ import { env } from '@config/env';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
-import {
-  type MovedArrival,
-  moveArrivalToFreshThreadOrNull,
-} from '@queries/threads/moveArrivalToFreshThread';
+import { moveArrivalToFreshThread } from '@queries/threads/moveArrivalToFreshThread';
 import { EMBEDDING_MODEL_ID, pausedArrivalOrNull } from '@services/aiService';
 import { subscribe } from '@services/events';
-import { EMPTY_SEED, type MemoryFeature, currentSeed } from '@services/memory';
-import { type Result, err, ok } from '../types/result';
+import { EMPTY_SEED, currentSeed } from '@services/memory';
+import type { MemoryFeature } from '../types/memory';
+import { err, ok } from '../types/result';
 
 /** Waits for the work, or for the time limit; true when the work came first. */
-async function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+async function settledWithin(work: Promise<unknown>, ms: number) {
   let timer: NodeJS.Timeout | undefined;
   const limit = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), ms);
@@ -40,7 +38,7 @@ type Arrival = { userId: string; threadId: string; messageId: string };
 async function closedSegmentCaptureSettled(
   memory: Extract<MemoryFeature, { kind: 'on' }>,
   { userId, threadId, messageId }: Arrival,
-): Promise<boolean> {
+) {
   const logged = await findSegmentDriftLogByMessageId({ messageId, modelId: EMBEDDING_MODEL_ID });
   if (!logged) return true;
   const { segmentId } = logged;
@@ -87,7 +85,7 @@ export async function handOverArrival({
   threadId,
   messageId,
   memory,
-}: HandOverArrivalProps): Promise<Result<MovedArrival>> {
+}: HandOverArrivalProps) {
   const thread = await findThreadByIdAndUser({ userId, threadId });
   if (!thread) return err('thread_not_found');
 
@@ -102,7 +100,7 @@ export async function handOverArrival({
   ) {
     return err('capture_pending', 'Still saving what this chat taught. Try again shortly.');
   }
-  const moved = await moveArrivalToFreshThreadOrNull({
+  const moved = await moveArrivalToFreshThread({
     userId,
     fromThreadId: threadId,
     messageId,

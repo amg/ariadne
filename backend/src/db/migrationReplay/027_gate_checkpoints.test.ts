@@ -46,7 +46,7 @@ const VECTOR = `[${Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 :
 let scratch: Pool;
 
 /** Runs the tracked migrations on the scratch database up to `target`. */
-async function migrateTo(target: string | undefined): Promise<void> {
+async function migrateTo(target: string | undefined) {
   const db = createDbFromPool(scratch);
   const migrator = new Migrator({
     db,
@@ -62,7 +62,7 @@ async function migrateTo(target: string | undefined): Promise<void> {
 }
 
 /** The exact column list of a table's primary key, in key order. */
-async function primaryKeyColumns(table: string): Promise<string[]> {
+async function primaryKeyColumns(table: string) {
   const { rows } = await scratch.query(
     `select a.attname
        from pg_index i
@@ -77,7 +77,7 @@ async function primaryKeyColumns(table: string): Promise<string[]> {
 }
 
 /** Column names of an analysis table, alphabetically. */
-async function analysisColumns(table: string): Promise<string[]> {
+async function analysisColumns(table: string) {
   const { rows } = await scratch.query(
     `select column_name from information_schema.columns
       where table_schema = 'analysis' and table_name = $1
@@ -105,7 +105,7 @@ const ID = {
  * muted, two warm baselines (one under the σ floor, one above), one
  * cold-start — plus the reply embedding a Turn fold would key on.
  */
-async function seedPreviousShape(): Promise<void> {
+async function seedPreviousShape() {
   await scratch.query('insert into chat.users (id) values ($1)', [ID.user]);
   await scratch.query(
     "insert into chat.threads (id, user_id, title) values ($1, $2, 'gate checkpoints')",

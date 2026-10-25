@@ -1,7 +1,8 @@
 import { db } from '@db/db';
-import { type JobErrorClass, jobErrorClassOrNull } from './jobError';
+import type { JobErrorClass } from '@db/types';
+import { jobErrorClassOrNull } from './jobError';
 
-export interface DeadJob {
+interface DeadJob {
   id: string;
   task: string;
   key: string | null;

@@ -3,35 +3,32 @@ import type { NewModelConfig } from '@db/types';
 import { findModelConfigByModelId } from '@queries/modelConfigs/findModelConfigByModelId';
 import { getLatestModelConfigRefresh } from '@queries/modelConfigs/getLatestModelConfigRefresh';
 import { saveModelConfig } from '@queries/modelConfigs/saveModelConfig';
+import { z } from 'zod';
 
-/** Model config from DeepInfra API (external wire format — snake_case). */
-interface DeepInfraModel {
-  _id: string;
-  name?: string;
-  model_name?: string;
-  organization?: string;
-  description?: string;
-  context_length?: number;
-  pricing?: {
-    prompt?: string;
-    completion?: string;
-    image?: string;
-    cents_per_input_token?: number;
-    cents_per_output_token?: number;
-    rate_per_input_token_cached?: number;
-  };
-  modality?: {
-    text?: boolean;
-    image?: boolean;
-  };
-  capabilities?: {
-    chat_completion?: boolean;
-    caching?: boolean;
-  };
-}
+/**
+ * The fields read from one model of DeepInfra's list (snake_case, as the
+ * provider writes them). A model may omit any of them or send null, so every
+ * field is optional.
+ */
+const deepInfraModelSchema = z.object({
+  _id: z.string().nullish(),
+  name: z.string().nullish(),
+  model_name: z.string().nullish(),
+  context_length: z.number().nullish(),
+  pricing: z
+    .object({
+      cents_per_input_token: z.number().nullish(),
+      cents_per_output_token: z.number().nullish(),
+      rate_per_input_token_cached: z.number().nullish(),
+    })
+    .nullish(),
+  capabilities: z.object({ caching: z.boolean().nullish() }).nullish(),
+});
+
+type DeepInfraModel = z.infer<typeof deepInfraModelSchema>;
 
 /** Our model config row. */
-export interface ModelConfigRow {
+interface ModelConfigRow {
   modelId: string;
   provider: string;
   contextWindow: number | null;
@@ -77,7 +74,7 @@ const REFRESH_COOLDOWN_MS = 60 * 1000; // 1 minute
  * servers and users. Returns 0 if a refresh is allowed now (including
  * when no configs have been loaded yet).
  */
-export async function getTimeUntilNextRefresh(): Promise<number> {
+export async function getTimeUntilNextRefresh() {
   const latest = await getLatestModelConfigRefresh();
 
   const last = latest ? latest.getTime() : Number.NaN;
@@ -88,9 +85,11 @@ export async function getTimeUntilNextRefresh(): Promise<number> {
 
 /**
  * Fetches model list from DeepInfra API.
- * Returns parsed models or null if fetch fails.
+ * Returns the models it can read, or null when the fetch fails or the answer
+ * is not a list. A model that does not fit the schema is skipped, so one odd
+ * entry never costs the rest.
  */
-async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
+async function fetchDeepInfraModels() {
   try {
     const res = await fetch('https://api.deepinfra.com/models/list', {
       method: 'GET',
@@ -104,8 +103,21 @@ async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
       return null;
     }
 
-    const data = await res.json();
-    return data as DeepInfraModel[];
+    const data: unknown = await res.json();
+    if (!Array.isArray(data)) {
+      console.error('DeepInfra API error: the model list is not a list');
+      return null;
+    }
+    const models = data.flatMap((entry) => {
+      const model = deepInfraModelSchema.safeParse(entry);
+      return model.success ? [model.data] : [];
+    });
+    if (models.length < data.length) {
+      console.error(
+        `DeepInfra model list: skipped ${data.length - models.length} unreadable entries`,
+      );
+    }
+    return models;
   } catch (error) {
     console.error('Failed to fetch DeepInfra models:', error);
     return null;
@@ -119,7 +131,7 @@ async function fetchDeepInfraModels(): Promise<DeepInfraModel[] | null> {
  * - cents_per_output_token: price per token in cents
  * - rate_per_input_token_cached: multiplier (e.g., 0.5 = 50% of input price)
  */
-function parseDeepInfraModel(model: DeepInfraModel): ModelConfigRow | null {
+function parseDeepInfraModel(model: DeepInfraModel) {
   // DeepInfra's /models/list returns some objects that lack model_name or id,
   // or use `model_name` instead of `name`. We need to handle this robustly.
   const modelId = model.name ?? model.model_name ?? model._id;
@@ -201,18 +213,11 @@ export async function refreshModelConfigs(): Promise<{
     updated++;
   }
 
-  // No in-memory rate-limit update: refreshed rows' last_updated already
-  // advance the DB cooldown marker read by getTimeUntilNextRefresh().
-
   return { success: true, modelsUpdated: updated };
 }
 
-/**
- * The pricing tier every unknown model falls back to. Exported so the
- * analyzer's call-specific costs (threadAnalysis/cost.ts) can share the
- * central fallback instead of keeping a private pricing table.
- */
-export function getFallbackPricing(): { inputPerMillionUsd: number; outputPerMillionUsd: number } {
+/** The pricing tier every unknown model falls back to. */
+export function getFallbackPricing() {
   return {
     inputPerMillionUsd: FALLBACK_CONFIG.inputPricePerMillion ?? 0,
     outputPerMillionUsd: FALLBACK_CONFIG.outputPricePerMillion ?? 0,
@@ -223,7 +228,7 @@ export function getFallbackPricing(): { inputPerMillionUsd: number; outputPerMil
  * Gets config for a specific model.
  * Falls back to hardcoded config if not in DB.
  */
-export async function getModelConfig(modelId: string): Promise<ModelConfigRow | null> {
+export async function getModelConfig(modelId: string) {
   const config = await findModelConfigByModelId({ modelId });
 
   if (config) {

@@ -1,5 +1,4 @@
 import { db } from '@db/db';
-import type { UserFact } from '@db/types';
 
 type ListAllUserFactsProps = {
   userId: string;
@@ -9,7 +8,7 @@ type ListAllUserFactsProps = {
  * All of the user's current Facts (including suppressed), newest first by
  * stated date, or by when they were noted when no date was stated.
  */
-export async function listAllUserFacts({ userId }: ListAllUserFactsProps): Promise<UserFact[]> {
+export async function listAllUserFacts({ userId }: ListAllUserFactsProps) {
   return db
     .selectFrom('memory.userFacts')
     .select([

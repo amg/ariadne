@@ -1,4 +1,4 @@
-import type { FeatureFlags } from '@config/features';
+import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import { setupChatPostRoute } from '@routes/chat';
 import { setupConfigRoute } from '@routes/config';
 import { setupEventsGetRoute } from '@routes/events/get';
@@ -27,14 +27,18 @@ import {
 } from '@routes/threads';
 import type { FastifyInstance } from 'fastify';
 import { memoryFeatureOf } from './memoryFeature';
+import type { FeatureFlags } from './types';
 
 /**
  * The routes of Memory: the user's settings (all of them about Memory),
  * their Facts, and the on-demand capture. A deployment without Memory
  * does not serve them at all.
  */
-function registerMemoryRoutes(app: FastifyInstance): void {
-  setupThreadCaptureMemoryRoute(app);
+function registerMemoryRoutes(
+  app: FastifyInstance,
+  { threadAnalysisMode }: { threadAnalysisMode: ThreadAnalysisMode },
+) {
+  setupThreadCaptureMemoryRoute(app, { threadAnalysisMode });
   setupSettingsGetRoute(app);
   setupSettingsPatchRoute(app);
   setupMemoryFactsGetRoute(app);
@@ -45,6 +49,7 @@ function registerMemoryRoutes(app: FastifyInstance): void {
 /** Every route the deployment serves, given which features it runs. */
 export function registerRoutes(app: FastifyInstance, features: FeatureFlags): void {
   const memory = memoryFeatureOf(features);
+  const { threadAnalysisMode } = features;
   setupHealthRoute(app);
   setupConfigRoute(app, features);
   setupEventsGetRoute(app);
@@ -54,13 +59,13 @@ export function registerRoutes(app: FastifyInstance, features: FeatureFlags): vo
   setupThreadsPatchRoute(app);
   setupThreadsDeleteRoute(app);
   setupThreadSummaryRoute(app);
-  setupThreadAnalysisRoute(app);
-  setupMessagesGetRoute(app);
+  setupThreadAnalysisRoute(app, { threadAnalysisMode });
+  setupMessagesGetRoute(app, { threadAnalysisMode });
   setupMessagesPatchRoute(app);
   setupModelsRefreshRoute(app);
-  setupChatPostRoute(app, { memory });
+  setupChatPostRoute(app, { memory, threadAnalysisMode });
   setupThreadStopRoute(app);
   setupThreadDraftRoute(app);
   setupThreadHandoverRoute(app, { memory });
-  if (memory.kind === 'on') registerMemoryRoutes(app);
+  if (memory.kind === 'on') registerMemoryRoutes(app, { threadAnalysisMode });
 }

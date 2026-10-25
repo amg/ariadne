@@ -7,13 +7,13 @@ import type { Kysely } from 'kysely';
  * picks the thread up via its partial title, the resume-draft reader finds
  * the arrival's text).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up(db: Kysely<unknown>) {
   await db.schema
     .alterTable('messages')
     .addColumn('abandoned', 'boolean', (col) => col.notNull().defaultTo(false))
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down(db: Kysely<unknown>) {
   await db.schema.alterTable('messages').dropColumn('abandoned').execute();
 }

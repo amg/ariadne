@@ -1,12 +1,10 @@
+import { handOver } from '@ari/lib/api/schemas/threads/handover';
 import { handOverArrival } from '@services/handoverService';
-import type { MemoryFeature } from '@services/memory';
-import { isValidUuid } from '@services/validation';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { SessionRequest } from 'supertokens-node/framework/fastify';
+import type { FastifyInstance } from 'fastify';
 import { verifySession } from 'supertokens-node/recipe/session/framework/fastify';
-
-type HandoverParams = { id: string };
-type HandoverBody = { messageId?: unknown };
+import type { MemoryFeature } from '../../../src/types/memory';
+import { type RouteOf, parsedOrNull } from '../contract';
+import { userIdOf } from '../request';
 
 /** A held handover is asked again right away; the next request holds again. */
 const CAPTURE_RETRY_AFTER_SECONDS = 1;
@@ -19,36 +17,42 @@ const CAPTURE_RETRY_AFTER_SECONDS = 1;
  * nothing moved, ask again. 409 when the message is not, or no longer, a
  * paused arrival.
  */
-export async function setupThreadHandoverRoute(
+export function setupThreadHandoverRoute(
   fastify: FastifyInstance,
   { memory }: { memory: MemoryFeature },
 ) {
-  fastify.post(
-    '/api/threads/:id/handover',
-    { preHandler: verifySession() },
-    async (
-      request: FastifyRequest<{ Params: HandoverParams; Body: HandoverBody }>,
-      reply: FastifyReply,
-    ) => {
-      const userId = (request as SessionRequest).session?.getUserId() as string;
-      const { id: threadId } = request.params;
-      const messageId = request.body?.messageId;
-      if (!isValidUuid(threadId) || typeof messageId !== 'string' || !isValidUuid(messageId)) {
+  fastify.route<RouteOf<typeof handOver>>({
+    method: handOver.method,
+    url: handOver.path,
+    preHandler: verifySession(),
+    handler: async (request, reply) => {
+      const userId = userIdOf(request);
+      const params = parsedOrNull(handOver.params, request.params);
+      const body = parsedOrNull(handOver.body, request.body);
+      if (!params || !body) {
         return reply.code(400).send({ error: 'Invalid thread or message id' });
       }
 
-      const result = await handOverArrival({ userId, threadId, messageId, memory });
+      const result = await handOverArrival({
+        userId,
+        threadId: params.id,
+        messageId: body.messageId,
+        memory,
+      });
       if (result.type === 'error') {
         if (result.code === 'thread_not_found') {
           return reply.code(404).send({ error: 'Thread not found' });
         }
         if (result.code === 'capture_pending') {
           reply.header('Retry-After', String(CAPTURE_RETRY_AFTER_SECONDS));
-          return reply.code(503).send({ error: result.message, errorCode: result.code });
+          return reply.code(503).send({
+            error: result.message ?? 'Memory is still being saved.',
+            errorCode: result.code,
+          });
         }
         return reply.code(409).send({ error: result.message ?? 'The message cannot be moved.' });
       }
-      return reply.send(result.data);
+      return reply.code(200).send(result.data);
     },
-  );
+  });
 }

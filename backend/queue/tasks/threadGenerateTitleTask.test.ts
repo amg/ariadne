@@ -7,11 +7,12 @@ import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { enqueueThreadGenerateTitle, titleThread } from '@queue/tasks/threadGenerateTitleTask';
 import { queueTasks } from '@queue/worker';
-import { type ServerEvent, subscribe } from '@services/events';
+import { subscribe } from '@services/events';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ServerEvent } from '../../src/types/events';
 
 /**
  * The Thread's titling as queued work: it titles through the queue, holds
@@ -72,7 +73,7 @@ async function untitledThreadWithExchange() {
   return { userId, threadId };
 }
 
-async function titleOf(userId: string, threadId: string): Promise<string | null> {
+async function titleOf(userId: string, threadId: string) {
   return (await findThreadByIdAndUser({ userId, threadId }))?.title ?? null;
 }
 
@@ -86,7 +87,7 @@ describe('threadGenerateTitle on the worker', () => {
     }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
       expect(events).toEqual([
@@ -104,7 +105,7 @@ describe('threadGenerateTitle on the worker', () => {
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
       expect(provider.requests.count).toBe(1);
@@ -126,7 +127,7 @@ describe('threadGenerateTitle on the worker', () => {
     }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
       expect(await titleOf(userId, threadId)).toBe('My important notes');
       expect(provider.requests.count).toBe(0);
@@ -150,7 +151,7 @@ describe('threadGenerateTitle on the worker', () => {
     }).close;
     try {
       await enqueueThreadGenerateTitle({ userId, threadId, forced: true });
-      await drainQueue(queueTasks(memoryOff));
+      await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
       expect(await titleOf(userId, threadId)).toBe('Steam Engines Explained');
       expect(events).toEqual([
@@ -167,7 +168,7 @@ describe('threadGenerateTitle on the worker', () => {
     await deleteThread({ userId, threadId });
 
     await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
-    await drainQueue(queueTasks(memoryOff));
+    await drainQueue(queueTasks({ memory: memoryOff, threadAnalysisMode: 'heuristic' }));
 
     expect(await findThreadByIdAndUser({ userId, threadId })).toBeUndefined();
   });
