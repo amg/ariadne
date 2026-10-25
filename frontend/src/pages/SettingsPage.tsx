@@ -1,6 +1,7 @@
 import { categoryDisplay } from '@/components/memory/categoryDisplay';
 import {
   FACT_CATEGORIES,
+  type FactCategory,
   type UserSettings,
   fetchUserSettings,
   updateUserSettings,
@@ -47,7 +48,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleCategoryToggle = async (category: string, blocked: boolean) => {
+  const handleCategoryToggle = async (category: FactCategory, blocked: boolean) => {
     if (!settings) return;
     setIsSaving(true);
     try {

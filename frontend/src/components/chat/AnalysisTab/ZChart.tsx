@@ -1,4 +1,6 @@
-import { type ChartModel, DRIFT_COLORS } from './model';
+import { DRIFT_COLORS, type buildChartModel } from './model';
+
+type ChartModel = ReturnType<typeof buildChartModel>;
 
 export function ZChart({ model }: { model: ChartModel }) {
   const withZ = model.judged.filter((point) => point.zScore !== null);
@@ -11,7 +13,7 @@ export function ZChart({ model }: { model: ChartModel }) {
   const innerH = height - margin.top - margin.bottom;
 
   const zs = withZ.map((point) => point.zScore as number);
-  const zMax = Math.max(...zs, model.immediateK) + 0.5;
+  const zMax = Math.max(...zs, model.immediateStdDevs) + 0.5;
   const zMin = Math.min(0, ...zs) - 0.5;
 
   const zTicks: number[] = [];
@@ -30,15 +32,15 @@ export function ZChart({ model }: { model: ChartModel }) {
     >
       <line
         x1={margin.left}
-        y1={sy(model.immediateK)}
+        y1={sy(model.immediateStdDevs)}
         x2={width - margin.right}
-        y2={sy(model.immediateK)}
+        y2={sy(model.immediateStdDevs)}
         stroke={DRIFT_COLORS.trigger}
         strokeDasharray="6 4"
         strokeWidth={1.5}
         opacity={0.8}
       >
-        <title>{`immediate fire level z = ${model.immediateK}`}</title>
+        <title>{`immediate fire level z = ${model.immediateStdDevs}`}</title>
       </line>
       {withZ.map((point) => (
         <circle

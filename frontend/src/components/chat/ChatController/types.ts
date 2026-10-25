@@ -1,4 +1,4 @@
-import type { DriftFireChannel, DriftVerdict } from '@/services/api';
+import type { FireChannel, GateVerdict } from '@/services/api';
 
 export type UiMessageLike = {
   id: string;
@@ -11,6 +11,6 @@ export type StreamVerdict = {
   userMessageId: string;
   /** The arrival's stored id, as the server reported it. */
   messageId: string | null;
-  verdict: DriftVerdict;
-  fireChannel: DriftFireChannel | null;
+  verdict: GateVerdict;
+  fireChannel: FireChannel | null;
 };

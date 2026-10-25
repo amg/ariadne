@@ -1,7 +1,7 @@
+import type { DisplayRow } from '@/components/chat/types';
 import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { EditBox } from './EditBox';
-import type { DisplayRow } from './types';
 
 export function UserMessageRow({
   row,

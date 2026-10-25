@@ -1,3 +1,4 @@
+import { requestTitle } from '@/services/api';
 import type { ActionFunctionArgs } from 'react-router';
 
 type ActionProps = ActionFunctionArgs;
@@ -10,7 +11,7 @@ type ActionProps = ActionFunctionArgs;
  * the backend contract and is mapped to friendly copy there
  * (services/errorCodes) — raw provider details never reach the browser.
  */
-export type GenerateTitleActionResult =
+type GenerateTitleActionResult =
   | { ok: true; queued?: boolean; threadId?: string }
   | { ok: false; errorCode?: string };
 
@@ -26,15 +27,7 @@ export async function action({ params, request }: ActionProps): Promise<Generate
   // Never throw from a fetch result: even if the backend is briefly down,
   // the fetcher must settle so the loading pulse stops and loaders
   // revalidate. A hard fetch failure is surfaced as a generic toast instead.
-  const res = await fetch(`/api/threads/${threadId}/generate-title`, {
-    method: 'POST',
-    ...(forced
-      ? {
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ forced: true }),
-        }
-      : {}),
-  }).catch(() => null);
+  const res = await requestTitle(threadId, forced).catch(() => null);
 
   if (!res) return { ok: false, errorCode: 'internal_error' };
   if (!res.ok) {

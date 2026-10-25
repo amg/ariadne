@@ -1,59 +1,24 @@
+import { pathOf } from '@ari/lib/api/schemas/common/endpoint';
+import { events, serverEventSchema } from '@ari/lib/api/schemas/events/events';
 import Session from 'supertokens-auth-react/recipe/session';
 import { SERVER_EVENT_KINDS, type ServerEvent, type ServerEventKind } from '../events';
 import type { PushTransport } from '../transport';
 
-function stringOrNull(value: unknown, allowed: readonly string[]): string | null {
-  return allowed.includes(value as string) ? (value as string) : null;
-}
-
-function messageIdOrNull(body: Record<string, unknown>): string | null {
-  return typeof body.messageId === 'string' ? body.messageId : null;
-}
-
 /**
- * Parses one frame's JSON payload into the event its kind names; null on
- * anything malformed, which a dodgy intermediate could hand us. Each
- * branch spells out the fields the server promises for that kind.
+ * Reads one frame's JSON payload as the event its kind names; null on
+ * anything malformed, which a dodgy intermediate could hand us.
  */
-function parsePayload(kind: ServerEventKind, data: unknown): ServerEvent | null {
+function eventOrNull(kind: ServerEventKind, data: unknown) {
   if (typeof data !== 'object' || data === null) return null;
-  const body = data as Record<string, unknown>;
-  if (typeof body.threadId !== 'string') return null;
-  const threadId = body.threadId;
-
-  if (kind === 'thread-titled') {
-    return typeof body.title === 'string' ? { kind, threadId, title: body.title } : null;
-  }
-  if (kind === 'memory-captured' || kind === 'memory-capture-failed') {
-    return typeof body.segmentId === 'string'
-      ? { kind, threadId, segmentId: body.segmentId }
-      : null;
-  }
-
-  const messageId = messageIdOrNull(body);
-  if (!messageId) return null;
-  if (kind === 'verdict-ok') {
-    const verdict = stringOrNull(body.verdict, ['pass', 'muted', 'fire']);
-    return { kind, threadId, messageId, verdict: verdict as 'pass' | 'muted' | 'fire' | null };
-  }
-  if (kind === 'verdict-paused') {
-    const fireChannel = stringOrNull(body.fireChannel, ['immediate', 'slow']);
-    return {
-      kind,
-      threadId,
-      messageId,
-      fireChannel: fireChannel as 'immediate' | 'slow' | null,
-    };
-  }
-  // The one remaining kind: gate-failed carries only its scope.
-  return { kind, threadId, messageId };
+  const parsed = serverEventSchema.safeParse({ ...data, kind });
+  return parsed.success ? parsed.data : null;
 }
 
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
 
 /** Hands each named event on the stream to `onEvent`, parsed. */
-function listen(source: EventSource, onEvent: (event: ServerEvent) => void): void {
+function listen(source: EventSource, onEvent: (event: ServerEvent) => void) {
   for (const kind of SERVER_EVENT_KINDS) {
     // Named events arrive as MessageEvents; anything else on this
     // stream is a heartbeat comment the browser already ignores.
@@ -65,7 +30,7 @@ function listen(source: EventSource, onEvent: (event: ServerEvent) => void): voi
       } catch {
         return;
       }
-      const event = parsePayload(kind, data);
+      const event = eventOrNull(kind, data);
       if (event) onEvent(event);
     });
   }
@@ -76,7 +41,7 @@ function listen(source: EventSource, onEvent: (event: ServerEvent) => void): voi
  * and also when the refresh itself could not reach the backend, which a
  * later attempt can fix. False when the session has really ended.
  */
-async function sessionStillUsable(): Promise<boolean> {
+async function sessionStillUsable() {
   try {
     return await Session.attemptRefreshingSession();
   } catch {
@@ -100,18 +65,23 @@ export const sseTransport: PushTransport = {
     let everOpened = false;
     let disposed = false;
 
+    // Each wait falls somewhere in the upper half of the current backoff,
+    // so tabs refused together do not come back together.
     const reopenLater = () => {
-      retryTimer = setTimeout(async () => {
-        retryTimer = null;
-        if (disposed) return;
-        if (!(await sessionStillUsable())) return;
-        if (!disposed) dial();
-      }, retryMs);
+      retryTimer = setTimeout(
+        async () => {
+          retryTimer = null;
+          if (disposed) return;
+          if (!(await sessionStillUsable())) return;
+          if (!disposed) dial();
+        },
+        retryMs * (0.5 + Math.random() / 2),
+      );
       retryMs = Math.min(retryMs * 2, MAX_RETRY_MS);
     };
 
     const dial = () => {
-      const current = new EventSource('/api/events', { withCredentials: true });
+      const current = new EventSource(pathOf(events), { withCredentials: true });
       source = current;
       listen(current, onEvent);
       current.onopen = () => {

@@ -13,6 +13,7 @@
     "gate": "npm run typecheck && npm run lint && npm run build"
   },
   "dependencies": {
+    "@ari/lib": "*",
     "@ai-sdk/react": "^4.0.102",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-dropdown-menu": "^2.1.24",

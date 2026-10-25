@@ -1,3 +1,4 @@
+import type { DisplayRow, HandoverProgress, RestoredDraft } from '@/components/chat/types';
 import { MessageMetaRow } from '@/components/metadata';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -7,13 +8,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
 import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
-import type {
-  ChatViewStatus,
-  DisplayRow,
-  HandoverProgress,
-  RestoredDraft,
-  UnansweredArrival,
-} from './types';
+import type { ChatViewStatus, UnansweredArrival } from './types';
 
 const FOLLOW_BOTTOM_PX = 80;
 

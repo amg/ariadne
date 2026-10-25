@@ -35,7 +35,7 @@ export function subscribe<Kind extends ServerEventKind>(
  * returned function is called. Events sent during the gap are lost, so a
  * screen re-reads whatever it shows from push.
  */
-export function onReconnected(handler: () => void): () => void {
+export function onReconnected(handler: () => void) {
   reconnectedHandlers.add(handler);
   return () => {
     reconnectedHandlers.delete(handler);
@@ -46,7 +46,7 @@ export function onReconnected(handler: () => void): () => void {
  * Opens the connection once per tab; later calls are no-ops. Events
  * emitted while no screen is subscribed are simply dropped.
  */
-export function connect(): void {
+export function connect() {
   if (close) return;
   close = sseTransport.open(
     (event) => {
@@ -61,7 +61,7 @@ export function connect(): void {
 }
 
 /** Closes the tab's connection; safe to call when none is open. */
-export function disconnect(): void {
+export function disconnect() {
   close?.();
   close = null;
 }

@@ -17,10 +17,7 @@ const MESSAGE_BY_CODE: Record<string, string> = {
 
 const DEFAULT_FRIENDLY_MESSAGE = 'Something went wrong. Please try again.';
 
-export function friendlyErrorMessage(
-  errorCode: unknown,
-  fallback = DEFAULT_FRIENDLY_MESSAGE,
-): string {
+export function friendlyErrorMessage(errorCode: unknown, fallback = DEFAULT_FRIENDLY_MESSAGE) {
   if (typeof errorCode !== 'string') return fallback;
   return MESSAGE_BY_CODE[errorCode] ?? fallback;
 }

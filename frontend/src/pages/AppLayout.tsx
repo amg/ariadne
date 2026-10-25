@@ -1,11 +1,10 @@
-import type { GenerateTitleActionResult } from '@/actions/threads/generateTitle';
+import type { action } from '@/actions/threads/generateTitle';
 import AppShell from '@/components/layout/AppShell';
 import ThreadInfoPanel from '@/components/layout/ThreadInfoPanel';
 import ThreadSidebar from '@/components/layout/ThreadSidebar';
 import { FEATURE_DEFAULTS, type FeatureFlags, featuresFromServer } from '@/config/features';
 import {
   TITLE_GENERATING_SENTINEL,
-  type Thread,
   type ThreadAnalysisMode,
   type ThreadSummary,
   fetchConfig,
@@ -15,6 +14,7 @@ import {
 } from '@/services/api';
 import { friendlyErrorMessage } from '@/services/errorCodes';
 import { pushClient } from '@/services/push';
+import type { RootLoaderData } from '@/types/pages';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Outlet,
@@ -28,6 +28,8 @@ import {
 import { redirect } from 'react-router';
 import { toast } from 'sonner';
 import Session, { SessionAuth } from 'supertokens-auth-react/recipe/session';
+
+type GenerateTitleActionResult = Awaited<ReturnType<typeof action>>;
 
 export async function loader() {
   if (!(await Session.doesSessionExist())) {
@@ -47,13 +49,6 @@ export async function loader() {
   }
   const data: RootLoaderData = { threads: await fetchThreads(), threadAnalysisMode, features };
   return data;
-}
-
-/** What the app shell loads once per navigation: the sidebar's threads and the deployment's surfaces. */
-export interface RootLoaderData {
-  threads: Thread[];
-  threadAnalysisMode: ThreadAnalysisMode;
-  features: FeatureFlags;
 }
 
 // Framework entry for the app chrome: reads route state, delegates to the pure shell.

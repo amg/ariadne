@@ -3,7 +3,7 @@ import { factRecencyMs } from './factDates';
 
 const USER_SUBJECT = 'user';
 
-export interface FactGroup {
+interface FactGroup {
   key: string;
   heading: string;
   facts: UserFact[];
@@ -15,12 +15,12 @@ interface RankedFactGroup {
   newestFactMs: number;
 }
 
-function normalizedSubjectOrNull(subject: string | null): string | null {
+function normalizedSubjectOrNull(subject: string | null) {
   const normalized = subject?.trim().toLowerCase() ?? '';
   return normalized === '' ? null : normalized;
 }
 
-function capitalizedWords(text: string): string {
+function capitalizedWords(text: string) {
   return text
     .split(' ')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -28,7 +28,7 @@ function capitalizedWords(text: string): string {
 }
 
 /** `spelling` is the subject as a fact in the group writes it. */
-function subjectHeading(subject: string | null, spelling: string): string {
+function subjectHeading(subject: string | null, spelling: string) {
   if (subject === null) return 'Unspecified';
   if (subject === USER_SUBJECT) return 'About: The User';
   return `About: ${capitalizedWords(spelling)}`;
@@ -40,11 +40,11 @@ function subjectRank(subject: string | null): number {
   return subject === USER_SUBJECT ? 0 : 1;
 }
 
-function byNewestFact(a: UserFact, b: UserFact): number {
+function byNewestFact(a: UserFact, b: UserFact) {
   return factRecencyMs(b) - factRecencyMs(a);
 }
 
-function byGroupOrder(a: RankedFactGroup, b: RankedFactGroup): number {
+function byGroupOrder(a: RankedFactGroup, b: RankedFactGroup) {
   return (
     a.subjectRank - b.subjectRank ||
     b.newestFactMs - a.newestFactMs ||
@@ -60,7 +60,7 @@ function byGroupOrder(a: RankedFactGroup, b: RankedFactGroup): number {
  * or when it was noted. Subjects match case-insensitively; a heading
  * spells its subject the way the group's newest fact does.
  */
-export function factGroupsBySubject(facts: UserFact[]): FactGroup[] {
+export function factGroupsBySubject(facts: UserFact[]) {
   const factsBySubject = new Map<string | null, UserFact[]>();
   for (const fact of facts) {
     const subject = normalizedSubjectOrNull(fact.subject);

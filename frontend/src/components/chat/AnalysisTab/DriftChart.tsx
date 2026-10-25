@@ -1,4 +1,6 @@
-import { type ChartModel, DRIFT_COLORS, polylinePoints } from './model';
+import { DRIFT_COLORS, type buildChartModel, polylinePoints, stepPath } from './model';
+
+type ChartModel = ReturnType<typeof buildChartModel>;
 
 export function DriftChart({ model }: { model: ChartModel }) {
   const width = 720;
@@ -11,24 +13,6 @@ export function DriftChart({ model }: { model: ChartModel }) {
     margin.left + ((turn - model.xMin) / (model.xMax - model.xMin)) * innerW;
   const sy = (value: number) =>
     margin.top + innerH - ((value - model.yMin) / (model.yMax - model.yMin)) * innerH;
-
-  const triggerPath = (() => {
-    const parts: string[] = [];
-    const first = (model.judged[0]?.turnNumber ?? model.xMin) as number;
-    if (first > model.xMin) {
-      parts.push(
-        `M ${sx(model.xMin).toFixed(1)} ${sy(model.segmentThreshold).toFixed(1)} H ${sx(first).toFixed(1)}`,
-      );
-    }
-    model.judged.forEach((point, index) => {
-      const next = model.judged[index + 1];
-      const xEnd = next ? next.turnNumber : model.xMax;
-      parts.push(
-        `M ${sx(point.turnNumber).toFixed(1)} ${sy(point.threshold).toFixed(1)} H ${sx(xEnd).toFixed(1)}`,
-      );
-    });
-    return parts.join(' ');
-  })();
 
   const xs = model.judged.map((point) => point.turnNumber);
   const driftYs = model.judged.map((point) => point.driftP);
@@ -135,7 +119,24 @@ export function DriftChart({ model }: { model: ChartModel }) {
           </text>
         </g>
       ))}
-      <path d={triggerPath} fill="none" stroke={DRIFT_COLORS.trigger} strokeWidth={2} />
+      {model.triggerSegments.map((segment) => (
+        <path
+          key={segment.segmentIndex}
+          d={stepPath(
+            segment.points.map((point) => ({
+              x: sx(point.turnNumber),
+              y: sy(point.threshold),
+            })),
+            { left: margin.left, right: width - margin.right },
+          )}
+          fill="none"
+          stroke={DRIFT_COLORS.trigger}
+          strokeWidth={2}
+          strokeLinejoin="round"
+        >
+          <title>{`Live trigger (segment ${segment.segmentIndex})`}</title>
+        </path>
+      ))}
       {muXs.length > 1 && (
         <polyline
           points={polylinePoints(muXs, muYs, sx, sy)}

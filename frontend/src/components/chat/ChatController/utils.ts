@@ -1,11 +1,12 @@
-import type { Message, MessageDriftVerdict } from '@/services/api';
+import type { DisplayRow } from '@/components/chat/types';
+import type { Message } from '@/services/api';
+import { streamVerdictSchema } from '@ari/lib/api/schemas/common/driftGate';
 import type { UIMessage } from 'ai';
-import type { DisplayRow, UnansweredArrival } from '../ChatView';
 import type { GateWaitOutcome } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 
 /** Join the text parts of a useChat message into one content string. */
-export function joinTextParts(parts: UiMessageLike['parts']): string {
+function joinTextParts(parts: UiMessageLike['parts']) {
   return parts
     .filter((part) => part.type === 'text')
     .map((part) => part.text ?? '')
@@ -13,7 +14,7 @@ export function joinTextParts(parts: UiMessageLike['parts']): string {
 }
 
 /** Extract reasoning parts from a useChat message. */
-export function extractReasoning(parts: UiMessageLike['parts']): string {
+export function extractReasoning(parts: UiMessageLike['parts']) {
   return parts
     .filter((part) => part.type === 'reasoning')
     .map((part) => part.text ?? '')
@@ -21,7 +22,7 @@ export function extractReasoning(parts: UiMessageLike['parts']): string {
 }
 
 /** Counts rows per (role, content) — the dedup key against chat state. */
-export function countByKey(rows: Message[]): Map<string, number> {
+function countByKey(rows: Message[]) {
   const counts = new Map<string, number>();
   for (const row of rows) {
     const key = `${row.role}:${row.content}`;
@@ -38,18 +39,8 @@ export function countByKey(rows: Message[]): Map<string, number> {
  * null on any part that is not a verdict payload.
  */
 export function readVerdictData(part: { data?: unknown }): StreamVerdict | null {
-  if (part.data === undefined || typeof part.data !== 'object') return null;
-  // An unchecked stream payload: every field is optional here and is
-  // validated one by one below.
-  const data = part.data as { verdict?: string; fireChannel?: string | null; messageId?: unknown };
-  if (data.verdict !== 'muted' && data.verdict !== 'pass' && data.verdict !== 'fire') return null;
-  return {
-    userMessageId: '',
-    messageId: typeof data.messageId === 'string' ? data.messageId : null,
-    verdict: data.verdict,
-    fireChannel:
-      data.fireChannel === 'immediate' || data.fireChannel === 'slow' ? data.fireChannel : null,
-  };
+  const parsed = streamVerdictSchema.safeParse(part.data);
+  return parsed.success ? { ...parsed.data, userMessageId: '' } : null;
 }
 
 /**
@@ -68,7 +59,7 @@ export function withoutMovedArrival<T extends UiMessageLike>(messages: T[], cont
 }
 
 /** The most recent user message in live chat state — the pending arrival. */
-export function lastUserMessage(chatMessages: UiMessageLike[]): UiMessageLike | null {
+export function lastUserMessage(chatMessages: UiMessageLike[]) {
   for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
     const candidate = chatMessages[i];
     if (candidate?.role === 'user') return candidate;
@@ -77,7 +68,7 @@ export function lastUserMessage(chatMessages: UiMessageLike[]): UiMessageLike | 
 }
 
 /** Maps a DB row (or a just-forked prompt) into an SDK message for seeding. */
-export function toUiMessage(source: {
+function toUiMessage(source: {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -142,7 +133,7 @@ export function buildRetrySeed(
  * - chat messages not covered by a DB row render as pending (optimistic user
  *   bubble, in-flight assistant stream), appended in chat order.
  */
-export function buildSettledRow(
+function buildSettledRow(
   row: Message,
   sdkMsg: UiMessageLike | undefined,
   streaming: boolean,
@@ -180,10 +171,7 @@ export function buildSettledRow(
 }
 
 /** The live verdict a pending row wears — only its own arrival bubble. */
-export function pendingVerdictFor(
-  message: UiMessageLike,
-  liveVerdict: StreamVerdict | null,
-): MessageDriftVerdict | null {
+function pendingVerdictFor(message: UiMessageLike, liveVerdict: StreamVerdict | null) {
   if (!liveVerdict || message.role !== 'user' || liveVerdict.userMessageId !== message.id) {
     return null;
   }
@@ -200,7 +188,7 @@ export function pendingVerdictFor(
 function hideUnsettledExchangeRow(
   rows: Message[],
   status: 'submitted' | 'streaming' | 'ready' | 'error',
-): Message[] {
+) {
   if (status === 'ready' || status === 'error') return rows;
   return rows.filter(
     (row, index) => !(index === rows.length - 1 && row.role === 'assistant' && row.content === ''),
@@ -213,7 +201,7 @@ export function mergeDisplayRows(
   status: 'submitted' | 'streaming' | 'ready' | 'error',
   reasoningCache: Map<string, string>,
   liveVerdict: StreamVerdict | null,
-): DisplayRow[] {
+) {
   const settledRows = hideUnsettledExchangeRow(rows, status);
 
   const sdkMessages = new Map(chatMessages.map((m) => [m.id, m]));
@@ -260,7 +248,6 @@ export function mergeDisplayRows(
         role: message.role,
         content,
         createdAt: new Date().toISOString(),
-        usage: null,
       },
       usage: null,
       streaming: message.id === lastStreamingAssistantId,
@@ -282,7 +269,7 @@ export function pausedArrivalIdOrNull(
   display: DisplayRow[],
   settledRows: Message[],
   status: 'submitted' | 'streaming' | 'ready' | 'error',
-): string | null {
+) {
   if (status === 'submitted' || status === 'streaming') return null;
   const last = display[display.length - 1];
   if (!last || last.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
@@ -313,7 +300,7 @@ export function unansweredArrivalOrNull({
   status,
   gateWait,
   arrivalsJudged,
-}: UnansweredArrivalFacts): UnansweredArrival | null {
+}: UnansweredArrivalFacts) {
   if (status === 'submitted' || status === 'streaming') return null;
   const last = display[display.length - 1];
   if (!last || last.message.role !== 'user') return null;
@@ -331,7 +318,7 @@ export function unansweredArrivalOrNull({
  * (an abandoned arrival, such as one handed over, never counts); -1 when
  * there is none.
  */
-export function findTargetUserMessageIndex(rows: Message[], overrideId?: string): number {
+function findTargetUserMessageIndex(rows: Message[], overrideId?: string) {
   if (overrideId) {
     return rows.findIndex((row) => row.id === overrideId);
   }

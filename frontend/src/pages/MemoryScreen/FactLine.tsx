@@ -7,7 +7,7 @@ interface Props {
   fact: UserFact;
 }
 
-function factTooltip(fact: UserFact): string {
+function factTooltip(fact: UserFact) {
   const stated =
     fact.validAt === null ? 'No date stated' : `Dated ${formattedStatedDate(fact.validAt, 'day')}`;
   return `${fact.content}\n${stated} · Noted ${formattedNotedDate(fact.createdAt, 'day')}`;

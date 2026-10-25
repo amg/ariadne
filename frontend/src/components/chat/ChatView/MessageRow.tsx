@@ -1,7 +1,8 @@
+import type { DisplayRow } from '@/components/chat/types';
 import { AssistantMessageRow } from './AssistantMessageRow';
 import { SystemMessageRow } from './SystemMessageRow';
 import { UserMessageRow } from './UserMessageRow';
-import type { ChatViewStatus, DisplayRow } from './types';
+import type { ChatViewStatus } from './types';
 
 /** Per-row edit + retry affordances; extracted to keep ChatView shallow. */
 export function MessageRow(props: {

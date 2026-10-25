@@ -1,8 +1,9 @@
+import type { DisplayRow } from '@/components/chat/types';
 import { MessageMetaRow } from '@/components/metadata';
 import { chatStatusText } from '@/services/utils';
 import { RefreshCw } from 'lucide-react';
 import { BubbleContent } from './BubbleContent';
-import type { ChatViewStatus, DisplayRow } from './types';
+import type { ChatViewStatus } from './types';
 
 export function AssistantMessageRow({
   row,

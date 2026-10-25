@@ -1,10 +1,12 @@
+import type { factGroupsBySubject } from '@/pages/MemoryScreen/groupFacts';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import FactLine from './FactLine';
 import FactRow from './FactRow';
 import GroupActionsMenu from './GroupActionsMenu';
 import { deleteFacts, setFactsSuppressed } from './factActions';
-import type { FactGroup } from './groupFacts';
+
+type FactGroup = ReturnType<typeof factGroupsBySubject>[number];
 
 const PREVIEW_FACT_COUNT = 3;
 

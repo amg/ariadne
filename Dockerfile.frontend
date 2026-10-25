@@ -4,6 +4,7 @@ WORKDIR /app
 
 # Copy all package files (workspace setup)
 COPY package*.json ./
+COPY lib/package.json ./lib/
 COPY frontend/package*.json ./frontend/
 
 # Drop privileges for the build
@@ -14,7 +15,8 @@ USER node
 ENV LEFTHOOK=0
 RUN npm ci --ignore-scripts
 
-# Copy frontend source
+# Copy the shared contract and the frontend source
+COPY --chown=node:node lib ./lib
 COPY --chown=node:node frontend ./frontend
 
 # Build the frontend

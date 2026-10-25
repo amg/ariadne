@@ -1,7 +1,7 @@
-import type { MessageFinishReason, MessageUsage } from '@/services/api';
+import type { FinishReason, MessageUsage } from '@/services/api';
 import { cn, formatCost, formatDuration, formatTokens } from '@/services/utils';
 
-const FINISH_REASON_LABEL: Record<MessageFinishReason, string> = {
+const FINISH_REASON_LABEL: Record<FinishReason, string> = {
   stop: 'normal',
   length: 'length',
   content_filter: 'blocked',
@@ -14,11 +14,7 @@ const FINISH_REASON_LABEL: Record<MessageFinishReason, string> = {
 /**
  * Extracts reasoning token display values from usage.
  */
-function getReasoningDisplay(usage: MessageUsage | null): {
-  value: string | number;
-  label: string;
-  title: string;
-} {
+function getReasoningDisplay(usage: MessageUsage | null) {
   if (!usage) {
     return { value: '—', label: 'reasoning', title: 'Reasoning tokens (provider reported)' };
   }
@@ -52,12 +48,12 @@ function getReasoningDisplay(usage: MessageUsage | null): {
 }
 
 /** Subtracts an absent-tolerant exclusion from a nullable base; null stays null. */
-function tokensExcluding(base: number | null, excluded: number | null): number | null {
+function tokensExcluding(base: number | null, excluded: number | null) {
   return base === null ? null : base - (excluded ?? 0);
 }
 
 /** The cost cell's label; estimated spends advertise themselves as such. */
-function costDisplay(usage: MessageUsage | null): { title: string; estimatedTag: string } {
+function costDisplay(usage: MessageUsage | null) {
   if (usage?.estimated) {
     return { title: 'Estimated spend — the provider reported no usage', estimatedTag: ' est' };
   }
