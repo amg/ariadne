@@ -129,7 +129,8 @@ dist
 
 # Agent configuration/state
 .pi/*
-!.pi/agent/
+!.pi/skills/
+!.pi/extensions/
 .testing/
 
 # Working scratch (tickets, grill sessions, research drafts)

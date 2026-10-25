@@ -16,8 +16,6 @@ This skill defines the universal language standards for naming and communication
 Name functions and variables for exactly what they represent in the domain or the exact shape they return, not the internal mechanism used to produce them.
 *   **Decisions & Values**: Name for the exact shape returned. 
     *   *Generic Example*: Use `needsRefresh` (returns a boolean decision), not `consultCache` (interaction verb hides the return).
-*   **Explicitness of State**: If a function can return a null state, reflect that explicitly in the name.
-    *   *Generic Example*: `getUserOrNull`, never `buildUser` or `resolveUser`.
 *   **Formatting/Constructed Results**: Use adjectives to describe constructed results, not properties.
     *   *Generic Example*: Use `formattedAddress` instead of `addressText`.
 *   **Actions & Side-Effects**: Use simple, domain-driven verbs for the result achieved, avoiding implementation jargon.
@@ -27,6 +25,8 @@ Name functions and variables for exactly what they represent in the domain or th
 ## 3. Contextual Precision
 *   **Attach Context to Stats/Math**: When dealing with statistics, math concepts, or generic data structures, attach them directly to the domain entity they describe.
     *   *Generic Example*: Use `UserSessionStats` instead of just `RollingStats` or `Baseline` to clarify exactly *what* is being measured.
+*   **Maths Names Stay Inside the Maths Module**: A module that implements a formula may use the formula's own names and symbols inside it (`lambda`, `mu`, `sigma`). Its exported contract uses domain names, and each field's doc comment opens with the symbol, so a reader can go from the contract to the formula and its write-up. The module maps the domain names onto the maths names in one place.
+    *   *Generic Example*: Export `retryBackoffFactor` with the doc `/** α: how much each retry's wait grows. */`; inside the backoff function, name it `alpha`.
 
 ## 4. Plain Language in Documentation
 *   **Simple Words Over Elaborate Ones**: Use everyday words in comments and documentation. Avoid academic or literary terms that sound clever but slow readers down.

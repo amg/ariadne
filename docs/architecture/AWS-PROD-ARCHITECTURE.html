@@ -70,7 +70,8 @@
 
 <h1>aws-prod architecture: Cloudflare, AWS and the services</h1>
 <p class="sub">What aws-prod is made of and how its parts connect. How it is raised, tested and recovered is in
-<a href="AWS-PROD-DEPLOYMENT.html">AWS-PROD-DEPLOYMENT.html</a>; the decision behind it is
+<a href="AWS-PROD-DEPLOYMENT.html">AWS-PROD-DEPLOYMENT.html</a>; how load runs are driven, supervised, recorded and judged is in
+<a href="LOAD-TESTING-ARCHITECTURE.html">LOAD-TESTING-ARCHITECTURE.html</a>; the decision behind it is
 <a href="../../adrs/0014-aws-prod-hosting.md">ADR 0014</a>. How work and news move inside the app, on any deployment,
 is in <a href="../flows/BACKGROUND-WORK.md">BACKGROUND-WORK.md</a>. <code>&lt;project&gt;</code> below stands for the
 operator's <code>AWS_PROD_PROJECT</code>.</p>
@@ -186,7 +187,7 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
   <text x="102" y="658" class="th">Postgres 16 · RDS</text>
   <text x="102" y="676" class="ts">:5432 · TLS, verified</text>
   <text x="102" y="692" class="ts">app tables · auth schema · queue</text>
-  <text x="102" y="708" class="ts">restored from the seed snapshot</text>
+  <text x="102" y="708" class="ts">restored from the newest seed</text>
   <text x="102" y="724" class="ts">one instance, fixed size</text>
   <rect x="396" y="636" width="250" height="104" rx="7" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
   <text x="408" y="658" class="th">Valkey · ElastiCache</text>
@@ -220,7 +221,7 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
   <rect x="704" y="288" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="714" y="308" class="th">Secrets Manager</text><text x="714" y="325" class="ts">auth API key · population password</text>
   <rect x="704" y="344" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
-  <text x="714" y="364" class="th">SSM parameters</text><text x="714" y="381" class="ts">origin certificate ARN</text><text x="714" y="397" class="ts">seed snapshot id · run key</text>
+  <text x="714" y="364" class="th">SSM parameters</text><text x="714" y="381" class="ts">origin certificate ARN</text><text x="714" y="397" class="ts">run key · load client certificate</text>
   <rect x="704" y="416" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="714" y="436" class="th">Vault bucket (S3)</text><text x="714" y="453" class="ts">Terraform state · trust CA</text><text x="714" y="469" class="ts">spend ledger · access logs</text>
   <rect x="704" y="488" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
@@ -444,7 +445,7 @@ certificates. At each raise, AWS's side is made first and Cloudflare takes its l
   <tr><td>Daily spend budget set very high</td><td>Inference is mocked, so it should never refuse, but the check stays on the measured path.</td></tr>
   <tr><td>The load generator signs in with header tokens</td><td>No cookie jar to keep. The backend already accepts bearer tokens.</td></tr>
   <tr><td>Seeding goes through the real sign-up</td><td>The population is created exactly as users are, with Thread and Exchange rows to match.</td></tr>
-  <tr><td>Fixed-bucket histograms in the generator</td><td>Reports from many generators add up into one set of percentiles.</td></tr>
+  <tr><td>Percentiles come from every request line, never from running totals</td><td>A line per request is kept, so any figure can be computed again exactly, across any number of generators.</td></tr>
   <tr><td>Performance Insights, Container Insights, load-balancer access logs, flow logs (rejects only)</td><td>A test run is only worth what it can measure. All of them are usage-priced and small.</td></tr>
   <tr><td>Terraform owns the zone's three rule-phase entrypoints, guarded before each raise</td><td>A zone has one entrypoint per phase, so taking one over would replace other rules and deleting it would remove them.</td></tr>
   <tr><td>Valkey in every step</td><td>One shape to test, and it costs pennies. It carries news and stops between backend copies.</td></tr>

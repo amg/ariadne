@@ -17,20 +17,37 @@ truth; nothing here repeats it.
 - **`docs/flows/`** — how a message and background work move through the
   system. Concepts only.
 - **`docs/architecture/`** — HTML reports of deployment shapes (aws-prod
-  architecture and deployment).
+  architecture and deployment), and the load testing architecture: how a
+  run is driven, recorded and judged, and why.
+- **`docs/architecture/LOAD-RUN-LEARNINGS.md`** — what each load run hit,
+  what we changed, and what we now believe. Read it before planning a run,
+  and add to it after reading one.
 - **`docs/ideas/`** — open explorations, high level only.
 - **`docs/maths/`** — how the Drift gate's maths works, told as a story
   (no implementation detail), plus the alternatives considered.
-- **`docs/project-management/`** — WIP tickets and bugs; deleted when the
-  work lands.
+- **`load/`** — the load harness, split into records (what a run
+  stores, under one schema version for the run folder), generator (the virtual users), archive
+  (collects a run into a sealed folder) and rebuild (stored records to
+  numbers). Each part may import only records; the home commands also use
+  archive. A run folder lives in `load/.runs/<run id>/` on the operator's
+  machine, with the same layout on aws-prod and cubi, and its manifest,
+  written last, seals it. The aws-prod stack that runs it is
+  in `infra/lib/load/`.
+- **App records** — in every environment the backend logs a line per chat
+  request, per queue attempt, and a state line every few seconds, under an
+  `appRecord` key and without message text. The archive sorts them out of
+  the backend's log into `app/`, and its self-check fails a run that lacks
+  them. Every telemetry call is named `log*` (`logAppRecord`,
+  `record.logFirstToken`, `keepLoggingState`); `logMetric*` is reserved
+  for emitting a metric directly.
 - **`infra/README.md`** — operating aws-prod.
 - **`.pi/FUTURE-IMPROVEMENTS.md`** — backlog (gitignored).
 
 ## Agent Tips
 
 - **Tests** run from the agent container too (`cd backend && npm test`).
-  Probing the host database, and throwaway scripts, live in `.testing/`
-  (gitignored; start with `.testing/db.md`), never in the repo.
+  Probing the host database, and throwaway scripts, live in `.work/testing/`
+  (gitignored; start with `.work/testing/db.md`), never in the repo.
 - **Redis vs Valkey.** The server is Valkey everywhere; code says
   "Redis" for the protocol and the ioredis client (`connectRedis`,
   `redisCarrier`), while deployment names (`VALKEY_URL`, infra, compose)
@@ -44,15 +61,30 @@ truth; nothing here repeats it.
   `bash -c 'source scripts/lib/command.sh && load_names <step> && <helper>'`.
   Sourcing `command.sh` straight into their login shell turns on strict
   mode there, and the first error closes the session. A run's
-  `infra/.runs/<run>/generator.log` holds each generator's first errors;
+  `load/.runs/<run>/logs/generator-<n>-attempt-<m>.log` holds each
+  generator's first errors;
   requests blocked at the edge show in Cloudflare under Security, Events.
-- **Load paths.** `aws-prod load` goes through Cloudflare, as users do.
-  `aws-prod load --direct` skips Cloudflare to measure aws-prod alone:
-  generators present their own client certificate, and their addresses
-  are allowed in only for the length of the run. Steps are proven on the
-  direct path first, then repeated through Cloudflare.
+- **Load paths.** `aws-prod load` skips Cloudflare to measure aws-prod
+  alone: generators present their own client certificate, and leave the
+  load stack's network through one NAT address that the stack itself lets
+  into the origin, so the way in lasts exactly as long as the load stack.
+  Steps are proven on the
+  direct path first, then repeated through Cloudflare with `--edge`.
+- **Query tags.** A query file tags its query with
+  `db.withPlugin(tagQuery('<folder>/<file>'))` inside the function, on
+  each call, so it follows a request scope's handle. Postgres and
+  Performance Insights then see `/* query:<folder>/<file> */` at the
+  front of the SQL.
+- **Load tests check behaviour, not output.** Rebuild tests read run
+  folders from `load/src/rebuild/fixtures/` and check verdicts, logic and
+  determinism. No expected output or HTML markup is stored.
 
-## Skill Loading (CRITICAL)
+## Skills
 
-Before any task, read `.pi/SKILLS-INDEX.md`, load every `SKILL.md` that
-matches the task, then proceed. The skill file is the specification.
+`.pi/skills/` holds the agent skills in layers: `common/` (any language),
+`typescript/`, `react/`, and `project/` (this repo only). A skill refers
+only to skills in its own layer or a lower one, so the lower layers can be
+lifted into another repo unchanged. Pi lists every skill at startup; load
+each one whose description matches the task before starting, because the
+skill file is the specification. Keep Markdown files out of the
+`.pi/skills/` root, since Pi reads any `.md` there as a skill.

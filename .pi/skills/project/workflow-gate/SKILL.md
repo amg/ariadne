@@ -1,6 +1,6 @@
 ---
 name: workflow-gate
-description: Runs the project's validation gate (`npm run gate`) after code changes.
+description: Runs this repo's validation gate (`npm run gate`) after code changes, so type checking, linting, tests, and builds stay green.
 ---
 
 # Workflow Gate Skill
@@ -21,9 +21,8 @@ After completing ANY code modification that could impact type checking, linting,
 2. **ALWAYS** fix gate errors before presenting work to user
 3. **REPORT** gate status explicitly: `**Command:** npm run gate` + `**Result:** ✅ Passed` or `❌ Failed`
 
-## Integration
+## What the gate holds
 
-- **code-quality**: Defines quality standards and decision framework
-- **db**: Postgres/Kysely conventions — migrations, database testing
-- **workflow-gate**: Executes validation gate
-- **git-guardian**: Manages commits (requires explicit user confirmation)
+- The `comment-hygiene` check blocks the gross comment violations mechanically. Fix its findings by following the **docs-quality** skill.
+- A Biome failure on a design rule follows the **code-quality** skill: ask the user rather than adding a `// biome-ignore`.
+- Once the gate passes, the **change-report** skill produces the report.

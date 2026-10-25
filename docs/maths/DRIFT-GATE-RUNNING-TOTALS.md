@@ -99,4 +99,4 @@ Once a message has been judged, nothing before the one just behind it can change
 
 ## 8. When the Rules Change
 
-If the tracker's settings are retuned (the $k$ multiplier, the spread floor, the patrol's allowance or budget), the past is left alone. Every recorded verdict stays a record of the settings it was judged under, including the exact line it was measured against. A segment already in progress carries on from its notebook until its next fire wipes it, and re-judging old hikes under new settings is a separate replay, never the live tracker's job.
+If the tracker's settings are retuned (the $k$ multiplier, the spread floor, the patrol's allowance or budget), the past is left alone. Every recorded verdict stays a record of the settings it was judged under, including the exact line it was measured against. A segment already in progress carries on from its notebook until its next fire wipes it. Old hikes are never re-judged under the new settings.

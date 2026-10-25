@@ -28,5 +28,5 @@ description: Conventions for the Postgres/Kysely layer — migrations use the ty
 
 *   **No Database Mocks**: NEVER mock the database (Kysely/Postgres).
 *   **Real DB Testing**: All database/repository tests run against real PostgreSQL (Testcontainers).
-*   **Test Isolation**: Wrap tests in transactions with `ROLLBACK`, or truncate tables.
+*   **Test Isolation**: `useTestDb()` empties every table between tests. It reads the tables from the database catalog, so a new table needs no registration.
 *   **Permitted Mocks**: ONLY at system boundaries for external network calls (e.g., DeepInfra API).
