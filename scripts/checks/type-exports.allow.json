@@ -1,0 +1,8 @@
+{
+  "infra/config/names.ts#ImageName": "the member type of the IMAGES table, defined beside it",
+  "load/src/archive/aws/raise.ts#Raise": "inferred from raiseSchema, defined beside it",
+  "load/src/archive/manifestBuilder.ts#RunDescription": "inferred from runDescriptionSchema, defined beside it",
+  "load/src/archive/selfChecks.ts#ExpectedSource": "inferred from expectedSourceSchema, defined beside it",
+  "load/src/monitor/queries.ts#Measure": "the member type of the MEASURES table, defined beside it",
+  "backend/src/types/errorCodes.ts#TitlingErrorCode": "the member type of the ErrorCodes table, defined beside it"
+}

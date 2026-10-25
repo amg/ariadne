@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip/schema.json",
-  "ignoreExportsUsedInFile": true,
+  "ignoreExportsUsedInFile": false,
   "ignoreBinaries": ["hadolint", "openssl"],
   "ignore": [".pi/extensions/**"],
   "workspaces": {
@@ -9,7 +9,7 @@
     },
     "backend": {
       "entry": ["app/server.aws.ts"],
-      "ignore": ["src/db/migrations/**"]
+      "ignore": ["src/db/migrations/**", "src/db/*.generated.ts"]
     },
     "load": {
       "entry": [

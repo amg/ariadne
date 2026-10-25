@@ -205,7 +205,7 @@ if (violations > 0) {
       ...report,
       '',
       '  Fix standard — load the docs-quality skill before rewriting:',
-      '    .pi/agent/skills/docs-quality/SKILL.md',
+      '    .pi/skills/common/docs-quality/SKILL.md',
       '  No ticket/spec/ADR references, no .md citations, no dated narration,',
       '  no vocabulary lists, no implementation leaks in interface comments.',
       '  Repo-wide audit: node scripts/checks/comment-hygiene.mjs --all',
