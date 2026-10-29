@@ -7,6 +7,8 @@
  * function uses. A parameter typed by a named alias is left alone, since the alias is
  * shared and one function may take only part of it. A destructuring with a rest
  * element takes the remaining members, so it is skipped.
+ *
+ * Run by program-checks.mjs (`npm run audit:params`); this module does nothing run on its own.
  */
 import ts from 'typescript';
 import { rel } from './programs.mjs';

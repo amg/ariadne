@@ -12,6 +12,8 @@
  *
  * Imports are resolved with the compiler's checker, so barrels, aliases and
  * path mappings are followed to the declaring file.
+ *
+ * Run by program-checks.mjs (`npm run audit:types`); this module does nothing run on its own.
  */
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';

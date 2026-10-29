@@ -13,6 +13,15 @@ function isAlive(pid: number) {
   }
 }
 
+/** Whether the process ends within two seconds: a killed process finishes once it next runs, which a busy machine can delay. */
+async function endsSoon(pid: number) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!isAlive(pid)) return true;
+    await sleep(50);
+  }
+  return false;
+}
+
 /** A launcher that starts a long-lived program and reports its pid, as `tsx` does. */
 const LAUNCHER = `
 const { spawn } = require('node:child_process');
@@ -61,7 +70,7 @@ describe('startProcess', () => {
 
     await launcher.stop();
 
-    expect(isAlive(programPid)).toBe(false);
+    expect(await endsSoon(programPid)).toBe(true);
   });
 });
 

@@ -68,6 +68,15 @@ function isAlive(pid: number) {
   }
 }
 
+/** Whether the process ends within two seconds: a killed process finishes once it next runs, which a busy machine can delay. */
+async function endsSoon(pid: number) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!isAlive(pid)) return true;
+    await sleep(50);
+  }
+  return false;
+}
+
 async function freePort() {
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
@@ -137,7 +146,7 @@ describe('withDevStack, when the run ends early', () => {
 
       await expect(ended).rejects.toBeInstanceOf(Interrupted);
       expect(pids).toHaveLength(2);
-      expect(pids.map(isAlive)).toEqual([false, false]);
+      expect(await Promise.all(pids.map(endsSoon))).toEqual([true, true]);
     },
   );
 
@@ -153,7 +162,10 @@ describe('withDevStack, when the run ends early', () => {
     await expect(ended).rejects.toBeInstanceOf(Interrupted);
     expect(Date.now() - signalledAt).toBeLessThan(5_000);
     expect(work).not.toHaveBeenCalled();
-    expect([mockPid, backendPid].map((pid) => isAlive(pid ?? 0))).toEqual([false, false]);
+    expect(await Promise.all([mockPid, backendPid].map((pid) => endsSoon(pid ?? 0)))).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it('stops listening for signals once the run is over', async () => {
