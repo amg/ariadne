@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * type-exports — keeps an exported type as close as possible to the files that use it.
  * A type is read off the function that produces it (`ReturnType`, `Parameters`,
@@ -13,13 +12,11 @@
  *
  * Imports are resolved with the compiler's checker, so barrels, aliases and
  * path mappings are followed to the declaring file.
- *
- * Exit code 1 on violation so the gate fails.
  */
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import ts from 'typescript';
-import { ROOT, loadPrograms, rel, sourceFilesOf, uniqueSourceFiles } from './programs.mjs';
+import { ROOT, rel, sourceFilesOf } from './programs.mjs';
 
 /** Where a workspace keeps the types that its whole codebase shares. */
 const SHELVES = [
@@ -195,55 +192,67 @@ function typeViolationOf({ sourceFile, path, line, name, users, importers }) {
   return nestedViolationOf({ path, line, name, users, dependents });
 }
 
-const programs = loadPrograms();
-const importers = importersOf(programs);
-const found = new Map();
-const declared = new Set();
-
-for (const file of uniqueSourceFiles(programs)) {
-  const path = rel(file.fileName);
-  for (const { name, line } of exportedTypesOf(file)) {
-    const key = `${path}#${name}`;
-    declared.add(key);
-    if (ALLOWED[key] || isTestSupport(path)) continue;
-    const users = [...(importers.get(key) ?? [])].filter((user) => user !== path);
-    const violation = SHELVES.some((shelf) => path.startsWith(shelf))
-      ? !siblingsMentioning({ sourceFile: file, name }).length > 0 &&
+/** The rule an exported type breaks, by where it is declared: a shelf, a vocabulary, or anywhere else. */
+function exportViolationOf({ sourceFile, path, line, name, importers }) {
+  const users = [...(importers.get(`${path}#${name}`) ?? [])].filter((user) => user !== path);
+  return SHELVES.some((shelf) => path.startsWith(shelf))
+    ? !siblingsMentioning({ sourceFile, name }).length > 0 &&
         shelfViolationOf({ path, line, name, users })
-      : !isVocabulary(path) &&
-        typeViolationOf({ sourceFile: file, path, line, name, users, importers });
-    if (violation) found.set(key, violation);
-  }
+    : !isVocabulary(path) && typeViolationOf({ sourceFile, path, line, name, users, importers });
 }
 
-const stale = Object.keys(ALLOWED).filter((key) => !declared.has(key));
-const violations = [...found.values()];
-const advice = {
+/** The misplaced exported types of the files, and every `path#Name` they declare. */
+function violationsIn({ files, importers }) {
+  const found = new Map();
+  const declared = new Set();
+  for (const file of files) {
+    const path = rel(file.fileName);
+    for (const { name, line } of exportedTypesOf(file)) {
+      const key = `${path}#${name}`;
+      declared.add(key);
+      if (ALLOWED[key] || isTestSupport(path)) continue;
+      const violation = exportViolationOf({ sourceFile: file, path, line, name, importers });
+      if (violation) found.set(key, violation);
+    }
+  }
+  return { violations: [...found.values()], declared };
+}
+
+const ADVICE = {
   R1: 'no other file imports it: drop the `export`',
   R2: 'only tests import it: drop the `export`, let the test derive the type from the function',
   R3: 'an importer sits outside the declaring folder: move the type to the home named below',
   R4: 'only one folder imports it: move the type down to the home named below',
 };
 
-if (process.argv.includes('--json')) {
-  console.log(JSON.stringify(violations, null, 2));
-} else if (violations.length === 0 && stale.length === 0) {
-  console.log('✅ type-exports: every exported type stays within the folder of its importers');
-} else {
-  for (const rule of Object.keys(advice)) {
+function reportOf({ violations, stale }) {
+  const lines = [];
+  for (const rule of Object.keys(ADVICE)) {
     const group = violations.filter((v) => v.rule === rule);
     if (group.length === 0) continue;
-    console.error(`\n${rule}: ${advice[rule]}`);
+    lines.push(`\n${rule}: ${ADVICE[rule]}`);
     for (const v of group) {
       const home = v.home ? `  (home: ${v.home})` : '';
-      console.error(
-        `  ${v.path}:${v.line}  ${v.name}  <- ${v.users.slice(0, 3).join(', ')}${home}`,
-      );
+      lines.push(`  ${v.path}:${v.line}  ${v.name}  <- ${v.users.slice(0, 3).join(', ')}${home}`);
     }
   }
-  for (const key of stale) console.error(`\nstale allow-list entry, no such exported type: ${key}`);
-  console.error(
+  for (const key of stale) lines.push(`\nstale allow-list entry, no such exported type: ${key}`);
+  lines.push(
     `\n❌ type-exports: ${violations.length} exported type(s) in the wrong place, ${stale.length} stale allow-list entr${stale.length === 1 ? 'y' : 'ies'}. See the typescript-conventions skill.`,
   );
-  process.exit(1);
+  return lines.join('\n');
 }
+
+function run({ programs, files }) {
+  const { violations, declared } = violationsIn({ files, importers: importersOf(programs) });
+  const stale = Object.keys(ALLOWED).filter((key) => !declared.has(key));
+  if (violations.length === 0 && stale.length === 0) {
+    return {
+      passed: true,
+      report: '✅ type-exports: every exported type stays within the folder of its importers',
+    };
+  }
+  return { passed: false, report: reportOf({ violations, stale }) };
+}
+
+export const typeExports = { name: 'type-exports', run };

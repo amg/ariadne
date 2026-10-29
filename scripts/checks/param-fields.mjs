@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * param-fields — a function that destructures its parameter binds every member the
  * parameter's type declares. A member left unbound is an input the function never
@@ -8,11 +7,9 @@
  * function uses. A parameter typed by a named alias is left alone, since the alias is
  * shared and one function may take only part of it. A destructuring with a rest
  * element takes the remaining members, so it is skipped.
- *
- * Exit code 1 on violation so the gate fails.
  */
 import ts from 'typescript';
-import { loadPrograms, rel, uniqueSourceFiles } from './programs.mjs';
+import { rel } from './programs.mjs';
 
 const isFunctionLike = (node) =>
   ts.isFunctionDeclaration(node) ||
@@ -55,16 +52,19 @@ function findingsIn(file) {
   return found;
 }
 
-const findings = uniqueSourceFiles(loadPrograms()).flatMap(findingsIn);
-
-if (findings.length === 0) {
-  console.log('✅ param-fields: every destructured parameter binds all its declared members');
-} else {
-  for (const { path, line, unbound } of findings) {
-    console.error(`  ${path}:${line}  never bound: ${unbound.join(', ')}`);
+function run({ files }) {
+  const findings = files.flatMap(findingsIn);
+  if (findings.length === 0) {
+    return {
+      passed: true,
+      report: '✅ param-fields: every destructured parameter binds all its declared members',
+    };
   }
-  console.error(
-    `\n❌ param-fields: ${findings.length} parameter(s) declare members the function never reads. Remove the member from the type and from every caller, or bind it.`,
+  const lines = findings.map(
+    ({ path, line, unbound }) => `  ${path}:${line}  never bound: ${unbound.join(', ')}`,
   );
-  process.exit(1);
+  const summary = `\n❌ param-fields: ${findings.length} parameter(s) declare members the function never reads. Remove the member from the type and from every caller, or bind it.`;
+  return { passed: false, report: [...lines, summary].join('\n') };
 }
+
+export const paramFields = { name: 'param-fields', run };
