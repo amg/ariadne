@@ -3,6 +3,8 @@ import type { TaskInfo } from '../../types/archive.ts';
 import type { Raise } from './raise.ts';
 import type { RaiseSources } from './sources.ts';
 
+/** The run the fixture's generator task ran under. */
+export const RUN = '20261015T001000Z-smoke-load-direct';
 export const RAISED = '2026-10-15T00:00:00.000Z';
 export const STARTED = '2026-10-15T00:10:00.000Z';
 export const ENDED = '2026-10-15T00:12:00.000Z';
@@ -133,7 +135,7 @@ export const generatorTask: TaskInfo = {
   stoppedReason: 'Essential container in task exited',
   exitCode: 0,
   capacityProvider: 'FARGATE_SPOT',
-  environment: { GENERATOR: '0', FIRST_USER: '0', USER_COUNT: '2', RUN_ID: 'run-1' },
+  environment: { GENERATOR: '0', FIRST_USER: '0', USER_COUNT: '2', RUN_ID: RUN },
 };
 
 /** A raise as the fixture run left it: every source holds something, and counts how often it was asked. */

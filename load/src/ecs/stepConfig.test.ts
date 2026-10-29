@@ -15,6 +15,7 @@ const PRINTED_STEP10 = JSON.stringify({
     chattingShare: 0.2,
     rampSeconds: 600,
     holdSeconds: 1_200,
+    warmUp: { rampSeconds: 390, holdSeconds: 120 },
     thinkSeconds: 30,
     egressGbPerHour: 2,
     logsGbPerHour: 0.5,

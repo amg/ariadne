@@ -47,11 +47,16 @@ export function keptGeneratorTasks(folder: string): readonly TaskInfo[] {
     .map((line) => taskInfoSchema.parse(JSON.parse(line)));
 }
 
-/** The tasks ECS still describes, and the kept ones it has forgotten. */
-export function withKeptTasks(
-  live: readonly TaskInfo[],
-  kept: readonly TaskInfo[],
-): readonly TaskInfo[] {
+/**
+ * The run's tasks that ECS still describes, and the kept ones it has
+ * forgotten. Tasks of other runs, such as the warm-up, are left out.
+ */
+export function withKeptTasks(input: {
+  live: readonly TaskInfo[];
+  kept: readonly TaskInfo[];
+  runId: string;
+}): readonly TaskInfo[] {
+  const live = input.live.filter((task) => task.environment.RUN_ID === input.runId);
   const known = new Set(live.map((task) => task.taskId));
-  return [...live, ...kept.filter((task) => !known.has(task.taskId))];
+  return [...live, ...input.kept.filter((task) => !known.has(task.taskId))];
 }

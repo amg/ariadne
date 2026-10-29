@@ -91,6 +91,10 @@ const imagesSchema = z.record(z.string(), z.string());
  * that stops is kept in the run's folder as ECS described it, with its
  * reason, so that the archive has it after ECS forgets.
  *
+ * A step with a warm-up first runs the same fleet unrecorded, under
+ * `<run>-warm-up`, so that the load balancer has grown before the run
+ * begins. The run does not begin when the warm-up does not finish.
+ *
  * A seeding run runs the same fleet On-Demand, replaces no generator, and
  * keeps no record.
  *
@@ -111,6 +115,47 @@ const signal = interruptionOf(process, (repeated) =>
     `${repeated} received again. The run is already ending: it stops its generators and seals itself before the command returns.`,
   ),
 );
+const fleet = {
+  ecs,
+  mode: options.mode,
+  placement: config.load.spot ? ('spot' as const) : ('on-demand' as const),
+  users: config.load.users,
+  generators: config.load.generators,
+  rampSeconds: config.load.rampSeconds,
+  thinkSeconds: config.load.thinkSeconds,
+  signal,
+  say,
+  pollEveryMs: POLL_EVERY_MS,
+  sleep,
+};
+const stopGenerators = (reason: string) =>
+  stopEveryGenerator({ ecs, reason, pollEveryMs: POLL_EVERY_MS, sleep });
+
+const { warmUp } = config.load;
+if (options.mode === 'load' && warmUp !== null) {
+  say(
+    `Warm-up: the users come up over ${warmUp.rampSeconds} s and hold for ${warmUp.holdSeconds} s, unrecorded`,
+  );
+  const warmedUp = await carryOutRun({
+    recordOrNull: null,
+    runFleet: () =>
+      runGenerators({
+        ...fleet,
+        runId: `${options.run}-warm-up`,
+        rampSeconds: warmUp.rampSeconds,
+        holdSeconds: warmUp.holdSeconds,
+        keepStoppedTask: async () => undefined,
+      }),
+    stopEveryGenerator: stopGenerators,
+    say,
+  });
+  if (warmedUp !== 'finished') {
+    say(`The warm-up ended ${warmedUp}, so run ${options.run} does not begin`);
+    process.exit(exitStatusOf(warmedUp));
+  }
+  say(`Warm-up finished; run ${options.run} begins`);
+}
+
 const startedAt = new Date().toISOString();
 const keepStoppedTask =
   options.mode === 'load'
@@ -135,23 +180,12 @@ const outcome = await carryOutRun({
       : null,
   runFleet: () =>
     runGenerators({
-      ecs,
+      ...fleet,
       runId: options.run,
-      mode: options.mode,
-      placement: config.load.spot ? 'spot' : 'on-demand',
-      users: config.load.users,
-      generators: config.load.generators,
-      rampSeconds: config.load.rampSeconds,
       holdSeconds: config.load.holdSeconds,
-      thinkSeconds: config.load.thinkSeconds,
-      signal,
       keepStoppedTask,
-      say,
-      pollEveryMs: POLL_EVERY_MS,
-      sleep,
     }),
-  stopEveryGenerator: (reason) =>
-    stopEveryGenerator({ ecs, reason, pollEveryMs: POLL_EVERY_MS, sleep }),
+  stopEveryGenerator: stopGenerators,
   say,
 });
 process.exit(exitStatusOf(outcome));

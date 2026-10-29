@@ -96,9 +96,11 @@ load run that does not run its whole plan, because it was interrupted or
 failed, stops counting toward that limit; the ledger still lists it, since it
 may have cost something. `reset-budget` clears the day by hand. And
 the safety net deletes the app stack three hours after a raise and the
-load stack an hour after it starts, whether or not anyone remembers.
+load stack 80 minutes after it starts, whether or not anyone remembers.
 
 ## Runs
+
+A growing load balancer cuts open push streams. So step10, step50 and step100 first run an unrecorded warm-up under `<run id>-warm-up`, which grows the load balancer before the measured run. Its requests stay out of the run's folder. When it does not finish, the run does not begin.
 
 Every load run is archived into its folder on the operator's machine, `load/.runs/<run id>/`, before `load` returns: the generators' request lines, the API's, worker's and auth's logs, every CloudWatch metric of the raise, the database's Performance Insights, and what ECS and scaling recorded. The load balancer's access logs stay where it writes them, under the vault's `origin-access-logs/`. A run is sealed when its folder holds its manifest, written last; one that has begun and has no manifest is unsealed, and `down` refuses while the raise has one. The vault keeps no runs: runs from before this (under the vault's `runs/`) can be deleted with `aws s3 rm s3://<vault bucket>/runs/ --recursive`.
 
@@ -149,7 +151,7 @@ address to the origin's security group. The rule belongs to the load stack,
 so it goes when the stack goes. `load` deletes the stack once the run is
 sealed, or at once when it fails before the run begins recording. A run that
 could not be sealed keeps its stack for `archive`, and `down` or the safety
-net, an hour after the stack started, takes it then. Nothing needs closing by
+net, 80 minutes after the stack started, takes it then. Nothing needs closing by
 hand. The gateway runs on both paths and is in the run's worst case.
 
 ## Steps

@@ -16,7 +16,7 @@ const task = (taskId: string, overrides: Partial<TaskInfo> = {}) => ({
   stoppedReason: 'Your Spot Task was interrupted.',
   exitCode: 0,
   capacityProvider: 'FARGATE_SPOT',
-  environment: { GENERATOR: '0', ATTEMPT: '1' },
+  environment: { RUN_ID: 'run-1', GENERATOR: '0', ATTEMPT: '1' },
   ...overrides,
 });
 
@@ -44,6 +44,14 @@ describe('withKeptTasks', () => {
     const live = task('t1', { stopCode: 'EssentialContainerExited' });
     const kept = [task('t1'), task('t2')];
 
-    expect(withKeptTasks([live], kept)).toEqual([live, task('t2')]);
+    expect(withKeptTasks({ live: [live], kept, runId: 'run-1' })).toEqual([live, task('t2')]);
+  });
+
+  it('leaves out tasks of other runs, such as the warm-up', () => {
+    const warmUp = task('t0', { environment: { RUN_ID: 'run-1-warm-up', GENERATOR: '0' } });
+
+    expect(withKeptTasks({ live: [warmUp, task('t1')], kept: [], runId: 'run-1' })).toEqual([
+      task('t1'),
+    ]);
   });
 });

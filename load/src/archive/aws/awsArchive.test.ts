@@ -16,10 +16,8 @@ import type { RunDescription } from '../manifestBuilder.ts';
 import { archiveAwsRun, beginAwsRun } from './awsArchive.ts';
 import { generatorTaskKeeper } from './keptTasks.ts';
 import { SourceUnavailable } from './sources.ts';
-import { ENDED, STARTED, at, fakeSources, generatorTask, raise } from './testing.ts';
+import { ENDED, RUN, STARTED, at, fakeSources, generatorTask, raise } from './testing.ts';
 import { unsealedRunsSince } from './unsealed.ts';
-
-const RUN = '20261015T001000Z-smoke-load-direct';
 
 const description: RunDescription = {
   runId: RUN,

@@ -83,18 +83,20 @@ runs.
   ramp, where a minute's p95 reached 9,786 ms. That is a reading, not a
   figure rebuild gives.
 - Step50 has five times the connections, so expect it to be worse.
-- What we do about it. A load step now reserves its load balancer's
-  capacity for the raise's whole life: 14 units for every thousand users,
-  which is what it grew itself to under step10. So it should never grow
-  under a run. Not yet proven on a run. And a stream that the load
+- What we do about it. Reserving capacity (about 14 units per thousand
+  users, step10's own growth) would stop the growing, but the account's
+  quota of reserved units is 0 until AWS raises it. So a load run first
+  warms the load balancer up. The same users come up unrecorded, as fast
+  as auth allows (6.5 minutes for step10), hold 2 minutes, and stop. Not
+  yet proven on a run. And a stream that the load
   balancer, or anything else beneath the app, ends and the user reopens
   within 10 s is not a failure: the infrastructure changing is not the
   app failing. Such a user counts as holding a stream for the push
   streams criterion. Rebuilt that way, run 1 held 9,984 and run 2 held
   9,999, both passing. Sign-ins and chats in flight when it happens
   still fail, because a user sees those.
-- The reservation bills for the raise's whole life. Step100's puts its
-  raise's worst case at $63, so the daily limit is now $100.
+- The warm-up lengthens every load run, so the load stack now lives up to
+  80 minutes.
 
 **The app did not always notice a dead stream.** In run 1 the API kept
 about 8,800 closed streams for about 15 minutes, until the network gave up

@@ -106,13 +106,9 @@ describe('the load balancer’s reserved capacity', () => {
     return balancer?.Properties.MinimumLoadBalancerCapacity;
   };
 
-  it('reserves capacity for the users a load step brings, so the load balancer never grows under them', () => {
-    assert.deepEqual(reservedOf('step10'), { CapacityUnits: 140 });
-    assert.deepEqual(reservedOf('step50'), { CapacityUnits: 700 });
-  });
-
   it('leaves the load balancer to grow on its own where a step reserves nothing', () => {
     assert.equal(reservedOf('smoke'), undefined);
+    assert.equal(reservedOf('step10'), undefined);
     assert.equal(reservedOf('step-prod'), undefined);
   });
 });

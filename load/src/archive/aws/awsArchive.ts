@@ -42,8 +42,18 @@ export function beginAwsRun(input: {
 type AwsArchiveResult = { status: 'sealed' | 'already-sealed'; manifest: Manifest };
 
 /** The moment the run ended, when nothing says: the last of its generators' stops. */
-async function endOfRun(sources: RaiseSources, raise: Raise, folder: string) {
-  const tasks = withKeptTasks(await sources.tasks(raise.clusters.load), keptGeneratorTasks(folder));
+async function endOfRun(input: {
+  sources: RaiseSources;
+  raise: Raise;
+  folder: string;
+  runId: string;
+}) {
+  const { sources, raise, folder, runId } = input;
+  const tasks = withKeptTasks({
+    live: await sources.tasks(raise.clusters.load),
+    kept: keptGeneratorTasks(folder),
+    runId,
+  });
   const stops = generatorTasksOf(tasks)
     .flatMap(({ task }) => task.stoppedAt ?? [])
     .sort();
@@ -80,7 +90,9 @@ export async function archiveAwsRun(input: {
   const raise = raiseSchema.parse(JSON.parse(readFileSync(join(folder, LAYOUT.raise), 'utf8')));
   const sources = input.sourcesFor(raise);
   const endedAt =
-    input.endedAt ?? pending.description.endedAt ?? (await endOfRun(sources, raise, folder));
+    input.endedAt ??
+    pending.description.endedAt ??
+    (await endOfRun({ sources, raise, folder, runId }));
   if (endedAt === null) {
     throw new Error(`Nothing says when ${runId} ended; give it with --ended`);
   }
@@ -98,6 +110,7 @@ export async function archiveAwsRun(input: {
     collection: awsCollection({
       folder,
       run: {
+        runId,
         raise,
         startedAt: description.startedAt,
         endedAt,

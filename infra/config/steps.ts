@@ -123,6 +123,12 @@ export type Step = {
     chattingShare: number;
     rampSeconds: number;
     holdSeconds: number;
+    /**
+     * An unrecorded pass of the same users before the measured run. A
+     * growing load balancer cuts open push streams, so the warm-up grows it
+     * first. Null runs none.
+     */
+    warmUp: { rampSeconds: number; holdSeconds: number } | null;
     /** Pause between one reply ending and the user's next message. */
     thinkSeconds: number;
     /** Rough ceilings for the usage-priced estimate only. */
@@ -149,23 +155,11 @@ const WEB: ServiceSize = { cpu: 256, memoryMiB: 512, count: 2 };
  */
 const STEP50_WORKER_JOBS_AT_ONCE = 16;
 
-/**
- * Load balancer capacity units reserved for every thousand users, so that
- * a load step's users never make the load balancer grow during a run.
- * Growing breaks the push streams open at the time. Step10's readings
- * set it: its 10,000 users took the load balancer to about 140 units.
- */
-const CAPACITY_UNITS_PER_THOUSAND_USERS = 14;
-
-/** The load balancer of a step whose users arrive faster than it would grow by itself. */
-function reservedFor(users: number): Step['loadBalancer'] {
-  return {
-    reservedCapacityUnits: Math.ceil((users / 1_000) * CAPACITY_UNITS_PER_THOUSAND_USERS),
-  };
-}
-
 /** The load balancer of a step that leaves it to grow on its own. */
 const GROWS_ON_ITS_OWN: Step['loadBalancer'] = { reservedCapacityUnits: null };
+
+/** Short, because a raise is billed by the minute. */
+const WARM_UP_HOLD_SECONDS = 120;
 
 export const STEPS: Record<StepName, Step> = {
   seed: {
@@ -178,7 +172,7 @@ export const STEPS: Record<StepName, Step> = {
       api: { cpu: 2048, memoryMiB: 4096, count: 1 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 1 },
       // 16 vCPU signs up the population in about half an hour, inside the
-      // load stack's hour.
+      // load stack's life.
       auth: { cpu: 2048, memoryMiB: 4096, count: 8 },
       mock: { cpu: 512, memoryMiB: 1024, count: 1 },
       web: { ...WEB, count: 1 },
@@ -191,6 +185,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 1,
       rampSeconds: 0,
       holdSeconds: 0,
+      warmUp: null,
       thinkSeconds: 0,
       egressGbPerHour: 2,
       logsGbPerHour: 2,
@@ -220,6 +215,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 120,
       holdSeconds: 600,
+      warmUp: null,
       thinkSeconds: 30,
       egressGbPerHour: 1,
       logsGbPerHour: 0.5,
@@ -232,7 +228,7 @@ export const STEPS: Record<StepName, Step> = {
     deploy: REPLACE_DEPLOY,
     database: { instanceClass: 'm7g.xlarge', storageGiB: 400, source: 'seedSnapshot' },
     cache: { maxStorageGb: 1, maxEcpuPerSecond: 25_000 },
-    loadBalancer: reservedFor(10_000),
+    loadBalancer: GROWS_ON_ITS_OWN,
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 2 },
       worker: {
@@ -253,6 +249,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 600,
       holdSeconds: 1_200,
+      warmUp: { rampSeconds: 390, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
       egressGbPerHour: 2,
       logsGbPerHour: 0.5,
@@ -265,7 +262,7 @@ export const STEPS: Record<StepName, Step> = {
     deploy: REPLACE_DEPLOY,
     database: { instanceClass: 'r7g.2xlarge', storageGiB: 400, source: 'seedSnapshot' },
     cache: { maxStorageGb: 5, maxEcpuPerSecond: 250_000 },
-    loadBalancer: reservedFor(50_000),
+    loadBalancer: GROWS_ON_ITS_OWN,
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 20 },
       // Queue work waits on I/O and runs in parallel, so more 1 vCPU tasks
@@ -288,6 +285,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 900,
       holdSeconds: 1_200,
+      warmUp: { rampSeconds: 480, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
       egressGbPerHour: 8,
       logsGbPerHour: 3,
@@ -300,7 +298,7 @@ export const STEPS: Record<StepName, Step> = {
     deploy: REPLACE_DEPLOY,
     database: { instanceClass: 'r7g.4xlarge', storageGiB: 400, source: 'seedSnapshot' },
     cache: { maxStorageGb: 10, maxEcpuPerSecond: 500_000 },
-    loadBalancer: reservedFor(100_000),
+    loadBalancer: GROWS_ON_ITS_OWN,
     services: {
       api: { cpu: 1024, memoryMiB: 2048, count: 40 },
       worker: { cpu: 1024, memoryMiB: 2048, count: 20 },
@@ -316,6 +314,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 1_200,
       holdSeconds: 1_200,
+      warmUp: { rampSeconds: 840, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
       egressGbPerHour: 15,
       logsGbPerHour: 5,
@@ -371,6 +370,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 0,
       holdSeconds: 0,
+      warmUp: null,
       thinkSeconds: 0,
       egressGbPerHour: 1,
       logsGbPerHour: 0.5,

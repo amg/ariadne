@@ -12,8 +12,8 @@ import type { StackLimit } from './safetyNetHandler.ts';
 const CHECK_EVERY = Duration.minutes(5);
 
 /**
- * Deletes the app stack three hours after a raise and the load stack an
- * hour after it starts, whoever forgot them. It never touches Cloudflare:
+ * Deletes the app stack three hours after a raise and the load stack 80
+ * minutes after it starts, whoever forgot them. It never touches Cloudflare:
  * a record left pointing at a deleted load balancer only serves errors.
  */
 export class SafetyNet extends Construct {

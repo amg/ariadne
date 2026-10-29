@@ -36,6 +36,7 @@ export function trailingEndOf(endedAt: string) {
 }
 
 type AwsRunInput = {
+  runId: string;
   raise: Raise;
   startedAt: string;
   endedAt: string;
@@ -149,7 +150,9 @@ export function awsCollection(input: {
   const tasksOfGenerators = (): Promise<readonly TaskInfo[]> => {
     generatorTasks ??= orNothing('the generators’ tasks', () =>
       sources.tasks(raise.clusters.load),
-    ).then((tasks) => withKeptTasks(tasks ?? [], keptGeneratorTasks(folder)));
+    ).then((tasks) =>
+      withKeptTasks({ live: tasks ?? [], kept: keptGeneratorTasks(folder), runId: run.runId }),
+    );
     return generatorTasks;
   };
 
