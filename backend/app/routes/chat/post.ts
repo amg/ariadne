@@ -50,7 +50,7 @@ const judging: ArrivalJudging = {
 /** How a settled Exchange reaches the Thread's titling. */
 const titling: ThreadTitling = { enqueueThreadGenerateTitle };
 
-/** The chat client sends its whole message list; the newest user text is the message. */
+/** The newest user text in the request's messages is the message. */
 function extractLastUserText(messages: ChatMessages | undefined) {
   if (!messages) return '';
   const lastUser = [...messages].reverse().find((message) => message.role === 'user');

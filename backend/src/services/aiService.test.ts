@@ -256,6 +256,39 @@ describe('submitChat', () => {
     return mock.chats.lastRequest();
   }
 
+  it('sends the model the whole live conversation, without abandoned or empty rows', async () => {
+    const { userId, threadId } = await createRandomThread();
+    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const stored = [
+      { role: 'user', content: 'one TOPIC:hiking' },
+      { role: 'assistant', content: 'reply one TOPIC:hiking' },
+      { role: 'user', content: 'two TOPIC:hiking' },
+      { role: 'assistant', content: '', exchangeStatus: 'interrupted' },
+      { role: 'assistant', content: 'stale reply TOPIC:hiking', abandoned: true },
+      { role: 'assistant', content: 'reply two TOPIC:hiking' },
+      { role: 'user', content: 'edited away TOPIC:hiking', abandoned: true },
+    ] as const;
+    for (const [index, row] of stored.entries()) {
+      await insertMessage({ ...row, threadId, createdAt: minutesAgo(stored.length - index) });
+    }
+
+    const handle = await assertSuccess(
+      await submit({ userId, threadId, content: 'three TOPIC:hiking' }),
+    );
+    await drain(handle);
+    await expect(handle.outcome).resolves.toMatchObject({ type: 'success' });
+
+    // The mock keeps the request body it received untyped.
+    const sent = mock.chats.lastRequest()?.messages as { role: string; content: string }[];
+    expect(sent.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', content: 'one TOPIC:hiking' },
+      { role: 'assistant', content: 'reply one TOPIC:hiking' },
+      { role: 'user', content: 'two TOPIC:hiking' },
+      { role: 'assistant', content: 'reply two TOPIC:hiking' },
+      { role: 'user', content: 'three TOPIC:hiking' },
+    ]);
+  });
+
   it('lets the model think when reasoning is enabled', async () => {
     const request = await chatRequestWithReasoning('true');
     expect(request?.chat_template_kwargs).toBeUndefined();

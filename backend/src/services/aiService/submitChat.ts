@@ -7,6 +7,8 @@ import { secondsUntilUtcMidnight, sumDailySpend } from '@queries/messageUsage/su
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertPendingReplyOrNull } from '@queries/messages/insertPendingReplyOrNull';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { listModelHistoryByThread } from '@queries/messages/listModelHistoryByThread';
+import { listNewestRowsByThread } from '@queries/messages/listNewestRowsByThread';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
@@ -93,30 +95,19 @@ function abandonedTitlePreview(content: string) {
   return `${trimmed.slice(0, ABANDONED_TITLE_MAX_CHARS - 1).trimEnd()}\u2026`;
 }
 
-/** A Thread's messages as `listMessagesByThread` reads them, oldest first. */
-type ThreadRows = Awaited<ReturnType<typeof listMessagesByThread>>;
+/** The Thread's conversation before a user turn, as the model reads it. */
+type ModelHistory = Awaited<ReturnType<typeof listModelHistoryByThread>>;
 
-/** System prompt + prior turns (user/assistant only) + the new user turn.
- * Abandoned turns stay out of inference memory — no history to learn from.
- * Empty assistant rows (interrupted before first token) stay in the DB/UI
- * but are skipped in the model context.
- */
+/** Prior turns + the new user turn, as the model receives them. */
 function buildModelMessages({
   history,
   userMessage,
 }: {
-  history: ThreadRows;
+  history: ModelHistory;
   userMessage: Message;
 }): ModelMessage[] {
   return [
-    ...history
-      .filter(
-        (row) =>
-          (row.role === 'user' || row.role === 'assistant') &&
-          !row.abandoned &&
-          (row.role === 'user' || row.content !== ''),
-      )
-      .map((row) => ({ role: row.role, content: row.content })),
+    ...history.map((row) => ({ role: row.role, content: row.content })),
     { role: userMessage.role, content: userMessage.content },
   ];
 }
@@ -143,35 +134,31 @@ type StartExchangeProps = {
  * Settles a crashed exchange: status + estimated spend (no abandonment
  * flags — interruption/failure never abandons). The spend row is best
  * effort: a process that settled first keeps its row, and a failed write
- * is recorded without blocking the new Exchange.
+ * is recorded without blocking the new Exchange. The crashed reply's
+ * prompt may sit before the Thread's newest rows, so the whole Thread is
+ * read to find it.
  */
 async function settleCrashedExchange({
-  rows,
+  threadId,
   assistantMessage,
-  assistantIndex,
   systemPrompt,
 }: {
-  rows: ThreadRows;
-  assistantMessage: ThreadRows[number];
-  assistantIndex: number;
+  threadId: string;
+  assistantMessage: Message;
   systemPrompt: string;
 }) {
   await updateExchangeStatus({ messageId: assistantMessage.id, exchangeStatus: 'interrupted' });
 
-  let promptRow: ThreadRows[number] | undefined;
-  let promptIndex = -1;
-  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'user') {
-      promptRow = rows[i];
-      promptIndex = i;
-      break;
-    }
-  }
+  const rows = await listMessagesByThread({ threadId });
+  const assistantIndex = rows.findIndex((row) => row.id === assistantMessage.id);
+  const promptRow = rows
+    .slice(0, Math.max(assistantIndex, 0))
+    .findLast((row) => row.role === 'user');
   const promptTokens = promptRow
     ? estimateChatPromptTokens({
         systemPrompt,
         messages: buildModelMessages({
-          history: rows.slice(0, promptIndex),
+          history: await listModelHistoryByThread({ threadId, beforeMessageId: promptRow.id }),
           userMessage: promptRow,
         }),
       })
@@ -205,13 +192,6 @@ async function budgetExceededErrorOrNull(): Promise<ResultError | null> {
   return errBudgetExceeded(secondsUntilUtcMidnight());
 }
 
-function newestAssistantIndexOf(rows: Message[]) {
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i]?.role === 'assistant') return i;
-  }
-  return -1;
-}
-
 /** Whether a `pending` reply is young enough that its process may still be streaming it. */
 function isLivePending(row: Message | undefined): row is Message {
   if (row?.exchangeStatus !== 'pending') return false;
@@ -228,7 +208,8 @@ const EXCHANGE_IN_FLIGHT_MESSAGE = 'An exchange is already running in this threa
  * belongs to a dead process: settle it as interrupted here so the thread
  * moves on. Run on rows read before the gate wait, it only refuses early;
  * the claim re-runs it on fresh rows, and the database refuses a second
- * pending reply whatever the rows said.
+ * pending reply whatever the rows said. The rows must hold the Thread's
+ * newest assistant Message.
  */
 async function guardOrSettleStaleExchange({
   rows,
@@ -236,13 +217,12 @@ async function guardOrSettleStaleExchange({
   threadId,
   memory,
 }: {
-  rows: ThreadRows;
+  rows: readonly Message[];
   userId: string;
   threadId: string;
   memory: MemoryFeature;
 }) {
-  const newestAssistantIndex = newestAssistantIndexOf(rows);
-  const newestAssistant = rows[newestAssistantIndex];
+  const newestAssistant = rows.findLast((row) => row.role === 'assistant');
   if (!newestAssistant || newestAssistant.exchangeStatus !== 'pending') return null;
   if (isLivePending(newestAssistant)) return err('exchange_in_flight', EXCHANGE_IN_FLIGHT_MESSAGE);
 
@@ -252,12 +232,7 @@ async function guardOrSettleStaleExchange({
     memory,
     basePrompt: SYSTEM_PROMPT,
   });
-  await settleCrashedExchange({
-    rows,
-    assistantMessage: newestAssistant,
-    assistantIndex: newestAssistantIndex,
-    systemPrompt,
-  });
+  await settleCrashedExchange({ threadId, assistantMessage: newestAssistant, systemPrompt });
   return null;
 }
 
@@ -276,8 +251,6 @@ function liveReplyIdsBeneath({
 }
 
 type ClaimedExchange = {
-  /** Turns preceding the user turn, as the Thread stands at the claim. */
-  precedingRows: ThreadRows;
   userMessage: Message;
   /** The `pending` reply row the Exchange settles. */
   assistantMessage: Message;
@@ -306,7 +279,7 @@ async function claimExchange({
   return inTransaction(async (trx): Promise<Result<ClaimedExchange>> => {
     // Locked before the read, so the read sees what the one ahead left.
     const live = await lockLiveMessage({ threadId, messageId: userMessageId }, trx);
-    const rows = await listMessagesByThread({ threadId }, trx);
+    const rows = await listNewestRowsByThread({ threadId }, trx);
     const userIndex = newestLiveUserIndex(rows);
     const userMessage = rows[userIndex];
     if (!live || userMessage?.id !== userMessageId) {
@@ -322,7 +295,7 @@ async function claimExchange({
     const assistantMessage = await insertPendingReplyOrNull({ threadId }, trx);
     if (!assistantMessage) return err('exchange_in_flight', EXCHANGE_IN_FLIGHT_MESSAGE);
     await setMessagesAbandoned({ messageIds: replyIds, abandoned: true }, trx);
-    return ok({ precedingRows: rows.slice(0, userIndex), userMessage, assistantMessage });
+    return ok({ userMessage, assistantMessage });
   });
 }
 
@@ -331,11 +304,14 @@ async function startExchange(props: StartExchangeProps): Promise<Result<ChatStre
   const claimed = await claimExchange(props);
   if (claimed.type === 'error') return claimed;
   const { userId, threadId, titling, memory, exchangeLog } = props;
-  const { precedingRows, userMessage, assistantMessage } = claimed.data;
+  const { userMessage, assistantMessage } = claimed.data;
   const config = resolveInferenceConfig();
 
   const controller = new AbortController();
-  const modelMessages = buildModelMessages({ history: precedingRows, userMessage });
+  // Read after the claim commits: the turns before the claimed arrival
+  // are settled, and the claim's transaction stays short.
+  const history = await listModelHistoryByThread({ threadId, beforeMessageId: userMessage.id });
+  const modelMessages = buildModelMessages({ history, userMessage });
   const systemPrompt = await assembledSystemPrompt({
     userId,
     threadId,
@@ -586,15 +562,15 @@ async function submitArrival({
   const overBudget = await budgetExceededErrorOrNull();
   if (overBudget) return overBudget;
 
-  const precedingRows = await listMessagesByThread({ threadId });
+  const newestRows = await listNewestRowsByThread({ threadId });
   const inFlight = await guardOrSettleStaleExchange({
-    rows: precedingRows,
+    rows: newestRows,
     userId,
     threadId,
     memory,
   });
   if (inFlight) return inFlight;
-  const unanswered = await unansweredArrivalErrorOrNull(precedingRows);
+  const unanswered = await unansweredArrivalErrorOrNull(newestRows);
   if (unanswered) return unanswered;
 
   const { userMessage, listener } = await storeArrival({
@@ -670,7 +646,7 @@ async function retryExchange({
   const overBudget = await budgetExceededErrorOrNull();
   if (overBudget) return overBudget;
 
-  const rows = await listMessagesByThread({ threadId });
+  const rows = await listNewestRowsByThread({ threadId });
   const last = rows[rows.length - 1];
   if (!last) return err('nothing_to_regenerate');
 

@@ -152,7 +152,14 @@ export function getThreadChat(threadId: string) {
 
   const chat = new Chat<UIMessage>({
     id: threadId,
-    transport: new DefaultChatTransport({ api: pathOf(chatEndpoint, { id: threadId }) }),
+    transport: new DefaultChatTransport({
+      api: pathOf(chatEndpoint, { id: threadId }),
+      // The server keeps the Thread and reads only the newest message, so
+      // the request carries that one alone, however long the Thread grows.
+      prepareSendMessagesRequest: ({ body, id, messages, trigger, messageId }) => ({
+        body: { ...body, id, messages: messages.slice(-1), trigger, messageId },
+      }),
+    }),
     onData: (part) => notify(threadId, (listener) => listener.onData?.(part)),
     // Fires after every exchange end — finished, stopped, or failed.
     onFinish: () => {
