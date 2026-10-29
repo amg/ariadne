@@ -292,6 +292,34 @@ describe('handOverArrival', () => {
     expect(prompt).toContain('The user loves hiking in the Alps.');
   });
 
+  it('moves at once when the capture has stored its Facts but its job has not left the queue yet', async () => {
+    process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
+    const { userId, threadId, pausedMessageId } = await pausedThread();
+    const segmentId = await closedSegmentIdOf(pausedMessageId);
+    for (let tries = 0; (await findMemoryCaptureSegmentJobOrNull(segmentId)) !== null; tries += 1) {
+      if (tries > 200) throw new Error('the capture never finished');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const jobStillListed = {
+      ...memoryOn,
+      findMemoryCaptureSegmentJobOrNull: async () => ({
+        id: '1',
+        state: 'running' as const,
+        errorClass: null,
+        lastError: null,
+      }),
+    };
+
+    const result = await handOverArrival({
+      userId,
+      threadId,
+      messageId: pausedMessageId,
+      memory: jobStillListed,
+    });
+
+    expect(result.type).toBe('success');
+  });
+
   it('moves without the closed segment once its capture gives up', async () => {
     process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
     const { userId, threadId, pausedMessageId } = await pausedThread(() =>

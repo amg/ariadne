@@ -3,7 +3,10 @@ import { capturePointersOf } from '@queries/memoryCaptureProgress/capturePointer
 import { recordSegmentCapture } from '@queries/memoryCaptureProgress/recordSegmentCapture';
 import { upsertCaptureProgress } from '@queries/memoryCaptureProgress/upsertCaptureProgress';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
-import { listSegmentsNeedingCapture } from '@queries/threadSegments/listSegmentsNeedingCapture';
+import {
+  findSegmentNeedingCaptureOrNull,
+  listSegmentsNeedingCapture,
+} from '@queries/threadSegments/listSegmentsNeedingCapture';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { getUserSettings } from '@services/settingsService';
@@ -179,8 +182,7 @@ export async function captureSegment({
 }: SegmentToCapture): Promise<CapturePassReport> {
   const settings = await getUserSettings({ userId });
   const report = emptyReport(settings.memoryEnabled);
-  const owed = await listSegmentsNeedingCapture({ threadId, modelId: EMBEDDING_MODEL_ID });
-  const segment = owed.find((candidate) => candidate.segmentId === segmentId);
+  const segment = await findSegmentNeedingCaptureOrNull({ segmentId, modelId: EMBEDDING_MODEL_ID });
   if (!segment) return report;
 
   if (!settings.memoryEnabled) {

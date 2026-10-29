@@ -1,6 +1,7 @@
 import { env } from '@config/env';
 import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
+import { findSegmentNeedingCaptureOrNull } from '@queries/threadSegments/listSegmentsNeedingCapture';
 import { findThreadByIdAndUser } from '@queries/threads/findThreadByIdAndUser';
 import { moveArrivalToFreshThread } from '@queries/threads/moveArrivalToFreshThread';
 import { EMBEDDING_MODEL_ID, pausedArrivalOrNull } from '@services/aiService';
@@ -24,16 +25,25 @@ async function settledWithin(work: Promise<unknown>, ms: number) {
 
 type Arrival = { userId: string; threadId: string; messageId: string };
 
+/** Whether the segment's Facts are stored, so that it owes no capture. */
+async function segmentCaptured(segmentId: string) {
+  return (
+    (await findSegmentNeedingCaptureOrNull({ segmentId, modelId: EMBEDDING_MODEL_ID })) === null
+  );
+}
+
 /**
  * Whether the capture of the segment the arrival's fire closed has
- * settled: it landed, or it gave up and its Facts stay owed. Waits for it,
- * up to the handover's wait, and queues it when none is under way. A
- * capture already queued or running is waited on as it is, so asking
- * again never restarts its attempts, and one that gave up is not tried
- * again here. Listening starts first, so a capture finishing meanwhile is
- * still heard; news lost between backend copies is caught by looking at
- * the capture again when the wait runs out. No closed segment on record
- * means nothing to wait for.
+ * settled: its Facts are stored, or it gave up and its Facts stay owed.
+ * Stored Facts are read from the segment itself, whatever the queue still
+ * lists. Otherwise the handover waits for the capture, up to the
+ * handover's wait, and queues it when none is under way. A capture already
+ * queued or running is waited on as it is, so asking again never restarts
+ * its attempts, and one that gave up is not tried again here. Listening
+ * starts before anything is read, so a capture finishing meanwhile is
+ * still heard. News lost between backend copies is caught by reading the
+ * segment again when the wait runs out. No closed segment on record means
+ * nothing to wait for.
  */
 async function closedSegmentCaptureSettled(
   memory: Extract<MemoryFeature, { kind: 'on' }>,
@@ -54,13 +64,14 @@ async function closedSegmentCaptureSettled(
   });
   try {
     await subscription.ready;
+    if (await segmentCaptured(segmentId)) return true;
     const job = await memory.findMemoryCaptureSegmentJobOrNull(segmentId);
     if (job?.state === 'dead') return true;
     if (job === null) await memory.enqueueMemoryCaptureSegment({ userId, threadId, segmentId });
     if (await settledWithin(settled, env.HANDOVER_WAIT_MS)) return true;
-    // A finished capture leaves no job behind; a dead one gave up.
+    if (await segmentCaptured(segmentId)) return true;
     const after = await memory.findMemoryCaptureSegmentJobOrNull(segmentId);
-    return after === null || after.state === 'dead';
+    return after?.state === 'dead';
   } finally {
     subscription.close();
   }

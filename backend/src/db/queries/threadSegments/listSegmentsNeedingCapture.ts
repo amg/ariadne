@@ -86,6 +86,27 @@ function settleRowOf({
   return latest.at.getTime() > pointer ? latest : null;
 }
 
+/** The segment's owed capture, or null when it owes none. */
+function owedCaptureOrNull({
+  segment,
+  successor,
+  chain,
+}: {
+  segment: ThreadSegment;
+  successor: ThreadSegment | null;
+  chain: ThreadChain;
+}): SegmentNeedingCapture | null {
+  const settle = settleRowOf({ segment, successor, chain });
+  if (!settle) return null;
+  return {
+    segmentId: segment.id,
+    startMessageId: segment.startMessageId,
+    capturedThroughAt: chain.pointerBySegment.get(segment.id) ?? null,
+    settleMessageId: settle.messageId,
+    settleMessageAt: settle.at,
+  };
+}
+
 /**
  * The thread's segments whose Fact capture is still owed, oldest first. A
  * segment owes one once it is settled (see `settleRowOf`) and its settle
@@ -105,19 +126,66 @@ export async function listSegmentsNeedingCapture({ threadId, modelId }: ListProp
     pointerBySegment: await capturePointersOf(segmentIds),
   };
 
-  const results: SegmentNeedingCapture[] = [];
-  for (let i = 0; i < segments.length; i += 1) {
-    const segment = segments[i];
-    if (!segment) break;
-    const settle = settleRowOf({ segment, successor: segments[i + 1] ?? null, chain });
-    if (!settle) continue;
-    results.push({
-      segmentId: segment.id,
-      startMessageId: segment.startMessageId,
-      capturedThroughAt: chain.pointerBySegment.get(segment.id) ?? null,
-      settleMessageId: settle.messageId,
-      settleMessageAt: settle.at,
-    });
-  }
-  return results;
+  return segments.flatMap(
+    (segment, i) => owedCaptureOrNull({ segment, successor: segments[i + 1] ?? null, chain }) ?? [],
+  );
+}
+
+/**
+ * One segment's owed capture, as `listSegmentsNeedingCapture` would list
+ * it, or null when it owes none or is gone. It reads that segment and the
+ * one after it only, so its cost does not grow with the thread.
+ */
+export async function findSegmentNeedingCaptureOrNull({
+  segmentId,
+  modelId,
+}: {
+  segmentId: string;
+  modelId: string;
+}) {
+  const segment = await db
+    .selectFrom('analysis.threadSegments')
+    .selectAll()
+    .where('id', '=', segmentId)
+    .where('modelId', '=', modelId)
+    .executeTakeFirst();
+  if (!segment) return null;
+  // Compared in the database: a JavaScript date drops the microseconds Postgres keeps.
+  const successor =
+    (await db
+      .selectFrom('analysis.threadSegments as next')
+      .innerJoin('analysis.threadSegments as current', (join) =>
+        join
+          .onRef('current.threadId', '=', 'next.threadId')
+          .onRef('current.modelId', '=', 'next.modelId'),
+      )
+      .selectAll('next')
+      .where('current.id', '=', segmentId)
+      .where((eb) =>
+        eb.or([
+          eb('next.createdAt', '>', eb.ref('current.createdAt')),
+          eb.and([
+            eb('next.createdAt', '=', eb.ref('current.createdAt')),
+            eb('next.id', '>', eb.ref('current.id')),
+          ]),
+        ]),
+      )
+      .orderBy('next.createdAt', 'asc')
+      .orderBy('next.id', 'asc')
+      .limit(1)
+      .executeTakeFirst()) ?? null;
+  const opener = successor
+    ? await db
+        .selectFrom('chat.messages')
+        .selectAll()
+        .where('id', '=', successor.startMessageId)
+        .executeTakeFirst()
+    : undefined;
+  const chain: ThreadChain = {
+    segments: successor ? [segment, successor] : [segment],
+    firesBySegment: await firesBySegmentOf([segment.id]),
+    messageById: new Map(opener ? [[opener.id, opener]] : []),
+    pointerBySegment: await capturePointersOf([segment.id]),
+  };
+  return owedCaptureOrNull({ segment, successor, chain });
 }
