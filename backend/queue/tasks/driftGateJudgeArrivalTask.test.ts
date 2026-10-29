@@ -13,6 +13,7 @@ import {
 } from '@queue/tasks/driftGateJudgeArrivalTask';
 import { queueTasks } from '@queue/worker';
 import { subscribe } from '@services/events';
+import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
 import { useTestDb } from '@test/test-db';
@@ -37,6 +38,7 @@ afterAll(async () => {
 });
 
 useTestDb();
+const holdTransaction = useHeldTransactions();
 
 /** A thread with one settled Turn, and a second arrival on a new topic. */
 async function threadWithShift() {
@@ -146,6 +148,27 @@ describe('judgeArrival', () => {
       }),
     ).toEqual({ kind: 'gone' });
     expect(await chainRowCounts(first.threadId)).toMatchObject({ logs: '0' });
+  });
+
+  it('reports an arrival abandoned while it was judged gone, leaving no segment behind', async () => {
+    const { userId, threadId, shiftId } = await threadWithShift();
+    const edit = await holdTransaction();
+    await setMessagesAbandoned({ messageIds: [shiftId], abandoned: true }, edit.trx);
+
+    const judging = judgeArrival({
+      arrival: { userId, threadId, messageId: shiftId },
+      threadAnalysisMode: 'heuristic',
+    });
+    await someoneWaitsOnALock();
+    await edit.commit();
+
+    expect(await judging).toEqual({ kind: 'gone' });
+    const segments = await db
+      .selectFrom('analysis.threadSegments')
+      .select('startMessageId')
+      .where('threadId', '=', threadId)
+      .execute();
+    expect(segments.map((segment) => segment.startMessageId)).not.toContain(shiftId);
   });
 
   it('fails recoverably when the provider does', async () => {

@@ -33,6 +33,9 @@ type AppendArrivalVerdictProps = {
 /** Rolls the append back when another pass wrote first. */
 class WrittenByAnotherPass extends Error {}
 
+/** Rolls the append back when an arrival that would open a segment was abandoned. */
+class OpenerAbandoned extends Error {}
+
 /**
  * Prunes the Thread's checkpoints to the keep-two survivors: every
  * judgment state and turn fold of this Thread and model whose Message is
@@ -92,6 +95,17 @@ async function storeJudgment(
   },
 ) {
   if (openedSegments.length > 0) {
+    // Locked so that an abandon either sees the segment and deletes it, or
+    // commits first and leaves this pass to write nothing.
+    const openerIds = [...new Set(openedSegments.map((segment) => segment.startMessageId))];
+    const liveOpeners = await trx
+      .selectFrom('chat.messages')
+      .select('id')
+      .where('id', 'in', openerIds)
+      .where('abandoned', '=', false)
+      .forShare()
+      .execute();
+    if (liveOpeners.length < openerIds.length) throw new OpenerAbandoned();
     const opened = await trx
       .insertInto('analysis.threadSegments')
       .values(openedSegments)
@@ -127,10 +141,12 @@ async function storeJudgment(
  * Adds one arrival's judgment to the live chain — its verdict, the
  * segments it opens, and its judgment-state checkpoint — together or not
  * at all, then prunes every other checkpoint of the Thread to the
- * keep-two survivors. False, with nothing written, when another pass
- * already logged that verdict or opened one of those segments; the state
- * row itself is idempotent (both passes replay the same stored rows into
- * the same values), so only the verdict and the segments decide the race.
+ * keep-two survivors. Nothing is written when another pass already logged
+ * that verdict or opened one of those segments, or when an arrival that
+ * would open a segment has been abandoned; the outcome says which. The
+ * state row itself is idempotent (both passes replay the same stored rows
+ * into the same values), so only the verdict and the segments decide the
+ * race.
  */
 export async function appendArrivalVerdict({
   threadId,
@@ -145,9 +161,10 @@ export async function appendArrivalVerdict({
       if (modelId === undefined) return;
       await storeJudgment(trx, { openedSegments, verdict, judgmentState, keep, threadId, modelId });
     });
-    return true;
+    return 'appended';
   } catch (error) {
-    if (error instanceof WrittenByAnotherPass) return false;
+    if (error instanceof WrittenByAnotherPass) return 'written-by-another-pass';
+    if (error instanceof OpenerAbandoned) return 'opener-abandoned';
     throw error;
   }
 }

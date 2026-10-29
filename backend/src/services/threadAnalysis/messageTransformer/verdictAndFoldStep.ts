@@ -431,7 +431,8 @@ async function foldTurnOfArrival(input: {
 
 /**
  * Stores the arrival's judgment, when the chain lacks any part of it, and
- * returns the chain holding it; null when another pass stored it first.
+ * returns the chain holding it, or why nothing was stored: another pass
+ * stored it first, or an arrival it would open a segment at was abandoned.
  */
 async function commitJudgment(input: {
   chain: LiveChain;
@@ -442,7 +443,7 @@ async function commitJudgment(input: {
   keep: KeptCheckpoints;
 }) {
   const { chain, messageId, verdict, openedSegments, judgmentState, keep } = input;
-  if (verdict === null && openedSegments.length === 0) return chain;
+  if (verdict === null && openedSegments.length === 0) return { kind: 'committed' as const, chain };
   const appended = await appendArrivalVerdict({
     threadId: chain.threadId,
     openedSegments,
@@ -450,8 +451,8 @@ async function commitJudgment(input: {
     judgmentState,
     keep,
   });
-  if (!appended) return null;
-  return withJudgment(chain, {
+  if (appended !== 'appended') return { kind: appended } as const;
+  const committed = withJudgment(chain, {
     messageId,
     verdict:
       verdict === null
@@ -464,6 +465,7 @@ async function commitJudgment(input: {
           },
     openedSegments,
   });
+  return { kind: 'committed' as const, chain: committed };
 }
 
 /**
@@ -513,7 +515,7 @@ async function judgeAndCommit(input: {
     state.currentSegmentId = fireOpening.id;
   }
 
-  const committed = await commitJudgment({
+  const commit = await commitJudgment({
     chain,
     messageId: userMessageId,
     verdict,
@@ -523,8 +525,18 @@ async function judgeAndCommit(input: {
     judgmentState: judgmentStateRow(userMessageId, snapshotOfVerdictState(state.verdictState)),
     keep: checkpointsToKeep({ chain, arrivalIndex: input.arrivalIndex }),
   });
-  if (committed === null) return ok({ kind: 'written-by-another-pass' });
-  return ok({ kind: 'filled', chain: committed });
+  switch (commit.kind) {
+    case 'committed':
+      return ok({ kind: 'filled', chain: commit.chain });
+    case 'written-by-another-pass':
+      return ok({ kind: 'written-by-another-pass' });
+    case 'opener-abandoned':
+      return err('arrival_not_live', 'The arrival was abandoned while it was judged.');
+    default: {
+      const _check: never = commit;
+      return _check;
+    }
+  }
 }
 
 /**

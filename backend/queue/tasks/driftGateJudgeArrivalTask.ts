@@ -84,8 +84,8 @@ export async function judgeArrival({
 
   const gate = await runLiveGate({ threadId, upToMessageId: messageId, mode: threadAnalysisMode });
   if (gate.type === 'error') {
-    // Gone between the check and the pass: report it as such.
-    if (gate.code === 'thread_not_found') return { kind: 'gone' };
+    // Abandoned after the check, before or during the pass: report it as such.
+    if (gate.code === 'arrival_not_live') return { kind: 'gone' };
     throw new TaskFailure(gate.code, gate.message);
   }
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '@db/db';
 import type { NewArrivalJudgmentState, NewSegmentDriftLog } from '@db/types';
 import { insertMessage } from '@queries/messages/insertMessage';
+import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { appendArrivalVerdict } from '@queries/segmentDriftLogs/appendArrivalVerdict';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -35,7 +36,7 @@ async function chainWithFiringArrival() {
       judgmentState: null,
       keep: { stateMessageIds: [], foldMessageIds: [] },
     }),
-  ).toBe(true);
+  ).toBe('appended');
   const arrival = await insertMessage({ threadId, role: 'user', content: 'Something else' });
   const verdict: NewSegmentDriftLog = {
     segmentId: openingSegment.id,
@@ -110,12 +111,50 @@ async function statesOf(threadId: string) {
 }
 
 describe('appendArrivalVerdict', () => {
+  it('writes nothing for an arrival abandoned while the judgment ran', async () => {
+    const { threadId, arrivalId, fire } = await chainWithFiringArrival();
+    const edit = await holdTransaction();
+    await setMessagesAbandoned({ messageIds: [arrivalId], abandoned: true }, edit.trx);
+
+    const judging = appendArrivalVerdict({
+      ...fire,
+      judgmentState: null,
+      keep: keepOwn(arrivalId),
+    });
+    await someoneWaitsOnALock();
+    await edit.commit();
+
+    expect(await judging).toBe('opener-abandoned');
+    const { segments } = await chainOf(threadId);
+    expect(segments.map((segment) => segment.startMessageId)).not.toContain(arrivalId);
+  });
+
+  it('lets an abandon that waited on the judgment delete the segment the judgment opened', async () => {
+    const { threadId, arrivalId, fire } = await chainWithFiringArrival();
+    const judging = await holdTransaction();
+    await judging.trx
+      .selectFrom('chat.messages')
+      .select('id')
+      .where('id', '=', arrivalId)
+      .forShare()
+      .execute();
+
+    const abandoning = setMessagesAbandoned({ messageIds: [arrivalId], abandoned: true });
+    await someoneWaitsOnALock();
+    await judging.trx.insertInto('analysis.threadSegments').values(fire.openedSegments).execute();
+    await judging.commit();
+    await abandoning;
+
+    const { segments } = await chainOf(threadId);
+    expect(segments.map((segment) => segment.startMessageId)).not.toContain(arrivalId);
+  });
+
   it("stores the verdict with the segment the arrival's fire opens", async () => {
     const { threadId, openingSegmentId, arrivalId, fire } = await chainWithFiringArrival();
 
     expect(
       await appendArrivalVerdict({ ...fire, judgmentState: null, keep: keepOwn(arrivalId) }),
-    ).toBe(true);
+    ).toBe('appended');
 
     const { segments, logs } = await chainOf(threadId);
     expect(segments.map((segment) => segment.startMessageId)).toContain(arrivalId);
@@ -138,7 +177,7 @@ describe('appendArrivalVerdict', () => {
 
     expect(
       await appendArrivalVerdict({ ...fire, judgmentState: state, keep: keepOwn(arrivalId) }),
-    ).toBe(true);
+    ).toBe('appended');
 
     const stored = await db
       .selectFrom('analysis.arrivalJudgmentStates')
@@ -188,7 +227,7 @@ describe('appendArrivalVerdict', () => {
         judgmentState: freshState(arrivalId),
         keep: keepOwn(arrivalId),
       }),
-    ).toBe(true);
+    ).toBe('appended');
 
     // The stale checkpoint left the live keep-two; the abandoned-free
     // Thread keeps only the newest arrival's state.
@@ -236,7 +275,7 @@ describe('appendArrivalVerdict', () => {
         judgmentState: freshState(arrivalId),
         keep: keepOwn(arrivalId),
       }),
-    ).toBe(true);
+    ).toBe('appended');
 
     expect((await statesOf(threadId)).sort()).toEqual([abandoned.id, arrivalId].sort());
   });
@@ -257,7 +296,7 @@ describe('appendArrivalVerdict', () => {
         judgmentState: null,
         keep: keepOwn(fire.verdict.messageId),
       }),
-    ).toBe(false);
+    ).toBe('written-by-another-pass');
 
     expect(await chainOf(threadId)).toEqual(before);
   });
@@ -280,7 +319,7 @@ describe('appendArrivalVerdict', () => {
         judgmentState: null,
         keep: keepOwn(fire.verdict.messageId),
       }),
-    ).toBe(false);
+    ).toBe('written-by-another-pass');
 
     expect(await chainOf(threadId)).toEqual(before);
   });
@@ -301,7 +340,7 @@ describe('appendArrivalVerdict', () => {
     await someoneWaitsOnALock();
     await other.commit();
 
-    expect(await appending).toBe(false);
+    expect(await appending).toBe('written-by-another-pass');
     const { segments, logs } = await chainOf(threadId);
     expect(segments).toHaveLength(1);
     expect(logs).toHaveLength(1);

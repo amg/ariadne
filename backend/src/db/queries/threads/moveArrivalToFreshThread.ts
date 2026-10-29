@@ -2,6 +2,7 @@ import { db } from '@db/db';
 import type { SeedLine } from '@db/types';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
 import { seedLinesJson } from '@queries/threadSeeds/insertThreadSeed';
+import { deleteSegmentsOpenedBy } from '@queries/threadSegments/deleteSegmentsOpenedBy';
 
 type MoveArrivalToFreshThreadProps = {
   userId: string;
@@ -13,10 +14,11 @@ type MoveArrivalToFreshThreadProps = {
 
 /**
  * Moves an arrival into a fresh Thread in one transaction: the arrival is
- * abandoned in its old Thread, and the fresh Thread opens with its Seed and
- * a copy of the arrival as its first message. Null, with nothing written,
- * when the arrival is no longer the newest live user Message of its
- * Thread: another handover or a reply got there first.
+ * abandoned in its old Thread, the segment it opened there is deleted, and
+ * the fresh Thread opens with its Seed and a copy of the arrival as its
+ * first message. Null, with nothing written, when the arrival is no longer
+ * the newest live user Message of its Thread: another handover or a reply
+ * got there first.
  */
 export async function moveArrivalToFreshThread({
   userId,
@@ -51,6 +53,8 @@ export async function moveArrivalToFreshThread({
       .returning('content')
       .executeTakeFirst();
     if (!claimed) return null;
+    // The claim above abandons the arrival itself, so it deletes the segment as every abandon does.
+    await deleteSegmentsOpenedBy({ messageIds: [messageId] }, trx);
 
     const thread = await trx
       .insertInto('chat.threads')

@@ -6,6 +6,7 @@ import { insertMessage } from '@queries/messages/insertMessage';
 import { setMessagesAbandoned } from '@queries/messages/setMessagesAbandoned';
 import { insertSegmentDriftLog } from '@queries/segmentDriftLogs/insertSegmentDriftLog';
 import { insertThreadSegment } from '@queries/threadSegments/insertThreadSegment';
+import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserFact } from '@queries/userFacts/insertUserFact';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
@@ -536,28 +537,29 @@ describe('captureSegment', () => {
     ]);
   });
 
-  it('keeps old Turns captured when the closer dies; the fork settles at the next cut', async () => {
-    const { userId, threadId, boundary, segmentId, secondSegmentId } =
-      await threadWithClosedSegment(['I love hiking in the Alps']);
+  it('reopens a segment whose closer dies, and reads only the later Turns at its next cut', async () => {
+    const { userId, threadId, boundary, segmentId } = await threadWithClosedSegment([
+      'I love hiking in the Alps',
+    ]);
     await captureSegment({ userId, threadId, segmentId });
     expect(await capturedThrough(segmentId)).not.toBeNull();
     const extractions = mock.memory.extractionCount();
 
-    // The edit abandons the arrival that closed the segment. That cut still
-    // stands (the successor segment names it), so nothing is owed again; the
-    // fork's Turns settle at the next cut in the chain.
+    // The edit abandons the arrival that closed the segment, and with it the
+    // segment that arrival opened. The first segment draws Turns again, so
+    // it owes nothing until its next cut.
     await setMessagesAbandoned({ messageIds: [boundary.id], abandoned: true });
+    expect(await listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID })).toEqual([
+      expect.objectContaining({ id: segmentId }),
+    ]);
     await addTurn(threadId, 'I work as a carpenter');
     await captureSegment({ userId, threadId, segmentId });
 
-    expect(mock.memory.extractionCount()).toBe(extractions); // nothing was re-extracted
-    expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
-      'The user loves hiking in the Alps.',
-    ]);
+    expect(mock.memory.extractionCount()).toBe(extractions);
 
     const reclosing = await insertMessage({ threadId, role: 'user', content: 'Another topic' });
     await insertSegmentDriftLog({
-      segmentId: secondSegmentId,
+      segmentId,
       messageId: reclosing.id,
       modelId: EMBEDDING_MODEL_ID,
       verdict: 'fire',
@@ -568,9 +570,10 @@ describe('captureSegment', () => {
       startMessageId: reclosing.id,
       modelId: EMBEDDING_MODEL_ID,
     });
-    await captureSegment({ userId, threadId, segmentId: secondSegmentId });
+    await captureSegment({ userId, threadId, segmentId });
 
-    expect(await capturedThrough(secondSegmentId)).not.toBeNull();
+    // The hiking Turn sits before the pointer, so only the carpenter Turn is read.
+    expect(mock.memory.extractionCount()).toBe(extractions + 1);
     expect((await factsOf(userId)).map((fact) => fact.content)).toEqual([
       'The user loves hiking in the Alps.',
       'The user works as a carpenter.',

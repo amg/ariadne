@@ -81,7 +81,6 @@ export type NewMessageEmbedding = Omit<MessageEmbeddingStored, 'embedding' | 'cr
 /** Expansion row as returned by `queries/messageExpansions`. */
 export type MessageExpansion = Selectable<Database['analysis.messageExpansions']>;
 
-export type ThreadSegment = Selectable<Database['analysis.threadSegments']>;
 export type NewThreadSegment = Insertable<Database['analysis.threadSegments']>;
 
 /** Insert input for `queries/userFacts` (vector as numbers). */

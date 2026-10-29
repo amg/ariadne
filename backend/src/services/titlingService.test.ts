@@ -171,13 +171,13 @@ async function seedDriftedThread(threadId: string) {
     role: 'user',
     content: 'Switching gears: best pasta recipe?',
   });
-  await insertMessage({
+  const pivotReply = await insertMessage({
     threadId,
     role: 'assistant',
     content: 'Boil salted water, cook the spaghetti al dente.',
   });
   await insertThreadSegment({ threadId, startMessageId: first.id, modelId: EMBEDDING_MODEL_ID });
-  return { first: first.id, pivot: pivot.id };
+  return { first: first.id, pivot: pivot.id, pivotReply: pivotReply.id };
 }
 
 /** The prompt text of a captured chat-completion request. */
@@ -524,11 +524,11 @@ describe('autoTitleThread message window', () => {
     }
   });
 
-  it('forced regeneration still ends at a segment that starts at an edited-away message', async () => {
+  it('forced regeneration names the thread from what is left once its drift cut is edited away', async () => {
     const { userId, threadId } = await createThread();
-    const { pivot } = await seedDriftedThread(threadId);
+    const { pivot, pivotReply } = await seedDriftedThread(threadId);
     await insertThreadSegment({ threadId, startMessageId: pivot, modelId: EMBEDDING_MODEL_ID });
-    await setMessagesAbandoned({ messageIds: [pivot], abandoned: true });
+    await setMessagesAbandoned({ messageIds: [pivot, pivotReply], abandoned: true });
 
     let requestBody: unknown;
     const stop = await startProvider({

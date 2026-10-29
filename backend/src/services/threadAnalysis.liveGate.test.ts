@@ -589,7 +589,7 @@ describe('runLiveGate — the fill-forward walk', () => {
     expect(
       assertError(await runLiveGate({ threadId, upToMessageId: firstAssistant, mode: 'heuristic' }))
         .code,
-    ).toBe('thread_not_found');
+    ).toBe('arrival_not_live');
   });
 
   it('returns the empty outcome for threads with no arrivals', async () => {
@@ -694,11 +694,11 @@ describe('edit forks — the abandoned arrival keeps its chain', () => {
     const forkedId = edit.data.id;
     expect(forkedId).not.toBe(lastUser);
 
-    // The abandoned arrival keeps every chain row — its reading was never
-    // touched, so its analysis is still correct for it.
+    // The abandoned arrival keeps its verdict and embedding, which still show
+    // what it cost. The segment it opened goes, because nothing runs through it.
     const { logs: logsAfterEdit, segments: segmentsAfterEdit } = await readChain(threadId);
     expect(logsAfterEdit.map((log) => log.messageId)).toEqual(userMessageIds);
-    expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).toContain(lastUser);
+    expect(segmentsAfterEdit.map((segment) => segment.startMessageId)).not.toContain(lastUser);
     const storedAfterEdit = await listMessageEmbeddingsByMessageIds({
       messageIds: userMessageIds,
       modelId: EMBEDDING_MODEL_ID,

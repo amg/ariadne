@@ -80,8 +80,8 @@ function owesWork(chain: LiveChain, index: number, targetIndex: number) {
  * that is already done degrades to a fixed handful of reads and a broken
  * one resumes where it stopped.
  *
- * Failure codes: `thread_not_found` (empty/unknown thread), plus any
- * step failure (`provider_not_configured`, `embed_failed`,
+ * Failure codes: `arrival_not_live` (the target is not a live arrival:
+ * abandoned, or never one), plus any step failure (`provider_not_configured`, `embed_failed`,
  * `arrival_signal_missing`, `thread_analysis_failed`) which the chat
  * route surfaces as a failed exchange.
  */
@@ -99,7 +99,7 @@ async function transformArrivals({
       ? chain.arrivals.length - 1
       : chain.arrivals.findIndex((turn) => turn.userMessage.id === upToMessageId);
   const target = chain.arrivals[targetIndex];
-  if (!target) return err('thread_not_found');
+  if (!target) return err('arrival_not_live');
 
   let current = chain;
   for (let i = 0; i <= targetIndex; i += 1) {
