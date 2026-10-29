@@ -30,4 +30,4 @@ This skill must be followed during every implementation loop, code modification,
 - **Theory & Math Docs**: Should strictly describe how the approach works. They must be math-centric but human-readable in a story form, completely free from code bloat or implementation specifics.
 
 ## Enforcement Loop
-Before completing any task that involves writing code or updating documents, you must verify that your changes comply with these rules. Proactively remove any violating comments (like ticket numbers or narration) or implementation details in documentation as you encounter them in your work.
+Before completing any task that involves writing code or updating documents, you must verify that your changes comply with these rules. Apply them to every comment and document your change writes or rewrites. A violation outside the change becomes a follow-up under the **change-scope** skill.
