@@ -16,8 +16,10 @@ const STOP_WITHIN_MS = 20_000;
 
 /**
  * Brings the plan's users up evenly over the ramp, holds them for the
- * hold, then stops them all. When `interrupt` aborts first, no more users
- * start and the ones running are stopped at once. The phases are the ones
+ * hold, then stops them all. A user whose moment passed while the generator
+ * was busy starts at once, so the ramp still ends on time. When
+ * `interrupt` aborts first, no more users start and the ones running are
+ * stopped at once. The phases are the ones
  * that ran: the stretch it was in ends when it was told to stop, and any
  * later stretch before the stop is empty. Users that are still mid-request
  * after `stopWithinMs` are left behind.
@@ -31,10 +33,11 @@ export async function runLoad(input: {
 }) {
   const { plan, levels, requests, interrupt } = input;
   const stop = new AbortController();
-  const gapSeconds = plan.rampSeconds / Math.max(plan.userCount, 1);
+  const gapMs = (plan.rampSeconds * 1_000) / Math.max(plan.userCount, 1);
   const users: Promise<void>[] = [];
 
-  const rampStartedAt = new Date().toISOString();
+  const rampStartedMs = Date.now();
+  const rampStartedAt = new Date(rampStartedMs).toISOString();
   for (let offset = 0; offset < plan.userCount && !interrupt.aborted; offset += 1) {
     const userNumber = plan.firstUser + offset;
     users.push(
@@ -42,7 +45,8 @@ export async function runLoad(input: {
         () => undefined,
       ),
     );
-    await pause(gapSeconds, interrupt);
+    const nextUserAt = rampStartedMs + (offset + 1) * gapMs;
+    await pause(Math.max(0, nextUserAt - Date.now()) / 1_000, interrupt);
   }
   const holdStartedAt = new Date().toISOString();
   await pause(plan.holdSeconds, interrupt);

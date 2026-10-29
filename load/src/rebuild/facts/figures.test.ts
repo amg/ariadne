@@ -270,4 +270,32 @@ describe('runFiguresOf, what a sized step is judged by', () => {
     expect(runFiguresOf(data).generatorCpuPercentMax).toBeCloseTo(70.02, 2);
     expect(runFiguresOf(runDataWith()).generatorCpuPercentMax).toBeNull();
   });
+
+  it('judges the generators’ CPU up to the end of the hold, not while they stop their users', () => {
+    const busiest = (values: readonly number[]) => ({
+      namespace: 'ECS/ContainerInsights',
+      name: 'CpuUtilized',
+      dimensions: { ClusterName: 'load', TaskDefinitionFamily: 'generator' },
+      statistic: 'Maximum' as const,
+      periodSeconds: 60,
+      points: values.map((value, index) => ({ at: at(index * 60), value })),
+    });
+    const reserved = { ...busiest([1_024, 1_024, 1_024]), name: 'CpuReserved' };
+    const metrics = [
+      {
+        resource: AWS_METRIC_RESOURCES.generatorCluster,
+        path: LAYOUT.awsMetrics(AWS_METRIC_RESOURCES.generatorCluster),
+        series: [busiest([400, 500, 1_020]), { ...reserved, statistic: 'Average' as const }],
+      },
+    ];
+    const heldUntil = (seconds: number) =>
+      runDataWith({
+        slices: [sliceDataWith(sliceWith({ hold: { from: at(30), to: at(seconds) } }))],
+        awsMetrics: metrics,
+      });
+
+    // The hold ends 100 s in. The minute from 120 s, when the users were stopped, is not judged.
+    expect(runFiguresOf(heldUntil(100)).generatorCpuPercentMax).toBeCloseTo(48.83, 2);
+    expect(runFiguresOf(heldUntil(150)).generatorCpuPercentMax).toBeCloseTo(99.61, 2);
+  });
 });

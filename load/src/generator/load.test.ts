@@ -78,6 +78,27 @@ describe('runLoad', () => {
     expect(result.phases).not.toBeNull();
   });
 
+  it('ends its ramp on time when the generator stalls during it, starting the late users at once', async () => {
+    const stalledUser = 11;
+    vi.mocked(runUser).mockImplementation((_plan, user, _levels, _requests, signal) => {
+      // The clock jumps as it would while the generator is too busy to run timers.
+      if (user === stalledUser) vi.setSystemTime(Date.now() + 2_000);
+      return new Promise((resolve) => signal.addEventListener('abort', () => resolve()));
+    });
+    const startedAt = Date.now();
+    const running = runLoad({
+      plan,
+      levels: createLevels(),
+      requests: requests(),
+      interrupt: new AbortController().signal,
+    });
+    await vi.advanceTimersByTimeAsync(40_000);
+
+    const { phases } = await running;
+
+    expect(phases.ramp.endedAt).toBe(new Date(startedAt + 4_000).toISOString());
+  });
+
   it('stops its users and gives up the plan at once when told to stop mid-hold', async () => {
     const interrupt = new AbortController();
     const running = runLoad({

@@ -54,9 +54,19 @@ function gateWaitShareOrNull(data: RunData) {
   return judged === 0 ? null : atLimit / judged;
 }
 
-/** The busiest any generator got in any minute of the run, from the CloudWatch metrics the run kept. */
+/**
+ * The busiest any generator got in a minute of the run up to the end of its
+ * last hold, from the CloudWatch metrics the run kept. Stopping every user
+ * at once is the generators' own work, not the load they carry.
+ */
 function busiestGeneratorCpuOrNull(data: RunData) {
   const [column] = busiestGeneratorCpu(data);
   if (column === undefined) return null;
-  return maxOf(runMinutesOf(data).flatMap((minute) => column.at(minute) ?? []));
+  const holdEnds = data.manifest.slices.flatMap(({ hold }) => (hold ? Date.parse(hold.to) : []));
+  const judgedUntil = holdEnds.length === 0 ? Number.POSITIVE_INFINITY : Math.max(...holdEnds);
+  return maxOf(
+    runMinutesOf(data)
+      .filter((minute) => minute < judgedUntil)
+      .flatMap((minute) => column.at(minute) ?? []),
+  );
 }
