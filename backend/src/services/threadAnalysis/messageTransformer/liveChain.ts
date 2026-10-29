@@ -1,7 +1,7 @@
 import type { MessageEmbedding, MessageExpansion } from '@db/types';
 import { listStoredEmbeddings } from '@queries/messageEmbeddings/listStoredEmbeddings';
 import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
+import { listLiveMessagesByThread } from '@queries/messages/listLiveMessagesByThread';
 import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
 import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
 import { EMBEDDING_MODEL_ID } from '../../aiService';
@@ -27,8 +27,7 @@ const ARRIVALS_READ_WITH_VECTORS = 2;
  * the Thread's length, with the vectors of its newest arrivals alone.
  */
 export async function readLiveChain(threadId: string): Promise<LiveChain> {
-  const rows = await listMessagesByThread({ threadId });
-  const arrivals = liveArrivalsOf(rows.filter((row) => !row.abandoned));
+  const arrivals = liveArrivalsOf(await listLiveMessagesByThread({ threadId }));
   return {
     threadId,
     arrivals,

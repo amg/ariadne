@@ -4,9 +4,9 @@ import { env } from '@config/env';
 import type { Message } from '@db/types';
 import { insertMessageUsageIfAbsent } from '@queries/messageUsage/insertMessageUsageIfAbsent';
 import { secondsUntilUtcMidnight, sumDailySpend } from '@queries/messageUsage/sumDailySpend';
+import { findPromptOfReplyOrNull } from '@queries/messages/findPromptOfReplyOrNull';
 import { insertMessage } from '@queries/messages/insertMessage';
 import { insertPendingReplyOrNull } from '@queries/messages/insertPendingReplyOrNull';
-import { listMessagesByThread } from '@queries/messages/listMessagesByThread';
 import { listModelHistoryByThread } from '@queries/messages/listModelHistoryByThread';
 import { listNewestRowsByThread } from '@queries/messages/listNewestRowsByThread';
 import { lockLiveMessage } from '@queries/messages/lockLiveMessage';
@@ -134,9 +134,7 @@ type StartExchangeProps = {
  * Settles a crashed exchange: status + estimated spend (no abandonment
  * flags — interruption/failure never abandons). The spend row is best
  * effort: a process that settled first keeps its row, and a failed write
- * is recorded without blocking the new Exchange. The crashed reply's
- * prompt may sit before the Thread's newest rows, so the whole Thread is
- * read to find it.
+ * is recorded without blocking the new Exchange.
  */
 async function settleCrashedExchange({
   threadId,
@@ -149,11 +147,7 @@ async function settleCrashedExchange({
 }) {
   await updateExchangeStatus({ messageId: assistantMessage.id, exchangeStatus: 'interrupted' });
 
-  const rows = await listMessagesByThread({ threadId });
-  const assistantIndex = rows.findIndex((row) => row.id === assistantMessage.id);
-  const promptRow = rows
-    .slice(0, Math.max(assistantIndex, 0))
-    .findLast((row) => row.role === 'user');
+  const promptRow = await findPromptOfReplyOrNull({ threadId, replyId: assistantMessage.id });
   const promptTokens = promptRow
     ? estimateChatPromptTokens({
         systemPrompt,

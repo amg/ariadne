@@ -1,6 +1,5 @@
 import type { MessageExchangeStatus, MessageFinishReason } from '@db/types';
-import { getMessageUsageByMessageId } from '@queries/messageUsage/getMessageUsageByMessageId';
-import { insertMessageUsage } from '@queries/messageUsage/insertMessageUsage';
+import { insertMessageUsageIfAbsent } from '@queries/messageUsage/insertMessageUsageIfAbsent';
 import { updateExchangeStatus } from '@queries/messages/updateExchangeStatus';
 import { updateMessageContent } from '@queries/messages/updateMessageContent';
 import type { FinishReason, LanguageModelUsage } from 'ai';
@@ -226,10 +225,6 @@ export class ChatExchange {
     finishReason: MessageFinishReason,
   ): Promise<boolean> {
     if (!hasUsageReport(event.usage)) return false;
-    const existing = await getMessageUsageByMessageId({
-      messageId: this.deps.assistantMessageId,
-    });
-    if (existing) return false; // defensive: one chat row per message
     const usageArgs: Parameters<typeof buildUsageRow>[0] = {
       messageId: this.deps.assistantMessageId,
       model: this.deps.model,
@@ -239,8 +234,8 @@ export class ChatExchange {
     };
     if (this.assistantReasoning) usageArgs.reasoningContent = this.assistantReasoning;
     if (event.providerId !== undefined) usageArgs.providerId = event.providerId;
-    await insertMessageUsage(await buildUsageRow(usageArgs));
-    return true;
+    // One chat row per message: a row already there stands.
+    return insertMessageUsageIfAbsent(await buildUsageRow(usageArgs));
   }
 
   /**
@@ -248,11 +243,8 @@ export class ChatExchange {
    * provider usage report exists. True when the ledger row landed.
    */
   private async persistEstimatedSpend(finishReason: MessageFinishReason): Promise<boolean> {
-    const existing = await getMessageUsageByMessageId({
-      messageId: this.deps.assistantMessageId,
-    });
-    if (existing) return false; // defensive: one chat row per message
-    await insertMessageUsage(
+    // One chat row per message: a row already there stands.
+    return insertMessageUsageIfAbsent(
       await buildEstimatedUsageRow({
         messageId: this.deps.assistantMessageId,
         model: this.deps.model,
@@ -262,6 +254,5 @@ export class ChatExchange {
         latencyMs: this.latencyMs(),
       }),
     );
-    return true;
   }
 }
