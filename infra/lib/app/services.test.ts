@@ -98,6 +98,29 @@ describe('how the API lets go of a dead connection', () => {
   });
 });
 
+describe('the role each backend service runs as', () => {
+  const roleOf = (stepName: string, command: string) => {
+    const definitions = Object.values(
+      appTemplateOf(stepName).findResources('AWS::ECS::TaskDefinition'),
+    );
+    const container = definitions
+      .map((definition) => definition.Properties.ContainerDefinitions[0])
+      .find((candidate) => (candidate.Command ?? []).join(' ').includes(command));
+    const variables: { Name: string; Value: string }[] = container?.Environment ?? [];
+    return variables.find(({ Name }) => Name === 'PROCESS_ROLE')?.Value;
+  };
+
+  it('runs the API as the API alone, so its pool is sized for requests', () => {
+    for (const name of ['step10', 'step50', 'step-prod']) {
+      assert.equal(roleOf(name, 'dist/server.aws.js'), 'api');
+    }
+  });
+
+  it('runs the worker as the worker alone', () => {
+    assert.equal(roleOf('step10', 'dist/worker.js'), 'worker');
+  });
+});
+
 describe('the load balancer’s reserved capacity', () => {
   const reservedOf = (stepName: string) => {
     const [balancer] = Object.values(

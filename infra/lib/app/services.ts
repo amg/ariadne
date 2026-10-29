@@ -83,7 +83,7 @@ export class Services extends Construct {
       port: PORTS.api,
       // Migrations hold a lock, so tasks starting together apply them once.
       command: ['sh', '-c', 'npm run migrate && exec node dist/server.aws.js'],
-      environment: backend.environment,
+      environment: { ...backend.environment, PROCESS_ROLE: 'api' },
       secrets: backend.secrets,
       systemControls: [PUSH_STREAM_GIVE_UP],
     });
