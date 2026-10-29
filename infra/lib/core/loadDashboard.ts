@@ -247,7 +247,7 @@ export class LoadDashboard extends Construct {
         ...row('Database', [
           graph('CPU %', [lineOf(DATABASE.cpu, 'CPU')], { leftMax: 100 }),
           graph(
-            'Sessions busy at once (above the vCPU count means queueing)',
+            'Database sessions: working or waiting',
             [lineOf(DATABASE.sessionsOnCpu, 'on CPU'), lineOf(DATABASE.sessionsWaiting, 'waiting')],
             { stacked: true },
           ),

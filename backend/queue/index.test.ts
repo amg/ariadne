@@ -16,7 +16,7 @@ import { memoryOff } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { run } from 'graphile-worker';
 import { sql } from 'kysely';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, it } from 'vitest';
 
 const savedMockBaseUrl = process.env.MOCK_AI_BASE_URL;
 
@@ -101,7 +101,11 @@ describe('startQueue', () => {
           (await findThreadByIdAndUser({ userId, threadId }))?.title === 'Steam Engine Basics',
         'the restarted queue titles the thread',
       );
-      expect(await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId })).toBeNull();
+      // Finished jobs leave the queue in batches, so this one leaves a moment later.
+      await until(
+        async () => (await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId })) === null,
+        'the finished job leaves the queue',
+      );
     } finally {
       crash(new Error('the process is gone'));
       await crashed.stop();
