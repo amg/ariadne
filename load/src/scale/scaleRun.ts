@@ -49,6 +49,12 @@ function kindOfRequest(n: number) {
   return KINDS[n % KINDS.length] ?? 'chat';
 }
 
+/** How a request of this kind ends when it succeeds. */
+function outcomeOf(kind: string) {
+  if (kind === 'chat') return 'streamed';
+  return kind === 'push' ? 'held' : 'ok';
+}
+
 /** What one generator printed: its request lines, a state line every five seconds, and its report. */
 function* generatorOutput(generator: number, options: ScaleOptions, counts: Report['requests']) {
   const seconds = options.minutes * 60;
@@ -72,7 +78,7 @@ function* generatorOutput(generator: number, options: ScaleOptions, counts: Repo
       firstByteMs: kind === 'push' ? 5 : 120,
       totalMs: kind === 'push' ? 600_000 : 400,
       status: 200,
-      outcome: kind === 'chat' ? 'streamed' : kind === 'push' ? 'held' : 'ok',
+      outcome: outcomeOf(kind),
       errorCode: null,
     })}`;
   }

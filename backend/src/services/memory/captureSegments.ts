@@ -37,7 +37,7 @@ export function segmentTurns(
   const turns: CaptureTurn[] = [];
   for (let i = 0; i < live.length; i += 1) {
     const row = live[i];
-    if (!row || row.role !== 'user') continue;
+    if (row?.role !== 'user') continue;
     const next = live[i + 1];
     const reply = next && next.role === 'assistant' && next.content !== '' ? next : null;
     turns.push({ userMessage: row, assistantReply: reply });

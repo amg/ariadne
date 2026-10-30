@@ -272,7 +272,7 @@ export function pausedArrivalIdOrNull(
 ) {
   if (status === 'submitted' || status === 'streaming') return null;
   const last = display[display.length - 1];
-  if (!last || last.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
+  if (last?.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
   return settledRows.some((row) => row.id === last.id) ? last.id : null;
 }
 
@@ -303,7 +303,7 @@ export function unansweredArrivalOrNull({
 }: UnansweredArrivalFacts) {
   if (status === 'submitted' || status === 'streaming') return null;
   const last = display[display.length - 1];
-  if (!last || last.message.role !== 'user') return null;
+  if (last?.message.role !== 'user') return null;
   if (!gateWait && !settledRows.some((row) => row.id === last.id)) return null;
 
   const verdict = last.verdict?.verdict;

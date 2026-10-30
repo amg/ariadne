@@ -5,11 +5,7 @@ import { db } from '@db/db';
  * is abandoned and no exchange completed after it. A handed-over arrival
  * owes nothing here: it lives on in its fresh Thread.
  */
-export async function findResumeDraft({
-  threadId,
-}: {
-  threadId: string;
-}) {
+export async function findResumeDraft({ threadId }: { threadId: string }) {
   const newestUser = await db
     .selectFrom('chat.messages')
     .select(['id', 'content', 'abandoned', 'createdAt'])
@@ -19,7 +15,7 @@ export async function findResumeDraft({
     .orderBy('id', 'desc')
     .limit(1)
     .executeTakeFirst();
-  if (!newestUser || !newestUser.abandoned) return undefined;
+  if (!newestUser?.abandoned) return undefined;
 
   const handedOver = await db
     .selectFrom('memory.threadSeeds')

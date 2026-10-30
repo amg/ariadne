@@ -113,11 +113,7 @@ export function useTestQueue({ memory, threadAnalysisMode }: Parameters<typeof s
 }
 
 /** Leaves a job behind that is due at `runAt`, which may be in the past, as if it had waited since. */
-export async function addJobDueAt(job: {
-  task: string;
-  key: string;
-  runAt: Date;
-}) {
+export async function addJobDueAt(job: { task: string; key: string; runAt: Date }) {
   const utils = await workerUtils();
   try {
     await utils.addJob(

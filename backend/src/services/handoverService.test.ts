@@ -94,11 +94,7 @@ async function closedSegmentIdOf(messageId: string) {
  * Asks for the handover the way the browser does: again whenever the
  * capture is still pending, with its retry pauses brought forward.
  */
-async function handOverOnceSettled(props: {
-  userId: string;
-  threadId: string;
-  messageId: string;
-}) {
+async function handOverOnceSettled(props: { userId: string; threadId: string; messageId: string }) {
   for (let tries = 0; tries < 40; tries += 1) {
     const result = await handOverArrival({ ...props, memory: memoryOn });
     if (result.type === 'success' || result.code !== 'capture_pending') return result;

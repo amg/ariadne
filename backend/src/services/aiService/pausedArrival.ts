@@ -9,7 +9,7 @@ import { EMBEDDING_MODEL_ID } from './config';
  */
 export async function pausedArrivalOrNull(rows: Message[]) {
   const newestLive = rows.filter((row) => !row.abandoned).at(-1);
-  if (!newestLive || newestLive.role !== 'user') return null;
+  if (newestLive?.role !== 'user') return null;
   const logged = await findSegmentDriftLogByMessageId({
     messageId: newestLive.id,
     modelId: EMBEDDING_MODEL_ID,

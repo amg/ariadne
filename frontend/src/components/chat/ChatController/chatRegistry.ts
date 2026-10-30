@@ -41,7 +41,9 @@ export type GateWaitOutcome = 'gate_pending' | 'gate_failed';
  * body (a network fault).
  */
 function chatErrorBody(error: unknown) {
-  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  let message = '';
+  if (error instanceof Error) message = error.message;
+  else if (typeof error === 'string') message = error;
   try {
     const parsed = JSON.parse(message) as unknown;
     return typeof parsed === 'object' && parsed !== null

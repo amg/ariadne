@@ -11,7 +11,11 @@ export default function AnalysisTab({
   threadId,
   refreshKey,
   onLoaded,
-}: { threadId: string; refreshKey?: number; onLoaded?: () => void }) {
+}: {
+  threadId: string;
+  refreshKey?: number;
+  onLoaded?: () => void;
+}) {
   const [view, setView] = useState<LiveAnalysisView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfilling, setBackfilling] = useState(false);

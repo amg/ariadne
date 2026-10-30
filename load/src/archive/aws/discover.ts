@@ -126,10 +126,7 @@ async function stackFacts(client: CloudFormationClient, name: string) {
 }
 
 /** Describes the raise that stands now, from its two stacks. Both must be up. */
-export async function discoverRaise(input: {
-  appStack: string;
-  loadStack: string;
-}) {
+export async function discoverRaise(input: { appStack: string; loadStack: string }) {
   const formation = new CloudFormationClient({});
   const [app, load] = await Promise.all([
     stackFacts(formation, input.appStack),

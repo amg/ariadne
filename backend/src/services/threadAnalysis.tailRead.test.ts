@@ -63,7 +63,10 @@ async function liveMessageCount(threadId: string) {
 async function judgeCountingReads({
   threadId,
   arrivalId,
-}: { threadId: string; arrivalId: string }) {
+}: {
+  threadId: string;
+  arrivalId: string;
+}) {
   const live = await liveMessageCount(threadId);
   let messages = 0;
   const counting: KyselyPlugin = {

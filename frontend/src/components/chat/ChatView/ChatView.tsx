@@ -75,7 +75,10 @@ const UNANSWERED_ARRIVAL_COPY: Record<UnansweredArrival, string> = {
 function UnansweredArrivalNotice({
   kind,
   onRetry,
-}: { kind: UnansweredArrival; onRetry: () => void }) {
+}: {
+  kind: UnansweredArrival;
+  onRetry: () => void;
+}) {
   return (
     <p className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
       {UNANSWERED_ARRIVAL_COPY[kind]}
@@ -88,6 +91,22 @@ function UnansweredArrivalNotice({
       </button>
     </p>
   );
+}
+
+/** The line over the composer: the unanswered arrival's notice, else the error, else nothing. */
+function ComposerNotice({
+  unansweredArrival,
+  errorMessage,
+  onRetry,
+}: {
+  unansweredArrival: UnansweredArrival | null | undefined;
+  errorMessage: string | null | undefined;
+  onRetry: () => void;
+}) {
+  if (unansweredArrival)
+    return <UnansweredArrivalNotice kind={unansweredArrival} onRetry={onRetry} />;
+  if (errorMessage) return <p className="mb-2 text-sm text-red-400">{errorMessage}</p>;
+  return null;
 }
 
 export default function ChatView({
@@ -289,11 +308,11 @@ export default function ChatView({
         </button>
       ) : null}
       <div className="mx-auto w-full min-w-0 max-w-[900px] border-t bg-background p-4">
-        {unansweredArrival ? (
-          <UnansweredArrivalNotice kind={unansweredArrival} onRetry={onRetryLast} />
-        ) : errorMessage ? (
-          <p className="mb-2 text-sm text-red-400">{errorMessage}</p>
-        ) : null}
+        <ComposerNotice
+          unansweredArrival={unansweredArrival}
+          errorMessage={errorMessage}
+          onRetry={onRetryLast}
+        />
         <form className="flex gap-2" onSubmit={handleSubmit}>
           <Textarea
             ref={inputRef}

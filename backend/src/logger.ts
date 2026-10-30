@@ -105,12 +105,17 @@ function renderBody(value: unknown) {
 }
 
 /** One colored block: bold label line + tinted body. */
-function paintBlock(
-  label: string,
-  body: unknown,
-  tone: (input: string) => string,
-  colors: Colorette,
-) {
+function paintBlock({
+  label,
+  body,
+  tone,
+  colors,
+}: {
+  label: string;
+  body: unknown;
+  tone: (input: string) => string;
+  colors: Colorette;
+}) {
   const bodyLines = renderBody(body)
     .split('\n')
     .map((line) => tone(line))
@@ -123,13 +128,24 @@ function formatProviderCall(call: ProviderCall, colors: Colorette) {
   const label = typeof call.label === 'string' ? call.label : 'provider';
   const blocks: string[] = [];
   if (call.request !== undefined) {
-    blocks.push(paintBlock(`▼ ${label} request`, call.request, colors.yellow, colors));
+    blocks.push(
+      paintBlock({ label: `▼ ${label} request`, body: call.request, tone: colors.yellow, colors }),
+    );
   }
   if (call.response !== undefined) {
-    blocks.push(paintBlock(`▲ ${label} response`, call.response, colors.greenBright, colors));
+    blocks.push(
+      paintBlock({
+        label: `▲ ${label} response`,
+        body: call.response,
+        tone: colors.greenBright,
+        colors,
+      }),
+    );
   }
   if (call.error !== undefined) {
-    blocks.push(paintBlock(`✖ ${label} error`, call.error, colors.redBright, colors));
+    blocks.push(
+      paintBlock({ label: `✖ ${label} error`, body: call.error, tone: colors.redBright, colors }),
+    );
   }
   return blocks.join('\n');
 }
@@ -139,6 +155,7 @@ function isRequestRecord(value: unknown): value is RequestRecord {
   return typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'request';
 }
 
+// biome-ignore lint/complexity/useMaxParams: pino-pretty's messageFormat fixes this signature
 const messageFormat: MessageFormatter = (log, messageKey, _levelLabel, { colors }) => {
   if (isRequestRecord(log.appRecord)) return formatRequestRecord(log.appRecord, colors);
   const call = log.providerCall as ProviderCall | undefined;
@@ -194,13 +211,7 @@ export function logProviderRequest({ label, request }: { label: string; request:
 }
 
 /** Payload returned by a provider (DEBUG-only). */
-export function logProviderResponse({
-  label,
-  response,
-}: {
-  label: string;
-  response: unknown;
-}) {
+export function logProviderResponse({ label, response }: { label: string; response: unknown }) {
   logger.debug({ providerCall: { label, response } }, 'provider response');
 }
 

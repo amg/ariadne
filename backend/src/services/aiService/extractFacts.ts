@@ -119,7 +119,8 @@ export function buildFactExtractionPrompt(
       : '';
   const turns = input.turns
     .map((turn, index) => {
-      const tag = contextCount > 0 ? (index < contextCount ? ' [CONTEXT]' : ' [NEW]') : '';
+      let tag = '';
+      if (contextCount > 0) tag = index < contextCount ? ' [CONTEXT]' : ' [NEW]';
       const reply = turn.assistantText === null ? '' : `\nAssistant: ${turn.assistantText}`;
       return `Turn ${index + 1}${tag} (${isoDay(turn.date)}):\nUser: ${turn.userText}${reply}`;
     })

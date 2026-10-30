@@ -83,9 +83,10 @@ function downWindowsOf(attempt: Attempt, slice: readonly Attempt[], sources: Sli
  */
 function joinOverlapping(windows: readonly DownWindow[]) {
   const joined: DownWindow[] = [];
-  for (const window of [...windows].sort((a, b) =>
-    a.from < b.from ? -1 : a.from > b.from ? 1 : 0,
-  )) {
+  for (const window of [...windows].sort((a, b) => {
+    if (a.from < b.from) return -1;
+    return a.from > b.from ? 1 : 0;
+  })) {
     const last = joined.at(-1);
     if (last === undefined || window.from > last.to) {
       joined.push(window);

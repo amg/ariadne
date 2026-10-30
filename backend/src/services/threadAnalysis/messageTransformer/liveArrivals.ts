@@ -15,7 +15,7 @@ export function liveArrivalsOf({
   const arrivals: LiveArrival[] = [];
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i];
-    if (!message || message.role !== 'user') continue;
+    if (message?.role !== 'user') continue;
     const next = messages[i + 1];
     arrivals.push({
       turnNumber: arrivalsBefore + arrivals.length + 1,

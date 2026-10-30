@@ -11,6 +11,7 @@ export function guardStopOf(data: RunData) {
   if (tripped === undefined) return null;
   const plannedEnds = data.manifest.slices.flatMap(({ hold }) => hold?.to ?? []);
   const to = [runWindowOf(data).to, ...plannedEnds].reduce((latest, at) =>
+    // biome-ignore lint/complexity/useMathMinMax: compares ISO timestamp strings, which Math.max cannot
     at > latest ? at : latest,
   );
   return {
@@ -19,6 +20,7 @@ export function guardStopOf(data: RunData) {
     observed: tripped.observed,
     limit: tripped.limit,
     from: tripped.at,
+    // biome-ignore lint/complexity/useMathMinMax: compares ISO timestamp strings, which Math.max cannot
     to: to < tripped.at ? tripped.at : to,
   };
 }

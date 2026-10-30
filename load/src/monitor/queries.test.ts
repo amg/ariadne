@@ -15,6 +15,7 @@ describe('monitorQueries', () => {
 
     expect(new Set(queries.map((query) => query.Id)).size).toBe(queries.length);
     for (const query of queries) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: CloudWatch label syntax, literal on purpose
       expect(measureOrNull(query.Label.replace("${PROP('Dim.ServiceName')}", 'x'))).not.toBeNull();
     }
   });
@@ -22,6 +23,7 @@ describe('monitorQueries', () => {
   it('asks for the service of every per-service series, and of no other', () => {
     const labels = monitorQueries({}).map((query) => query.Label);
 
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: CloudWatch label syntax, literal on purpose
     expect(labels).toContain("running ${PROP('Dim.ServiceName')}");
     expect(labels).toContain('users');
   });

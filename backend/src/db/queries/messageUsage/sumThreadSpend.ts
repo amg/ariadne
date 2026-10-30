@@ -6,11 +6,7 @@ import { sql } from 'kysely';
  * exact zero sums; results are decimal strings cast to the same
  * numeric(14,10) precision the rows store.
  */
-export async function sumThreadSpend({
-  threadId,
-}: {
-  threadId: string;
-}) {
+export async function sumThreadSpend({ threadId }: { threadId: string }) {
   // The numeric(14,10) cast has no builder literal, so it rides a raw
   // fragment around the typed aggregates.
   const [chat, sides] = await Promise.all([

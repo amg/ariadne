@@ -6,11 +6,7 @@ import { sql } from 'kysely';
  * ago, each named once. A worker that took a job within that time is not
  * named, even if it also holds older ones.
  */
-export async function listStaleLockerIds({
-  olderThanSeconds,
-}: {
-  olderThanSeconds: number;
-}) {
+export async function listStaleLockerIds({ olderThanSeconds }: { olderThanSeconds: number }) {
   const rows = await db
     .selectFrom('queues.jobs')
     .select('lockedBy')

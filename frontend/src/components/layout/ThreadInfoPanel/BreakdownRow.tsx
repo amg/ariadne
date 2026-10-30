@@ -43,7 +43,11 @@ export function BreakdownRow({
   row,
   valueUsd,
   totalUsd,
-}: { row: CostRow; valueUsd: string; totalUsd: number }) {
+}: {
+  row: CostRow;
+  valueUsd: string;
+  totalUsd: number;
+}) {
   return (
     <>
       <span className="truncate text-muted-foreground" title={row.title}>
