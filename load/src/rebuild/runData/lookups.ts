@@ -32,6 +32,26 @@ export function runWindowOf(data: RunData) {
   return { from: manifest.startedAt, to: moments.reduce((last, at) => (at > last ? at : last)) };
 }
 
+/**
+ * The whole minutes in which the generators carried the run's load, each as
+ * the millisecond its minute starts, oldest first. They run from the first
+ * minute after the last generator started to the last minute that ends by
+ * the end of the last hold, or by the run's end when no slice has a hold.
+ * Starting a generator and stopping its users are the generators' own
+ * work, not the load the run measures.
+ */
+export function loadMinutesOf(data: RunData) {
+  const run = runWindowOf(data);
+  const { slices } = data.manifest;
+  const holdEnds = slices.flatMap(({ hold }) => (hold ? Date.parse(hold.to) : []));
+  const from = Math.max(
+    Date.parse(run.from),
+    ...slices.map(({ startedAt }) => Date.parse(startedAt)),
+  );
+  const to = holdEnds.length === 0 ? Date.parse(run.to) : Math.max(...holdEnds);
+  return runMinutesOf(data).filter((minute) => minute >= from && minute + MINUTE_MS <= to);
+}
+
 /** The minutes a run spans, each as the millisecond its minute starts, oldest first. */
 export function runMinutesOf(data: RunData) {
   const window = runWindowOf(data);

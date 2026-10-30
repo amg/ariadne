@@ -271,7 +271,7 @@ describe('runFiguresOf, what a sized step is judged by', () => {
     expect(runFiguresOf(runDataWith()).generatorCpuPercentMax).toBeNull();
   });
 
-  it('judges the generators’ CPU up to the end of the hold, not while they stop their users', () => {
+  describe('judging the generators’ CPU only while they carried the load', () => {
     const busiest = (values: readonly number[]) => ({
       namespace: 'ECS/ContainerInsights',
       name: 'CpuUtilized',
@@ -281,21 +281,40 @@ describe('runFiguresOf, what a sized step is judged by', () => {
       points: values.map((value, index) => ({ at: at(index * 60), value })),
     });
     const reserved = { ...busiest([1_024, 1_024, 1_024]), name: 'CpuReserved' };
-    const metrics = [
+    const metricsOf = (values: readonly number[]) => [
       {
         resource: AWS_METRIC_RESOURCES.generatorCluster,
         path: LAYOUT.awsMetrics(AWS_METRIC_RESOURCES.generatorCluster),
-        series: [busiest([400, 500, 1_020]), { ...reserved, statistic: 'Average' as const }],
+        series: [busiest(values), { ...reserved, statistic: 'Average' as const }],
       },
     ];
-    const heldUntil = (seconds: number) =>
-      runDataWith({
-        slices: [sliceDataWith(sliceWith({ hold: { from: at(30), to: at(seconds) } }))],
-        awsMetrics: metrics,
+    const held = (generatorNumber: number, startedAt: number, holdEnds: number) =>
+      sliceDataWith(
+        sliceWith({
+          generator: generatorNumber,
+          startedAt: at(startedAt),
+          hold: { from: at(30), to: at(holdEnds) },
+        }),
+      );
+
+    it('leaves out the minute a generator starts in and the minute its hold ends in', () => {
+      const data = runDataWith({
+        slices: [held(0, 1, 150)],
+        awsMetrics: metricsOf([1_020, 500, 1_020]),
       });
 
-    // The hold ends 100 s in. The minute from 120 s, when the users were stopped, is not judged.
-    expect(runFiguresOf(heldUntil(100)).generatorCpuPercentMax).toBeCloseTo(48.83, 2);
-    expect(runFiguresOf(heldUntil(150)).generatorCpuPercentMax).toBeCloseTo(99.61, 2);
+      // The generator starts 1 s in and its hold ends 150 s in, so only the minute from 60 s is judged.
+      expect(runFiguresOf(data).generatorCpuPercentMax).toBeCloseTo(48.83, 2);
+    });
+
+    it('starts judging only once the last generator has started', () => {
+      const data = runDataWith({
+        slices: [held(0, 1, 180), held(1, 61, 180)],
+        awsMetrics: metricsOf([400, 1_020, 500]),
+      });
+
+      // The second generator starts 61 s in, so the minute from 60 s holds its start-up and is not judged.
+      expect(runFiguresOf(data).generatorCpuPercentMax).toBeCloseTo(48.83, 2);
+    });
   });
 });

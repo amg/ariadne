@@ -14,6 +14,7 @@ export {
   cacheEcpuCapOrNull,
   drawnMinutesOf,
   jobWaitMs,
+  loadMinutesOf,
   runMinutesOf,
   runWindowOf,
   withAfterRun,

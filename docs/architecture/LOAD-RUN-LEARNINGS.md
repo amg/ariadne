@@ -46,9 +46,18 @@ warm-up the generators stalled for up to 12 s at a time, and the ramp ran
 late until the generators hit their time limit (`20261029T035850Z`).
 Fixed by giving each user its own start time on the ramp.
 
-**Generator CPU was judged while the generators stopped their users.**
-That minute read 74.9% and 99.7%, against at most 40.3% under load. Fixed
-by judging generator CPU only up to the end of the hold.
+**Generator CPU was judged while the generators started and stopped.**
+The minute the users were stopped read 74.9% and 99.7%, against at most
+40.3% under load. The minute a generator boots in read 99.7% against
+24.7% under load (`20261030T014328Z`).
+
+**The per-minute request check split the end of the hold.** Thousands of
+push streams close together when the hold ends, and the generators and
+the load balancer put about 2,090 of them on different sides of a
+minute's edge (`20261030T014328Z`).
+
+Both are fixed by judging only the whole minutes in which the generators
+carried the load: from the last generator's start to the end of the hold.
 
 **A printed step configuration lost a field.** A sized step was refused
 because the run command dropped the share of users who chat. Fixed by

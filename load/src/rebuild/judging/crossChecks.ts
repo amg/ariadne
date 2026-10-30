@@ -59,14 +59,17 @@ type Counted = { answered: number; serverErrors: number; clientErrors: number };
  * through Cloudflare, whose edge turns some requests away before they
  * arrive. Every other run needs it, and cannot pass without it. A mismatch
  * beyond the tolerance means one of the two records cannot be trusted.
- * Minutes in which a slice was down are left out of both sides, and the
- * detail says how many. Push streams that broke off are left out of the
- * generators' side, because the load balancer never counts them, and the
- * detail says how many.
+ * Only the minutes in which the generators carried the run's load are
+ * compared, because thousands of push streams that close together at the
+ * end of the hold can land either side of a minute's edge. Minutes in which
+ * a slice was down are left out of both sides. The detail says how many
+ * minutes each rule left out. Push streams that broke off are left out of
+ * the generators' side, because the load balancer never counts them, and
+ * the detail says how many.
  */
 export function crossCheckLoadBalancer(
   table: MinuteTable,
-  facts: Pick<RunFacts, 'run' | 'requestLinesWhole'>,
+  facts: Pick<RunFacts, 'run' | 'requestLinesWhole' | 'loadMinutes'>,
 ): CrossCheck[] {
   const exemption = reasonNotNeededOrNull(facts.run);
   if (exemption !== null) {
@@ -85,9 +88,16 @@ export function crossCheckLoadBalancer(
     );
   }
   const minutes = answeredMinutesOf(table, generators);
+  const loaded = new Set(facts.loadMinutes);
+  const underLoad = minutes.filter((index) => loaded.has(table.minutes[index] ?? Number.NaN));
   const down = valuesOf(table, SLICES_DOWN);
-  const kept = minutes.filter((index) => (down[index] ?? 0) === 0);
-  const left = leftOutText([[minutes.length - kept.length, 'minutes']]);
+  const kept = underLoad.filter((index) => (down[index] ?? 0) === 0);
+  const left = [
+    outsideLoadText(minutes.length - underLoad.length),
+    leftOutText([[underLoad.length - kept.length, 'minutes']]),
+  ]
+    .filter((part) => part !== '')
+    .join('; ');
   const cut = valuesOf(table, PUSH_STREAMS_CUT);
   const leftFromMinutes = [left, brokeOffText(sum(kept.map((index) => cut[index] ?? 0)))]
     .filter((part) => part !== '')
@@ -239,6 +249,13 @@ function notNeeded(what: string, against: string, detail: string): CrossCheck {
 function leftOutText(counts: readonly [number, string][]) {
   const parts = counts.filter(([count]) => count > 0).map(([count, what]) => `${count} ${what}`);
   return parts.length === 0 ? '' : `left out as inside a gap: ${parts.join(' and ')}`;
+}
+
+/** The minutes left out as outside the load the generators carried; empty when none were. */
+function outsideLoadText(count: number) {
+  return count === 0
+    ? ''
+    : `left out as a generator starting or its users stopping: ${count} minute${count === 1 ? '' : 's'}`;
 }
 
 /** The push streams that broke off in the minutes compared, left out of the generators' count; empty when none did. */

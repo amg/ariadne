@@ -1,6 +1,6 @@
 import { isChat } from '../../records/index.ts';
 import { maxOf, percentileOf } from '../numbers.ts';
-import { gateWaitCounts, runMinutesOf } from '../runData/index.ts';
+import { gateWaitCounts, loadMinutesOf } from '../runData/index.ts';
 import { busiestGeneratorCpu } from '../table/index.ts';
 import type { RunData } from '../types.ts';
 import { fewestUsersInHold } from './hold.ts';
@@ -55,18 +55,12 @@ function gateWaitShareOrNull(data: RunData) {
 }
 
 /**
- * The busiest any generator got in a minute of the run up to the end of its
- * last hold, from the CloudWatch metrics the run kept. Stopping every user
- * at once is the generators' own work, not the load they carry.
+ * The busiest any generator got in a minute it carried the run's load,
+ * from the CloudWatch metrics the run kept. The minutes a generator starts
+ * in, and those it stops its users in, are not judged.
  */
 function busiestGeneratorCpuOrNull(data: RunData) {
   const [column] = busiestGeneratorCpu(data);
   if (column === undefined) return null;
-  const holdEnds = data.manifest.slices.flatMap(({ hold }) => (hold ? Date.parse(hold.to) : []));
-  const judgedUntil = holdEnds.length === 0 ? Number.POSITIVE_INFINITY : Math.max(...holdEnds);
-  return maxOf(
-    runMinutesOf(data)
-      .filter((minute) => minute < judgedUntil)
-      .flatMap((minute) => column.at(minute) ?? []),
-  );
+  return maxOf(loadMinutesOf(data).flatMap((minute) => column.at(minute) ?? []));
 }
