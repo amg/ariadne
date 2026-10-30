@@ -76,13 +76,20 @@ p95 from 49 to 33 ms (`20261030T060616Z`). Database CPU and what users
 see did not move: the gain is headroom on a lock that grows with the
 chat rate.
 
+**The notification lock ran out at step50.** Every enqueue sent workers
+a notification, and commits that notify take one database-wide lock in
+turn. Near 8,000 chatters the enqueues fell behind it. `Lock:object`
+averaged 497 sessions with a peak of 899, database CPU fell from 71% to
+16%, and 48,843 chats timed out with a 504 (`20261030T084021Z`).
+Performance Insights put nearly all of that wait on `commit`, so the
+cause is measured. Fixed by adding jobs without a notification, with
+idle workers polling for new jobs instead.
+
 ## Still open
 
-- **The enqueue lock, smaller.** `Lock:object` averaged 0.17 sessions
-  and peaked at 0.98 (`20261030T060616Z`), likely from enqueues inside a
-  caller's transaction, which still wait for the flush. One commit holds
-  it at a time, so it grows faster than the chat rate; step50 shows
-  whether that matters.
+- **What polling costs.** An idle worker waits up to one polling
+  interval for a new job, and every hop of a chat's background work can
+  meet one. A step10 rerun shows what it adds to first byte.
 - **The API's database pool fills in bursts.** Both copies reached all 40
   connections, with up to 16 waiting, in the run's slowest minute for
   first byte: p95 878 ms against 467 ms across the hold

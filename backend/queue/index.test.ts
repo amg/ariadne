@@ -144,4 +144,28 @@ describe('startQueue', () => {
       await stopProvider();
     }
   });
+
+  it('stops the queue it installs from notifying workers of new jobs', async () => {
+    // A queue function that notifies, as an upgrade of the queue's schema would leave it.
+    const probe = sql.id(QUEUE_SCHEMA, 'notifying_probe');
+    await sql`create function ${probe}() returns void language plpgsql as $$
+      begin
+        perform pg_notify('jobs:insert', '{}');
+      end $$`.execute(db);
+    const notifies = async () => {
+      const { rows } = await sql<{ notifies: boolean }>`
+        select prosrc like '%pg_notify%' as notifies from pg_proc
+        where oid = ${`${QUEUE_SCHEMA}.notifying_probe()`}::regprocedure`.execute(db);
+      return rows[0]?.notifies;
+    };
+    try {
+      expect(await notifies()).toBe(true);
+
+      await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
+
+      expect(await notifies()).toBe(false);
+    } finally {
+      await sql`drop function if exists ${probe}()`.execute(db);
+    }
+  });
 });
