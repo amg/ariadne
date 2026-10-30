@@ -1,7 +1,8 @@
 import type { DisplayRow } from '@/components/chat/types';
 import type { Message } from '@/services/api';
 import { streamVerdictSchema } from '@ari/lib/api/schemas/common/driftGate';
-import type { UIMessage } from 'ai';
+import type { ChatStatus, UIMessage } from 'ai';
+import { isRunning } from '../isRunning';
 import type { GateWaitOutcome } from './chatRegistry';
 import type { StreamVerdict, UiMessageLike } from './types';
 
@@ -133,13 +134,19 @@ export function buildRetrySeed(
  * - chat messages not covered by a DB row render as pending (optimistic user
  *   bubble, in-flight assistant stream), appended in chat order.
  */
-function buildSettledRow(
-  row: Message,
-  sdkMsg: UiMessageLike | undefined,
-  streaming: boolean,
-  reasoningCache: Map<string, string>,
-  liveVerdict: StreamVerdict | null = null,
-): DisplayRow {
+function buildSettledRow({
+  row,
+  sdkMsg,
+  streaming,
+  reasoningCache,
+  liveVerdict,
+}: {
+  row: Message;
+  sdkMsg: UiMessageLike | undefined;
+  streaming: boolean;
+  reasoningCache: Map<string, string>;
+  liveVerdict: StreamVerdict | null;
+}): DisplayRow {
   // A saved arrival judged by the running exchange (a retry, an edit's
   // fork) wears the streamed verdict until the refetch stores it.
   const verdict =
@@ -185,23 +192,26 @@ function pendingVerdictFor(message: UiMessageLike, liveVerdict: StreamVerdict | 
  * the latest state of that exchange — the empty row hides until the stream
  * speaks for itself.
  */
-function hideUnsettledExchangeRow(
-  rows: Message[],
-  status: 'submitted' | 'streaming' | 'ready' | 'error',
-) {
+function hideUnsettledExchangeRow(rows: Message[], status: ChatStatus) {
   if (status === 'ready' || status === 'error') return rows;
   return rows.filter(
     (row, index) => !(index === rows.length - 1 && row.role === 'assistant' && row.content === ''),
   );
 }
 
-export function mergeDisplayRows(
-  rows: Message[],
-  chatMessages: UiMessageLike[],
-  status: 'submitted' | 'streaming' | 'ready' | 'error',
-  reasoningCache: Map<string, string>,
-  liveVerdict: StreamVerdict | null,
-) {
+export function mergeDisplayRows({
+  rows,
+  chatMessages,
+  status,
+  reasoningCache,
+  liveVerdict,
+}: {
+  rows: Message[];
+  chatMessages: UiMessageLike[];
+  status: ChatStatus;
+  reasoningCache: Map<string, string>;
+  liveVerdict: StreamVerdict | null;
+}) {
   const settledRows = hideUnsettledExchangeRow(rows, status);
 
   const sdkMessages = new Map(chatMessages.map((m) => [m.id, m]));
@@ -214,13 +224,13 @@ export function mergeDisplayRows(
     : null;
 
   const settled = settledRows.map((row) =>
-    buildSettledRow(
+    buildSettledRow({
       row,
-      sdkMessages.get(row.id),
-      row.id === lastStreamingAssistantId,
+      sdkMsg: sdkMessages.get(row.id),
+      streaming: row.id === lastStreamingAssistantId,
       reasoningCache,
       liveVerdict,
-    ),
+    }),
   );
 
   const rowCountByKey = countByKey(settledRows);
@@ -265,12 +275,16 @@ export function mergeDisplayRows(
  * Null otherwise — an optimistic row is never offered, its id is not the
  * server's yet.
  */
-export function pausedArrivalIdOrNull(
-  display: DisplayRow[],
-  settledRows: Message[],
-  status: 'submitted' | 'streaming' | 'ready' | 'error',
-) {
-  if (status === 'submitted' || status === 'streaming') return null;
+export function pausedArrivalIdOrNull({
+  display,
+  settledRows,
+  status,
+}: {
+  display: DisplayRow[];
+  settledRows: Message[];
+  status: ChatStatus;
+}) {
+  if (isRunning(status)) return null;
   const last = display[display.length - 1];
   if (last?.message.role !== 'user' || last.verdict?.verdict !== 'fire') return null;
   return settledRows.some((row) => row.id === last.id) ? last.id : null;
@@ -279,7 +293,7 @@ export function pausedArrivalIdOrNull(
 type UnansweredArrivalFacts = {
   display: DisplayRow[];
   settledRows: Message[];
-  status: 'submitted' | 'streaming' | 'ready' | 'error';
+  status: ChatStatus;
   /** How the thread's last chat request ended, when it ended in a gate wait. */
   gateWait: GateWaitOutcome | null;
   /** Whether the Drift gate judges arrivals; with it off every arrival is clear. */
@@ -301,7 +315,7 @@ export function unansweredArrivalOrNull({
   gateWait,
   arrivalsJudged,
 }: UnansweredArrivalFacts) {
-  if (status === 'submitted' || status === 'streaming') return null;
+  if (isRunning(status)) return null;
   const last = display[display.length - 1];
   if (last?.message.role !== 'user') return null;
   if (!gateWait && !settledRows.some((row) => row.id === last.id)) return null;

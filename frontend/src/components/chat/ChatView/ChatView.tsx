@@ -6,6 +6,7 @@ import { chatStatusText } from '@/services/utils';
 import { ArrowDown, Send, Square } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import ThinkingIndicator from '../ThinkingIndicator';
+import { isRunning } from '../isRunning';
 import { DriftChoice } from './DriftChoice';
 import { MessageRow } from './MessageRow';
 import type { ChatViewStatus, UnansweredArrival } from './types';
@@ -126,7 +127,7 @@ export default function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const busy = status === 'submitted' || status === 'streaming';
+  const busy = isRunning(status);
   const paused = pausedMessageId !== null;
 
   // The draft never dies on a failed submit: it returns to the input, and

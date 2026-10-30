@@ -158,8 +158,6 @@
         "backend/src/services/titlingService.ts",
         "frontend/src/components/chat/AnalysisTab/DriftChart.tsx",
         "frontend/src/components/chat/AnalysisTab/model.ts",
-        "frontend/src/components/chat/ChatController/ChatController.tsx",
-        "frontend/src/components/chat/ChatController/utils.ts",
         "frontend/src/components/chat/ChatView/ChatView.tsx",
         "frontend/src/components/layout/ThreadSidebar.tsx",
         "frontend/src/services/api.ts",
