@@ -116,6 +116,24 @@ describe('whenArrivalJudged', () => {
     });
   });
 
+  it('queues the capture when judging a fire again, after the first judgment\u2019s capture was lost', async () => {
+    const { userId, threadId, shiftId } = await threadWithShift();
+    const params = { userId, threadId, messageId: shiftId };
+    // The first judgment ended without queueing its capture: nothing was queued.
+    await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
+
+    const judgment = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
+    if (judgment.kind !== 'judged' || !judgment.closedSegment) {
+      throw new Error('expected a fire with a closed segment');
+    }
+    expect(await findMemoryCaptureSegmentJobOrNull(judgment.closedSegment.segmentId)).toBeNull();
+    await whenArrivalJudged({ judgment, memory: memoryOn });
+
+    expect(await findMemoryCaptureSegmentJobOrNull(judgment.closedSegment.segmentId)).toMatchObject(
+      { state: 'queued' },
+    );
+  });
+
   it('queues no capture without Memory, and still announces the pause', async () => {
     const { userId, threadId, shiftId } = await threadWithShift();
     const params = { userId, threadId, messageId: shiftId };

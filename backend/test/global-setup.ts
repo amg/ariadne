@@ -161,6 +161,8 @@ function redactUrl(url: string) {
 /**
  * Recreate `<template>_w1`…`<template>_wN` as copies of the migrated
  * template. The template must have no open connections while copying.
+ * Each copy commits durably by default, as production does, even on a
+ * server started with that turned off for speed.
  */
 async function cloneWorkerDatabases(templateUrl: string, workers: number) {
   const url = new URL(templateUrl);
@@ -172,6 +174,7 @@ async function cloneWorkerDatabases(templateUrl: string, workers: number) {
       const clone = escapeIdentifier(workerDatabaseName(templateName, poolId));
       await admin.query(`drop database if exists ${clone} with (force)`);
       await admin.query(`create database ${clone} template ${escapeIdentifier(templateName)}`);
+      await admin.query(`alter database ${clone} set synchronous_commit = on`);
     }
   } finally {
     await admin.end();

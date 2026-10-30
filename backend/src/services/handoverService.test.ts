@@ -320,6 +320,32 @@ describe('handOverArrival', () => {
     expect(result.type).toBe('success');
   });
 
+  it('queues the capture again when none is queued and the segment is still owed, then moves with its Facts', async () => {
+    const { userId, threadId, pausedMessageId } = await pausedThread();
+    const segmentId = await closedSegmentIdOf(pausedMessageId);
+    for (let tries = 0; (await findMemoryCaptureSegmentJobOrNull(segmentId)) !== null; tries += 1) {
+      if (tries > 200) throw new Error('the capture never finished');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    // As if the capture's queueing had been lost: its job is gone and its Facts are owed.
+    await db
+      .deleteFrom('memory.memoryCaptureProgress')
+      .where('segmentId', '=', segmentId)
+      .execute();
+    await db.deleteFrom('memory.userFacts').where('userId', '=', userId).execute();
+
+    const moved = await handOverOnceSettled({ userId, threadId, messageId: pausedMessageId });
+
+    if (moved.type !== 'success') throw new Error(`handover failed: ${moved.code}`);
+    const prompt = await assembledSystemPrompt({
+      userId,
+      threadId: moved.data.thread.id,
+      basePrompt: 'Base.',
+      memory: memoryOn,
+    });
+    expect(prompt).toContain('The user loves hiking in the Alps.');
+  });
+
   it('moves without the closed segment once its capture gives up', async () => {
     process.env.HANDOVER_WAIT_MS = SHORT_HANDOVER_WAIT_MS;
     const { userId, threadId, pausedMessageId } = await pausedThread(() =>

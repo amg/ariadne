@@ -12,11 +12,12 @@ import {
   THREAD_GENERATE_TITLE,
   enqueueThreadGenerateTitle,
 } from '@queue/tasks/threadGenerateTitleTask';
+import { useRecordedJobCommits } from '@test/jobCommits';
 import { memoryOff } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { run } from 'graphile-worker';
 import { sql } from 'kysely';
-import { afterEach, describe, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const savedMockBaseUrl = process.env.MOCK_AI_BASE_URL;
 
@@ -26,6 +27,7 @@ afterEach(async () => {
 });
 
 useTestDb();
+const commitSettingsOf = useRecordedJobCommits();
 
 /** Canned `chat.completion` endpoint answering every request with the title. */
 async function startProvider(title: string) {
@@ -62,6 +64,36 @@ async function until(condition: () => Promise<boolean>, what: string) {
 }
 
 describe('startQueue', () => {
+  it('fetches and finishes jobs without waiting for the flush', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const { id: threadId } = await insertThread({ userId });
+    await insertMessage({ threadId, role: 'user', content: 'How do steam engines work?' });
+    await insertMessage({ threadId, role: 'assistant', content: 'Steam pushes a piston.' });
+    const stopProvider = await startProvider('Steam Engine Basics');
+    try {
+      await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
+      await enqueueThreadGenerateTitle({ userId, threadId, forced: false });
+      await until(
+        async () => (await findThreadByIdAndUser({ userId, threadId }))?.title !== null,
+        'the queue titles the thread',
+      );
+      await until(
+        async () => (await findJobByKey({ task: THREAD_GENERATE_TITLE, key: threadId })) === null,
+        'the finished job leaves the queue',
+      );
+
+      const fetches = await commitSettingsOf({ operation: 'UPDATE', task: THREAD_GENERATE_TITLE });
+      expect(fetches.length).toBeGreaterThan(0);
+      expect(new Set(fetches)).toEqual(new Set(['off']));
+      expect(await commitSettingsOf({ operation: 'DELETE', task: THREAD_GENERATE_TITLE })).toEqual([
+        'off',
+      ]);
+    } finally {
+      await stopProvider();
+    }
+  });
+
   it('finishes a job that a crashed process left half done', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });

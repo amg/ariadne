@@ -105,7 +105,8 @@ these same ways.
   queue off it. The queue (ADR 0011) notifies on every new job so
   workers wake at once, and pays the serialized-commit cost for it. That
   is the price of queueing work in the same transaction as its data,
-  and at high job rates it sets a ceiling on those commits. If the
-  ceiling binds, the first step is a queue that polls instead of
-  notifying, which keeps the atomic enqueue. A separate broker comes
+  and at high job rates it sets a ceiling on those commits. ADR 0016
+  takes the disk flush out of the lock's hold. If the ceiling still
+  binds, the next step is a queue that polls instead of notifying,
+  which keeps the atomic enqueue. A separate broker comes
   after that, because it gives the atomic enqueue up.

@@ -4,4 +4,6 @@
 pre-commit:
   commands:
     gate:
-      run: npm run gate
+      # The commit stays here; offload runs the gate on the PC when it's
+      # switched on, and here otherwise.
+      run: if command -v offload >/dev/null 2>&1; then offload npm run gate; else npm run gate; fi
