@@ -7,9 +7,9 @@ copied here with their run id. How a run is driven and judged is in
 
 ## Where we stand
 
-Step10 passes on the direct path: `20261029T053022Z-step10-load-direct`.
-It held 9,999 push streams and 2,000 chatters, with no sign-in failures.
-Chat first byte p95 was 637 ms and the busiest generator used 33.6% CPU.
+Step10 passes on the direct path: `20261030T060616Z-step10-load-direct`.
+It held 10,000 push streams and 2,000 chatters, with no sign-in failures.
+Chat first byte p95 was 480 ms and the busiest generator used 30.8% CPU.
 
 ## What strained, and the fix
 
@@ -57,13 +57,27 @@ keeping the whole configuration and refusing one without that field.
 **The quota check counted a deploy surge** that a first raise never uses.
 Fixed by giving each step its own deploy policy.
 
+**Every queue commit waited for the log to reach disk.** A commit that
+notifies workers holds one database-wide lock until its log is flushed,
+so enqueues lined up behind each other's flush. Log write waits averaged
+1.43 sessions and the enqueue lock 0.59 (`20261030T014328Z`). Fixed by
+letting the queue's own commits and standalone enqueues return before
+the flush. At the same load these fell to 0.73 and 0.17, and job wait
+p95 from 49 to 33 ms (`20261030T060616Z`). Database CPU and what users
+see did not move: the gain is headroom on a lock that grows with the
+chat rate.
+
 ## Still open
 
-- **The enqueue lock.** `Lock:object` waits sit on `queue/enqueueJob` and
-  `commit`. Each enqueue calls `pg_notify`, and Postgres holds one
-  database-wide lock from that commit until its WAL is flushed. Peaks
-  varied between runs on the same load: 7.6 sessions in
-  `20261029T042655Z`, 2.57 in `20261029T053022Z`. A reading, not tested.
+- **The enqueue lock, smaller.** `Lock:object` averaged 0.17 sessions
+  and peaked at 0.98 (`20261030T060616Z`), likely from enqueues inside a
+  caller's transaction, which still wait for the flush. One commit holds
+  it at a time, so it grows faster than the chat rate; step50 shows
+  whether that matters.
+- **The API's database pool fills in bursts.** Both copies reached all 40
+  connections, with up to 16 waiting, in the run's slowest minute for
+  first byte: p95 878 ms against 467 ms across the hold
+  (`20261030T060616Z`).
 - **API CPU climbs across the hold.** The busiest task went from 58% to
   81% on a flat 4,350 replies a minute (`20261029T053022Z`). It is the
   nearest limit for step50.
