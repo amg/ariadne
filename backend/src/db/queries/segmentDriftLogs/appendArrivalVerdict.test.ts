@@ -8,6 +8,7 @@ import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { useTestDb } from '@test/test-db';
+import { sql } from 'kysely';
 import { describe, expect, it } from 'vitest';
 
 const MODEL_ID = 'test/embed-model';
@@ -129,6 +130,62 @@ describe('appendArrivalVerdict', () => {
     expect(segments.map((segment) => segment.startMessageId)).not.toContain(arrivalId);
   });
 
+  it('writes nothing for a judged arrival abandoned while the judgment ran, though it opens no segment', async () => {
+    const { threadId, openingSegmentId, arrivalId } = await chainWithFiringArrival();
+    const edit = await holdTransaction();
+    await setMessagesAbandoned({ messageIds: [arrivalId], abandoned: true }, edit.trx);
+
+    const judging = appendArrivalVerdict({
+      threadId,
+      openedSegments: [],
+      verdict: {
+        segmentId: openingSegmentId,
+        messageId: arrivalId,
+        modelId: MODEL_ID,
+        verdict: 'pass',
+      },
+      judgmentState: freshState(arrivalId),
+      keep: keepOwn(arrivalId),
+    });
+    await someoneWaitsOnALock();
+    await edit.commit();
+
+    expect(await judging).toBe('arrival-abandoned');
+    const { logs } = await chainOf(threadId);
+    expect(logs).toEqual([]);
+    expect(await statesOf(threadId)).toEqual([]);
+  });
+
+  it('never prunes the checkpoint of an arrival newer than its own', async () => {
+    const { threadId, openingSegmentId, arrivalId, fire } = await chainWithFiringArrival();
+    const newer = await insertMessage({ threadId, role: 'user', content: 'Right behind it' });
+    expect(
+      await appendArrivalVerdict({
+        threadId,
+        openedSegments: [],
+        verdict: {
+          segmentId: openingSegmentId,
+          messageId: newer.id,
+          modelId: MODEL_ID,
+          verdict: 'pass',
+        },
+        judgmentState: freshState(newer.id),
+        keep: { stateMessageIds: [arrivalId, newer.id], foldMessageIds: [] },
+      }),
+    ).toBe('appended');
+
+    // The older arrival commits second, and its keep-two does not name the newer one.
+    expect(
+      await appendArrivalVerdict({
+        ...fire,
+        judgmentState: freshState(arrivalId),
+        keep: keepOwn(arrivalId),
+      }),
+    ).toBe('appended');
+
+    expect((await statesOf(threadId)).sort()).toEqual([arrivalId, newer.id].sort());
+  });
+
   it('lets an abandon that waited on the judgment delete the segment the judgment opened', async () => {
     const { threadId, arrivalId, fire } = await chainWithFiringArrival();
     const judging = await holdTransaction();
@@ -195,6 +252,11 @@ describe('appendArrivalVerdict', () => {
     const { threadId, arrivalId, fire } = await chainWithFiringArrival();
     // An older arrival's checkpoint, kept by an earlier commit's keep-two.
     const stale = await insertMessage({ threadId, role: 'user', content: 'Long gone' });
+    await db
+      .updateTable('chat.messages')
+      .set({ createdAt: sql<Date>`now() - interval '1 minute'` })
+      .where('id', '=', stale.id)
+      .execute();
     const staleSegment = {
       id: randomUUID(),
       threadId,

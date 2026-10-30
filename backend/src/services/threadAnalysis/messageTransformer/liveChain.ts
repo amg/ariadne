@@ -2,8 +2,9 @@ import type { MessageEmbedding, MessageExpansion } from '@db/types';
 import { listStoredEmbeddings } from '@queries/messageEmbeddings/listStoredEmbeddings';
 import { listMessageExpansionsByMessageIds } from '@queries/messageExpansions/listMessageExpansionsByMessageIds';
 import { listLiveMessagesByThread } from '@queries/messages/listLiveMessagesByThread';
-import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegmentDriftLogsByThread';
-import { listThreadSegmentsByThread } from '@queries/threadSegments/listThreadSegmentsByThread';
+import { listLiveTailByThread } from '@queries/messages/listLiveTailByThread';
+import { listArrivalVerdictsByMessageIds } from '@queries/segmentDriftLogs/listArrivalVerdictsByMessageIds';
+import { listSegmentsStartingAt } from '@queries/threadSegments/listSegmentsStartingAt';
 import { EMBEDDING_MODEL_ID } from '../../aiService';
 import type { LiveArrival, LiveChain, LoggedVerdict } from '../types';
 import { liveArrivalsOf } from './liveArrivals';
@@ -23,34 +24,61 @@ interface ChainSegment {
 const ARRIVALS_READ_WITH_VECTORS = 2;
 
 /**
- * Reads the Thread's live chain in a fixed number of queries, whatever
- * the Thread's length, with the vectors of its newest arrivals alone.
+ * Reads the Thread's whole live chain, from its first arrival, in a fixed
+ * number of queries, with the vectors of its newest arrivals alone.
  */
 export async function readLiveChain(threadId: string): Promise<LiveChain> {
-  const arrivals = liveArrivalsOf(await listLiveMessagesByThread({ threadId }));
+  const arrivals = liveArrivalsOf({
+    messages: await listLiveMessagesByThread({ threadId }),
+    arrivalsBefore: 0,
+  });
   return {
     threadId,
+    before: { arrivals: 0, completedTurns: 0, unjudged: false },
     arrivals,
-    ...(await readStoredJudgments({ threadId, arrivals })),
+    ...(await readStoredJudgments({ arrivals })),
+  };
+}
+
+/**
+ * Reads the newest few live arrivals up to the target, with the newest
+ * completed Turn before it and the target's reply, in a fixed number of
+ * queries whatever the Thread's length. No target reads up to the
+ * Thread's newest live arrival. A target that is not a live arrival of the
+ * Thread yields a chain holding none.
+ */
+export async function readLiveTail({
+  threadId,
+  arrivalId,
+}: {
+  threadId: string;
+  arrivalId: string | null;
+}) {
+  const tail = await listLiveTailByThread({ threadId, arrivalId, modelId: EMBEDDING_MODEL_ID });
+  const arrivals = liveArrivalsOf({
+    messages: tail.messages,
+    arrivalsBefore: tail.before.arrivals,
+  });
+  return {
+    threadId,
+    before: tail.before,
+    arrivals,
+    ...(await readStoredJudgments({ arrivals })),
   };
 }
 
 /** Reads what is stored now for the given arrivals and their replies. */
-export async function readStoredJudgments({
-  threadId,
-  arrivals,
-}: Pick<LiveChain, 'threadId' | 'arrivals'>) {
-  const [embeddings, expansions, logs, segments] = await Promise.all([
+export async function readStoredJudgments({ arrivals }: Pick<LiveChain, 'arrivals'>) {
+  const arrivalIds = arrivals.map((arrival) => arrival.userMessage.id);
+  const [embeddings, expansions, verdicts, segments] = await Promise.all([
     listStoredEmbeddings({
       messageIds: messageIdsOf(arrivals),
       vectorsFor: messageIdsOf(arrivals.slice(-ARRIVALS_READ_WITH_VECTORS)),
       modelId: EMBEDDING_MODEL_ID,
     }),
-    listMessageExpansionsByMessageIds({
-      messageIds: arrivals.map((arrival) => arrival.userMessage.id),
-    }),
-    listSegmentDriftLogsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
-    listThreadSegmentsByThread({ threadId, modelId: EMBEDDING_MODEL_ID }),
+    listMessageExpansionsByMessageIds({ messageIds: arrivalIds }),
+    listArrivalVerdictsByMessageIds({ messageIds: arrivalIds, modelId: EMBEDDING_MODEL_ID }),
+    listSegmentsStartingAt({ startMessageIds: arrivalIds, modelId: EMBEDDING_MODEL_ID }),
   ]);
   return {
     embedded: new Set(embeddings.map((row) => row.messageId)),
@@ -60,9 +88,29 @@ export async function readStoredJudgments({
       ),
     ),
     expansions: new Map(expansions.map((row) => [row.messageId, row])),
-    verdicts: new Map(logs.map((log) => [log.messageId, log])),
+    verdicts: new Map(verdicts.map(({ messageId, ...verdict }) => [messageId, verdict])),
     segmentIdByStart: new Map(segments.map((segment) => [segment.startMessageId, segment.id])),
   };
+}
+
+/** The arrival at a position in the whole live chain; undefined when the chain does not hold it. */
+export function arrivalAt({ chain, position }: { chain: LiveChain; position: number }) {
+  if (position < chain.before.arrivals) return undefined;
+  return chain.arrivals[position - chain.before.arrivals];
+}
+
+/** The position in the whole live chain of the arrival on this user Message; -1 when the chain does not hold it. */
+export function positionOf({ chain, messageId }: { chain: LiveChain; messageId: string }) {
+  const arrival = chain.arrivals.find((row) => row.userMessage.id === messageId);
+  return arrival === undefined ? -1 : arrival.turnNumber - 1;
+}
+
+/** How many live arrivals before the given position completed a Turn. */
+export function completedTurnsBefore({ chain, position }: { chain: LiveChain; position: number }) {
+  const held = chain.arrivals.filter(
+    (arrival) => arrival.turnNumber <= position && arrival.assistantReply !== null,
+  );
+  return chain.before.completedTurns + held.length;
 }
 
 /** The arrivals' Messages and their replies', in chronology. */

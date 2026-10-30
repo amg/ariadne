@@ -4,8 +4,6 @@ import type { DbExecutor, QueuedJob } from '@db/types';
 import { isLiveArrival } from '@queries/messages/isLiveArrival';
 import { enqueueJob } from '@queries/queue/enqueueJob';
 import { findJobByKey } from '@queries/queue/findJobByKey';
-import { findSegmentDriftLogByMessageId } from '@queries/segmentDriftLogs/findSegmentDriftLogByMessageId';
-import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { runLiveGate } from '@services/threadAnalysis';
 import type { SegmentToCapture } from '../../src/types/memory';
 import { MAX_ATTEMPTS, TaskFailure } from '../errors';
@@ -101,9 +99,8 @@ export async function judgeArrival({
     };
   }
 
-  let closedSegment: SegmentToCapture | null = null;
-  const logged = await findSegmentDriftLogByMessageId({ messageId, modelId: EMBEDDING_MODEL_ID });
-  if (logged) closedSegment = { userId, threadId, segmentId: logged.segmentId };
+  const closedSegment =
+    gate.data.segmentId === null ? null : { userId, threadId, segmentId: gate.data.segmentId };
 
   return {
     kind: 'judged',

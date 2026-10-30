@@ -16,11 +16,22 @@ export interface LiveArrival {
 /**
  * One gate pass's view of a Thread's live chain: read from the database
  * once, then carried from step to step. A step that stores rows returns a
- * new chain holding them, so no step reads the same rows again.
+ * new chain holding them, so no step reads the same rows again. The chain
+ * holds either every live arrival or only the newest few up to a target.
+ * Either way an arrival's position counts every live arrival before it.
  */
 export interface LiveChain {
   threadId: string;
-  /** The live conversation's arrivals in order; abandoned rows are out. */
+  /** The live arrivals before the first one the chain holds; none when it holds every one. */
+  before: {
+    /** How many there are. */
+    arrivals: number;
+    /** How many of them completed a Turn. */
+    completedTurns: number;
+    /** Whether one of them has no stored verdict. */
+    unjudged: boolean;
+  };
+  /** The live arrivals the chain holds, in order; abandoned rows are out. */
   arrivals: readonly LiveArrival[];
   /** The live arrivals and replies that have an embedding stored under the current embedding model. */
   embedded: ReadonlySet<string>;

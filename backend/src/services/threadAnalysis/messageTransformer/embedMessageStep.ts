@@ -3,7 +3,7 @@ import { computeEmbeddingCostUsd } from '@services/aiService/pricing';
 import { err, ok } from '../../../types/result';
 import { EMBEDDING_MODEL_ID, embedText } from '../../aiService';
 import { formattedProspectiveTurn } from '../turns';
-import { withEmbedding } from './liveChain';
+import { arrivalAt, withEmbedding } from './liveChain';
 import type { MessageStep } from './messageStep';
 
 /**
@@ -20,7 +20,7 @@ import type { MessageStep } from './messageStep';
 export const embedMessageStep: MessageStep = {
   name: 'embed',
   async run({ chain, arrivalIndex }) {
-    const arrival = chain.arrivals[arrivalIndex];
+    const arrival = arrivalAt({ chain, position: arrivalIndex });
     if (!arrival) return err('thread_not_found');
     const userMessageId = arrival.userMessage.id;
     if (chain.embedded.has(userMessageId)) return ok(chain);

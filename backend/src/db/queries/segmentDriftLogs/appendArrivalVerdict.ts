@@ -10,7 +10,7 @@ interface OpenedSegment {
   modelId: string;
 }
 
-/** The checkpoints one verdict commit keeps: the previous arrival's and its own. */
+/** The checkpoints one verdict commit keeps: its own, and those it was judged from. */
 interface KeptCheckpoints {
   /** Judgment states kept, by their arrival's user Message. */
   stateMessageIds: readonly string[];
@@ -26,7 +26,7 @@ type AppendArrivalVerdictProps = {
   verdict: NewSegmentDriftLog | null;
   /** The arrival's judgment-state checkpoint; null when the arrival judged nothing new. */
   judgmentState: NewArrivalJudgmentState | null;
-  /** The keep-two rule's survivors; every other checkpoint of the Thread and model is pruned. */
+  /** The keep-two rule's survivors; every other older checkpoint of the Thread and model is pruned. */
   keep: KeptCheckpoints;
 };
 
@@ -36,10 +36,15 @@ class WrittenByAnotherPass extends Error {}
 /** Rolls the append back when an arrival that would open a segment was abandoned. */
 class OpenerAbandoned extends Error {}
 
+/** Rolls the append back when the judged arrival was abandoned. */
+class ArrivalAbandoned extends Error {}
+
 /**
  * Prunes the Thread's checkpoints to the keep-two survivors: every
  * judgment state and turn fold of this Thread and model whose Message is
- * live and not kept. Abandoned arrivals keep theirs — their rows stay
+ * live, older than the committing arrival, and not kept. Newer arrivals
+ * keep theirs, so a commit that lands late never removes what a newer
+ * judgment stored. Abandoned arrivals keep theirs — their rows stay
  * correct for them, whatever became of the conversation around them.
  */
 async function pruneCheckpoints(
@@ -48,9 +53,11 @@ async function pruneCheckpoints(
     threadId: string;
     modelId: string;
     keep: KeptCheckpoints;
+    /** When the committing arrival was created. */
+    arrivalCreatedAt: Date;
   },
 ) {
-  const { threadId, modelId, keep } = props;
+  const { threadId, modelId, keep, arrivalCreatedAt } = props;
   const states = [...new Set(keep.stateMessageIds)];
   const folds = [...new Set(keep.foldMessageIds)];
   if (states.length > 0) {
@@ -60,6 +67,7 @@ async function pruneCheckpoints(
       .whereRef('s.messageId', '=', 'm.id')
       .where('m.threadId', '=', threadId)
       .where('m.abandoned', '=', false)
+      .where('m.createdAt', '<', arrivalCreatedAt)
       .where('s.modelId', '=', modelId)
       .where('s.messageId', 'not in', states)
       .execute();
@@ -71,6 +79,7 @@ async function pruneCheckpoints(
       .whereRef('f.messageId', '=', 'm.id')
       .where('m.threadId', '=', threadId)
       .where('m.abandoned', '=', false)
+      .where('m.createdAt', '<', arrivalCreatedAt)
       .where('f.modelId', '=', modelId)
       .where('f.messageId', 'not in', folds)
       .execute();
@@ -94,18 +103,28 @@ async function storeJudgment(
     modelId: string;
   },
 ) {
+  // The judged arrival and the openers are locked, so that an abandon either
+  // sees what this commit stores, deleting the segments it opened, or
+  // commits first and leaves this commit to store nothing.
+  const arrivalId = verdict?.messageId ?? judgmentState?.messageId;
+  const openerIds = [...new Set(openedSegments.map((segment) => segment.startMessageId))];
+  const lockedIds = [...new Set(arrivalId === undefined ? openerIds : [...openerIds, arrivalId])];
+  const liveRows =
+    lockedIds.length === 0
+      ? []
+      : await trx
+          .selectFrom('chat.messages')
+          .select(['id', 'createdAt'])
+          .where('id', 'in', lockedIds)
+          .where('abandoned', '=', false)
+          .forShare()
+          .execute();
+  const createdAtOfLive = new Map(liveRows.map((row) => [row.id, row.createdAt]));
+  if (openerIds.some((id) => !createdAtOfLive.has(id))) throw new OpenerAbandoned();
+  const arrivalCreatedAt = arrivalId === undefined ? undefined : createdAtOfLive.get(arrivalId);
+  if (arrivalId !== undefined && arrivalCreatedAt === undefined) throw new ArrivalAbandoned();
+
   if (openedSegments.length > 0) {
-    // Locked so that an abandon either sees the segment and deletes it, or
-    // commits first and leaves this pass to write nothing.
-    const openerIds = [...new Set(openedSegments.map((segment) => segment.startMessageId))];
-    const liveOpeners = await trx
-      .selectFrom('chat.messages')
-      .select('id')
-      .where('id', 'in', openerIds)
-      .where('abandoned', '=', false)
-      .forShare()
-      .execute();
-    if (liveOpeners.length < openerIds.length) throw new OpenerAbandoned();
     const opened = await trx
       .insertInto('analysis.threadSegments')
       .values(openedSegments)
@@ -132,21 +151,21 @@ async function storeJudgment(
       .onConflict((oc) => oc.columns(['messageId', 'modelId']).doNothing())
       .execute();
   }
-  if (verdict !== null || judgmentState !== null) {
-    await pruneCheckpoints(trx, { threadId, modelId, keep });
+  if (arrivalCreatedAt !== undefined) {
+    await pruneCheckpoints(trx, { threadId, modelId, keep, arrivalCreatedAt });
   }
 }
 
 /**
  * Adds one arrival's judgment to the live chain — its verdict, the
  * segments it opens, and its judgment-state checkpoint — together or not
- * at all, then prunes every other checkpoint of the Thread to the
- * keep-two survivors. Nothing is written when another pass already logged
- * that verdict or opened one of those segments, or when an arrival that
- * would open a segment has been abandoned; the outcome says which. The
- * state row itself is idempotent (both passes replay the same stored rows
- * into the same values), so only the verdict and the segments decide the
- * race.
+ * at all, then prunes every other checkpoint of the Thread older than the
+ * arrival to the keep-two survivors. Nothing is written when another pass
+ * already logged that verdict or opened one of those segments, or when the
+ * judged arrival or an arrival that would open a segment has been
+ * abandoned; the outcome says which. The state row itself is idempotent
+ * (both passes replay the same stored rows into the same values), so only
+ * the verdict and the segments decide the race.
  */
 export async function appendArrivalVerdict({
   threadId,
@@ -165,6 +184,7 @@ export async function appendArrivalVerdict({
   } catch (error) {
     if (error instanceof WrittenByAnotherPass) return 'written-by-another-pass';
     if (error instanceof OpenerAbandoned) return 'opener-abandoned';
+    if (error instanceof ArrivalAbandoned) return 'arrival-abandoned';
     throw error;
   }
 }
