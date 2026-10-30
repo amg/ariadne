@@ -14,7 +14,7 @@
 
 /** Files sanctioned to import react-router (PROJECT-KNOWLEDGE glue list). */
 const FRONTEND_GLUE =
-  '^frontend/src/(App\\.tsx|router\\.tsx|pages/(AppLayout|ChatPage)\\.tsx|actions/)';
+  '^frontend/src/(App\\.tsx|router\\.tsx|pages/(AppLayout/|ChatPage\\.tsx)|actions/)';
 
 export default {
   forbidden: [

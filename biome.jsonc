@@ -162,7 +162,6 @@
         "frontend/src/components/chat/ChatController/utils.ts",
         "frontend/src/components/chat/ChatView/ChatView.tsx",
         "frontend/src/components/layout/ThreadSidebar.tsx",
-        "frontend/src/pages/AppLayout.tsx",
         "frontend/src/services/api.ts",
         "lib/metrics/catalogue.ts",
         "lib/metrics/emf.ts",
