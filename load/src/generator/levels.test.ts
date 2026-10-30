@@ -21,4 +21,23 @@ describe('createLevels', () => {
 
     expect(before.chattersActive).toBe(0);
   });
+
+  it('holds a figure up while work runs, and lets it down when the work fails', async () => {
+    const levels = createLevels();
+    let during = -1;
+
+    await expect(
+      levels.during('chattersActive', async () => {
+        during = levels.now().chattersActive;
+        throw new Error('down');
+      }),
+    ).rejects.toThrow('down');
+
+    expect(during).toBe(1);
+    expect(levels.now().chattersActive).toBe(0);
+  });
+
+  it('gives back what the work returned', async () => {
+    await expect(createLevels().during('usersSignedIn', async () => 7)).resolves.toBe(7);
+  });
 });

@@ -39,7 +39,15 @@ function stateGroups(line: StateLine): MetricGroup[] {
  * object, the record under `request` and the request's figures beside it as
  * metric fields, counted at the moment the line is written `at`.
  */
-export function requestLineText(line: RequestLine, publishMetrics: boolean, at: Date = new Date()) {
+export function requestLineText({
+  line,
+  publishMetrics,
+  at = new Date(),
+}: {
+  line: RequestLine;
+  publishMetrics: boolean;
+  at?: Date;
+}) {
   if (!publishMetrics) return `REQUEST ${JSON.stringify(line)}`;
   const fields = metricFields(NAMESPACES.load, at, requestGroups(line));
   return JSON.stringify({ request: line, ...fields });

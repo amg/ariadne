@@ -15,9 +15,10 @@ const details = {
 describe('createRequestLog', () => {
   it('writes one line per request, naming who made it', () => {
     const lines: string[] = [];
-    const log = createRequestLog({ run: 'run-1', generator: 2, attempt: 3 }, (line) =>
-      lines.push(line),
-    );
+    const log = createRequestLog({
+      who: { run: 'run-1', generator: 2, attempt: 3 },
+      emit: (line) => lines.push(line),
+    });
 
     log.forUser(7).record(details);
 
@@ -35,11 +36,11 @@ describe('createRequestLog', () => {
 
   it('writes each line with its figures where metrics are published', () => {
     const lines: string[] = [];
-    const log = createRequestLog(
-      { run: 'run-1', generator: 2, attempt: 3 },
-      (line) => lines.push(line),
-      true,
-    );
+    const log = createRequestLog({
+      who: { run: 'run-1', generator: 2, attempt: 3 },
+      emit: (line) => lines.push(line),
+      publishMetrics: true,
+    });
 
     log.forUser(7).record(details);
 
@@ -50,7 +51,10 @@ describe('createRequestLog', () => {
   });
 
   it('counts the lines it wrote, in all and by kind', () => {
-    const log = createRequestLog({ run: 'run-1', generator: 0, attempt: 1 }, () => undefined);
+    const log = createRequestLog({
+      who: { run: 'run-1', generator: 0, attempt: 1 },
+      emit: () => undefined,
+    });
 
     log.forUser(1).record(details);
     log.forUser(2).record(details);

@@ -33,11 +33,13 @@ const published = (text: string) => JSON.parse(text);
 
 describe('requestLineText', () => {
   it('follows a marker with the record where metrics are not published', () => {
-    expect(requestLineText(request, false, AT)).toBe(`REQUEST ${JSON.stringify(request)}`);
+    expect(requestLineText({ line: request, publishMetrics: false, at: AT })).toBe(
+      `REQUEST ${JSON.stringify(request)}`,
+    );
   });
 
   it('carries the record and the figures of a chat that streamed, on one JSON line the record leads', () => {
-    const text = requestLineText(request, true, AT);
+    const text = requestLineText({ line: request, publishMetrics: true, at: AT });
     const line = published(text);
 
     expect(text.startsWith('{"request":')).toBe(true);
@@ -53,7 +55,7 @@ describe('requestLineText', () => {
 
   it('counts a failed request by its kind and gives it no first byte', () => {
     const failed: RequestLine = { ...request, kind: 'signin', outcome: 'failed', status: 500 };
-    const line = published(requestLineText(failed, true, AT));
+    const line = published(requestLineText({ line: failed, publishMetrics: true, at: AT }));
 
     expect(line).toMatchObject({ Kind: 'signin', Requests: 1, Failures: 1 });
     expect(line).not.toHaveProperty('ChatFirstByteMs');
@@ -62,15 +64,23 @@ describe('requestLineText', () => {
   it('gives a chat that did not stream no first byte', () => {
     const paused: RequestLine = { ...request, outcome: 'paused' };
 
-    expect(published(requestLineText(paused, true, AT))).not.toHaveProperty('ChatFirstByteMs');
+    expect(
+      published(requestLineText({ line: paused, publishMetrics: true, at: AT })),
+    ).not.toHaveProperty('ChatFirstByteMs');
   });
 });
 
 describe('the metrics a generator publishes', () => {
   it('are signals of the catalogue, with the unit and dimensions it gives them', () => {
     const lines = [
-      published(requestLineText(request, true, AT)),
-      published(requestLineText({ ...request, kind: 'signin', outcome: 'failed' }, true, AT)),
+      published(requestLineText({ line: request, publishMetrics: true, at: AT })),
+      published(
+        requestLineText({
+          line: { ...request, kind: 'signin', outcome: 'failed' },
+          publishMetrics: true,
+          at: AT,
+        }),
+      ),
       published(stateLineText(state, true)),
     ];
     const metrics = lines.flatMap(publishedMetricsIn);

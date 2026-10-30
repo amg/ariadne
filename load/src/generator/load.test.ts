@@ -32,12 +32,12 @@ const plan: Plan = {
 };
 
 const requests = () =>
-  createRequestLog({ run: 'run-1', generator: 2, attempt: 1 }, () => undefined);
+  createRequestLog({ who: { run: 'run-1', generator: 2, attempt: 1 }, emit: () => undefined });
 
 /** A user that holds until it is told to stop, then takes `stoppingMs` to do so. */
 function userStoppingIn(stoppingMs: number) {
   vi.mocked(runUser).mockImplementation(
-    (_plan, _user, _levels, _requests, signal) =>
+    ({ signal }) =>
       new Promise((resolve) =>
         signal.addEventListener('abort', () =>
           stoppingMs === 0 ? resolve() : setTimeout(resolve, stoppingMs),
@@ -70,7 +70,9 @@ describe('runLoad', () => {
     expect(runUser).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(runUser).toHaveBeenCalledTimes(4);
-    expect(vi.mocked(runUser).mock.calls.map(([, user]) => user)).toEqual([10, 11, 12, 13]);
+    expect(vi.mocked(runUser).mock.calls.map(([{ userNumber }]) => userNumber)).toEqual([
+      10, 11, 12, 13,
+    ]);
     await vi.advanceTimersByTimeAsync(31_000);
 
     const result = await running;
@@ -80,9 +82,9 @@ describe('runLoad', () => {
 
   it('ends its ramp on time when the generator stalls during it, starting the late users at once', async () => {
     const stalledUser = 11;
-    vi.mocked(runUser).mockImplementation((_plan, user, _levels, _requests, signal) => {
+    vi.mocked(runUser).mockImplementation(({ userNumber, signal }) => {
       // The clock jumps as it would while the generator is too busy to run timers.
-      if (user === stalledUser) vi.setSystemTime(Date.now() + 2_000);
+      if (userNumber === stalledUser) vi.setSystemTime(Date.now() + 2_000);
       return new Promise((resolve) => signal.addEventListener('abort', () => resolve()));
     });
     const startedAt = Date.now();

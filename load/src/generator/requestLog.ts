@@ -42,11 +42,15 @@ type BegunAnswer = { status: number; firstByteMs: number };
  * A request the generator cut short because it was told to stop; it is no
  * failure of the app. `begun` is the answer that had begun, if any had.
  */
-export function cutShort(
-  kind: RequestKind,
-  clock: Stopwatch,
-  begun: BegunAnswer | null,
-): RequestDetails {
+export function cutShort({
+  kind,
+  clock,
+  begun,
+}: {
+  kind: RequestKind;
+  clock: Stopwatch;
+  begun: BegunAnswer | null;
+}): RequestDetails {
   const totalMs = clock.elapsedMs();
   return {
     kind,
@@ -60,12 +64,16 @@ export function cutShort(
 }
 
 /** A request that got no answer: cut short when `signal` has aborted, and otherwise unreachable. */
-export function unanswered(
-  kind: RequestKind,
-  clock: Stopwatch,
-  signal: AbortSignal,
-): RequestDetails {
-  return signal.aborted ? cutShort(kind, clock, null) : unreachable(kind, clock);
+export function unanswered({
+  kind,
+  clock,
+  signal,
+}: {
+  kind: RequestKind;
+  clock: Stopwatch;
+  signal: AbortSignal;
+}): RequestDetails {
+  return signal.aborted ? cutShort({ kind, clock, begun: null }) : unreachable(kind, clock);
 }
 
 /** Where one user's requests are written. */
@@ -83,11 +91,15 @@ type RequestLog = {
  * keeps everything but the request in flight. Where metrics are published,
  * each line also publishes its request's figures.
  */
-export function createRequestLog(
-  who: { run: string; generator: number; attempt: number },
-  emit: (line: string) => void,
+export function createRequestLog({
+  who,
+  emit,
   publishMetrics = false,
-): RequestLog {
+}: {
+  who: { run: string; generator: number; attempt: number };
+  emit: (line: string) => void;
+  publishMetrics?: boolean;
+}): RequestLog {
   const byKind: Partial<Record<RequestKind, number>> = {};
   let total = 0;
   return {
@@ -96,7 +108,7 @@ export function createRequestLog(
         total += 1;
         byKind[details.kind] = (byKind[details.kind] ?? 0) + 1;
         const line: RequestLine = { ...who, user, ...details };
-        emit(requestLineText(line, publishMetrics));
+        emit(requestLineText({ line, publishMetrics }));
       },
     }),
     counts: () => ({ total, byKind: { ...byKind } }),

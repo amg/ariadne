@@ -51,22 +51,22 @@ export function readPlan(env: NodeJS.ProcessEnv): Plan {
   return {
     mode: env.MODE === 'seed' ? 'seed' : 'load',
     runId: required(env, 'RUN_ID'),
-    generator: number(env, 'GENERATOR', 0),
-    attempt: number(env, 'ATTEMPT', 1),
+    generator: number({ env, key: 'GENERATOR', fallback: 0 }),
+    attempt: number({ env, key: 'ATTEMPT', fallback: 1 }),
     targetUrl: required(env, 'TARGET_URL'),
     loadKeyHeader: required(env, 'LOAD_KEY_HEADER'),
     loadKey: required(env, 'LOAD_KEY'),
     password: required(env, 'USER_PASSWORD'),
     emailDomain: required(env, 'EMAIL_DOMAIN'),
-    firstUser: number(env, 'FIRST_USER', 0),
-    userCount: number(env, 'USER_COUNT', 0),
-    chattingShare: number(env, 'CHATTING_SHARE', 0),
-    rampSeconds: number(env, 'RAMP_SECONDS', 60),
-    holdSeconds: number(env, 'HOLD_SECONDS', 300),
+    firstUser: number({ env, key: 'FIRST_USER', fallback: 0 }),
+    userCount: number({ env, key: 'USER_COUNT', fallback: 0 }),
+    chattingShare: number({ env, key: 'CHATTING_SHARE', fallback: 0 }),
+    rampSeconds: number({ env, key: 'RAMP_SECONDS', fallback: 60 }),
+    holdSeconds: number({ env, key: 'HOLD_SECONDS', fallback: 300 }),
     endsAt: env.ENDS_AT ? instant(env, 'ENDS_AT') : null,
-    thinkSeconds: number(env, 'THINK_SECONDS', 30),
-    seedConcurrency: number(env, 'SEED_CONCURRENCY', 200),
-    stateSeconds: number(env, 'STATE_SECONDS', 5),
+    thinkSeconds: number({ env, key: 'THINK_SECONDS', fallback: 30 }),
+    seedConcurrency: number({ env, key: 'SEED_CONCURRENCY', fallback: 200 }),
+    stateSeconds: number({ env, key: 'STATE_SECONDS', fallback: 5 }),
     publishMetrics: env.PUBLISH_METRICS === 'true',
     direct: env.ORIGIN_ADDRESS
       ? {
@@ -106,7 +106,7 @@ function required(env: NodeJS.ProcessEnv, key: string) {
   return value;
 }
 
-function number(env: NodeJS.ProcessEnv, key: string, fallback: number) {
+function number({ env, key, fallback }: { env: NodeJS.ProcessEnv; key: string; fallback: number }) {
   const value = Number(env[key] ?? fallback);
   if (Number.isNaN(value)) throw new Error(`${key} must be a number`);
   return value;
