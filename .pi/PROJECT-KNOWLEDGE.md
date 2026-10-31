@@ -19,7 +19,7 @@ truth; nothing here repeats it.
 - **`docs/architecture/`** — HTML reports of deployment shapes (aws-prod
   architecture and deployment), and the load testing architecture: how a
   run is driven, recorded and judged, and why.
-- **`docs/architecture/LOAD-RUN-LEARNINGS.md`** — what each load run hit,
+- **`docs/architecture/load-run-learnings.md`** — what each load run hit,
   what we changed, and what we now believe. Read it before planning a run,
   and add to it after reading one.
 - **`docs/ideas/`** — open explorations, high level only.

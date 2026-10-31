@@ -122,10 +122,10 @@ check, the tests and the frontend build.
 
 - **[Domain vocabulary](CONTEXT.md)** — The terms (Threads, Turns, Drift, Facts, Seeds, Handovers) the codebase assumes everywhere
 - **[Architecture decisions](adrs/)** — Why the key technical choices were made
-- **[A new message in a Thread](docs/flows/NEW-MESSAGE.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
-- **[Background work](docs/flows/BACKGROUND-WORK.md)** — The queue, the event bus, push to the browser, and how failures surface
-- **[aws-prod architecture](docs/architecture/AWS-PROD-ARCHITECTURE.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
-- **[aws-prod deployment](docs/architecture/AWS-PROD-DEPLOYMENT.html)** — Raising, running, recovering and the step gates
+- **[A new message in a Thread](docs/flows/new-message.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
+- **[Background work](docs/flows/background-work.md)** — The queue, the event bus, push to the browser, and how failures surface
+- **[aws-prod architecture](docs/architecture/aws-prod-architecture.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
+- **[aws-prod deployment](docs/architecture/aws-prod-deployment.html)** — Raising, running, recovering and the step gates
 - **[Drift maths](docs/maths/)** — How the Drift gate judges a message, how it keeps running totals, and the alternatives considered
 - **[Ideas](docs/ideas/)** — Open explorations
 

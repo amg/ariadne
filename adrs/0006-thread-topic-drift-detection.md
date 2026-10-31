@@ -115,7 +115,7 @@ to offer a choice.
   drifted, not one turn later.
 
 The math — formulas, parameters, numerical guardrails — lives in
-`docs/maths/THREAD-DRIFT-MATH.md`.
+`docs/maths/thread-drift-math.md`.
 
 ## What we tried instead
 
