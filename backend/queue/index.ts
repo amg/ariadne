@@ -1,6 +1,6 @@
 import { env } from '@config/env';
 import { queuePoolSize } from '@db/poolSize';
-import { silenceJobInserts } from '@queries/queue/silenceJobInserts';
+import { setJobInsertNotifications } from '@queries/queue/setJobInsertNotifications';
 import { type Runner, type WorkerUtils, makeWorkerUtils, run } from 'graphile-worker';
 import { Pool } from 'pg';
 import { logger } from '../src/logger';
@@ -24,13 +24,6 @@ const FETCHED_JOB_TTL_MS = 60_000;
  */
 const FINISHED_JOBS_BATCH_MS = 250;
 
-/**
- * How often a worker with nothing to run looks for new jobs. Adding a job
- * notifies no worker, so this is the longest a new job waits for an idle
- * worker.
- */
-const NEW_JOBS_POLL_MS = 100;
-
 let active: {
   runner: Runner;
   pool: Pool;
@@ -46,8 +39,12 @@ let active: {
  * not run stay queued, untouched, until it does. Jobs run side by side,
  * up to the worker's job concurrency; work on one Thread still serializes
  * on its own lock. A worker fetches up to as many jobs as it runs at once
- * in one query, and finished jobs leave the queue together. A worker
- * learns of new jobs by looking for them, not by being told.
+ * in one query, and finished jobs leave the queue together.
+ *
+ * Workers are notified of every new job, unless the deployment sets how
+ * often they poll instead. Then adding a job notifies no one, so enqueues
+ * never wait their turn on the lock that notifying commits share, and a
+ * new job waits for the next poll.
  *
  * The engine works through a pool of its own, whose commits return before
  * they are flushed to disk. A crash can then lose the engine's latest
@@ -62,7 +59,11 @@ export async function startQueue({ memory, threadAnalysisMode }: Parameters<type
     schema: QUEUE_SCHEMA,
   });
   await utils.migrate();
-  const stillNotifying = await silenceJobInserts({ schema: QUEUE_SCHEMA });
+  const pollMs = env.QUEUE_POLL_MS;
+  const stillNotifying = await setJobInsertNotifications({
+    schema: QUEUE_SCHEMA,
+    notify: pollMs === undefined,
+  });
   // The queue still works while it notifies; enqueues only take turns again under heavy load.
   if (stillNotifying.length > 0) {
     logger.error({ functions: stillNotifying }, 'queue still notifies workers of new jobs');
@@ -88,7 +89,7 @@ export async function startQueue({ memory, threadAnalysisMode }: Parameters<type
       worker: {
         localQueue: { size: env.WORKER_JOB_CONCURRENCY, ttl: FETCHED_JOB_TTL_MS },
         completeJobBatchDelay: FINISHED_JOBS_BATCH_MS,
-        pollInterval: NEW_JOBS_POLL_MS,
+        ...(pollMs === undefined ? {} : { pollInterval: pollMs }),
       },
     },
     taskList: runtime.taskList,

@@ -5,7 +5,6 @@ import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDbFromPool } from '@db/db';
-import { silenceJobInserts } from '@queries/queue/silenceJobInserts';
 import { QUEUE_SCHEMA } from '@queue/index';
 import { runMigrations } from 'graphile-worker';
 import { sql } from 'kysely';
@@ -218,7 +217,6 @@ export default async function globalSetup(project: TestProject): Promise<void> {
     if (error) throw error;
     console.log(`[test-db] applied ${results?.length ?? 0} migrations`);
     await runMigrations({ connectionString: databaseUrl, schema: QUEUE_SCHEMA });
-    await silenceJobInserts({ schema: QUEUE_SCHEMA }, db);
     console.log(`[test-db] installed the "${QUEUE_SCHEMA}" queue schema`);
   } finally {
     await db.destroy();

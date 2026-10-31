@@ -99,6 +99,9 @@ export class Services extends Construct {
         ...backend.environment,
         PROCESS_ROLE: 'worker',
         ...jobConcurrencySetting(step.services.worker.jobConcurrency),
+        // Enqueues then never take turns on the lock that notifying commits
+        // share, which a busy chat rate overruns; a new job waits for a poll.
+        QUEUE_POLL_MS: '100',
       },
       secrets: backend.secrets,
     });

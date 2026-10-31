@@ -245,6 +245,15 @@ export const env = {
   get WORKER_JOB_CONCURRENCY() {
     return getPositiveInteger('WORKER_JOB_CONCURRENCY', process.env.WORKER_JOB_CONCURRENCY, 4);
   },
+  /**
+   * How often, in milliseconds, a worker with nothing to run looks for new
+   * jobs. Unset, adding a job notifies the workers instead.
+   */
+  get QUEUE_POLL_MS() {
+    const raw = process.env.QUEUE_POLL_MS;
+    if (raw === undefined || raw.trim() === '') return undefined;
+    return getPositiveInteger('QUEUE_POLL_MS', raw, 1);
+  },
   /** Seconds between the state records a process writes of what it is carrying. */
   get STATE_LOG_INTERVAL_SECONDS() {
     return getPositiveInteger(

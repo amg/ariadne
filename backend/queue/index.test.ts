@@ -17,7 +17,7 @@ import { memoryOff } from '@test/memory';
 import { useTestDb } from '@test/test-db';
 import { run } from 'graphile-worker';
 import { sql } from 'kysely';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const savedMockBaseUrl = process.env.MOCK_AI_BASE_URL;
 
@@ -145,27 +145,49 @@ describe('startQueue', () => {
     }
   });
 
-  it('stops the queue it installs from notifying workers of new jobs', async () => {
-    // A queue function that notifies, as an upgrade of the queue's schema would leave it.
+  describe('new-job notifications', () => {
+    // A queue function that notifies, as installing the queue's schema leaves it.
     const probe = sql.id(QUEUE_SCHEMA, 'notifying_probe');
-    await sql`create function ${probe}() returns void language plpgsql as $$
-      begin
-        perform pg_notify('jobs:insert', '{}');
-      end $$`.execute(db);
-    const notifies = async () => {
-      const { rows } = await sql<{ notifies: boolean }>`
-        select prosrc like '%pg_notify%' as notifies from pg_proc
+    const savedPollMs = process.env.QUEUE_POLL_MS;
+
+    /** Whether the probe still notifies: its notification is neither gone nor switched off. */
+    async function probeNotifies() {
+      const { rows } = await sql<{ source: string }>`
+        select prosrc as source from pg_proc
         where oid = ${`${QUEUE_SCHEMA}.notifying_probe()`}::regprocedure`.execute(db);
-      return rows[0]?.notifies;
-    };
-    try {
-      expect(await notifies()).toBe(true);
+      return /^\s*perform pg_notify/m.test(rows[0]?.source ?? '');
+    }
+
+    beforeEach(async () => {
+      await sql`create function ${probe}() returns void language plpgsql as $$
+        begin
+          perform pg_notify('jobs:insert', '{}');
+        end $$`.execute(db);
+    });
+
+    afterEach(async () => {
+      await sql`drop function if exists ${probe}()`.execute(db);
+      if (savedPollMs === undefined) delete process.env.QUEUE_POLL_MS;
+      else process.env.QUEUE_POLL_MS = savedPollMs;
+    });
+
+    it('switches them off where workers poll', async () => {
+      process.env.QUEUE_POLL_MS = '100';
 
       await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
 
-      expect(await notifies()).toBe(false);
-    } finally {
-      await sql`drop function if exists ${probe}()`.execute(db);
-    }
+      expect(await probeNotifies()).toBe(false);
+    });
+
+    it('switches them back on where workers do not poll', async () => {
+      process.env.QUEUE_POLL_MS = '100';
+      await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
+      await stopQueue();
+      delete process.env.QUEUE_POLL_MS;
+
+      await startQueue({ memory: memoryOff, threadAnalysisMode: 'heuristic' });
+
+      expect(await probeNotifies()).toBe(true);
+    });
   });
 });

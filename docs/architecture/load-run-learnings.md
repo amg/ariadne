@@ -82,14 +82,20 @@ turn. Near 8,000 chatters the enqueues fell behind it. `Lock:object`
 averaged 497 sessions with a peak of 899, database CPU fell from 71% to
 16%, and 48,843 chats timed out with a 504 (`20261030T084021Z`).
 Performance Insights put nearly all of that wait on `commit`, so the
-cause is measured. Fixed by adding jobs without a notification, with
-idle workers polling for new jobs instead.
+cause is measured. Fixed on aws-prod by adding jobs without a
+notification, with idle workers polling every 100 ms instead. Home
+deployments keep notifying.
 
 ## Still open
 
-- **What polling costs.** An idle worker waits up to one polling
-  interval for a new job, and every hop of a chat's background work can
-  meet one. A step10 rerun shows what it adds to first byte.
+- **What polling costs.** On step10, polling raised the gate verdict's
+  p50 from 64 to 120 ms and chat first byte p95 from 494 to 593 ms
+  (`20261030T105417Z`). Jobs wait for a poll, and the jobs that pile up
+  between two polls start together in one worker and slow each other:
+  judge runs went from 47 to 76 ms p50. A local test reproduced the
+  pile-up, and fetching fewer jobs at a time did not shorten it. How
+  much of the AWS rise it explains is a guess until a second run of the
+  same build.
 - **The API's database pool fills in bursts.** Both copies reached all 40
   connections, with up to 16 waiting, in the run's slowest minute for
   first byte: p95 878 ms against 467 ms across the hold
