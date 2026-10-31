@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * program-checks — runs the checks that read the TypeScript programs, all against one
- * load of the programs, since building them is most of each check's cost.
+ * program-checks — runs the repo's own checks, all against one load of the TypeScript
+ * programs, since building them is most of each check's cost. A check that reads no
+ * program ignores what it is handed.
  *
  * A check is a module exporting `{ name, run }`. `run({ programs, files })` receives
  * every workspace's program and their source files, each listed once, and returns
@@ -11,11 +12,12 @@
  * Usage: program-checks.mjs [name...]   runs the named checks, or all of them.
  * Exit code 1 when any check fails, so the gate fails.
  */
+import { lintExemptions } from './lint-exemptions.mjs';
 import { paramFields } from './param-fields.mjs';
 import { loadPrograms, uniqueSourceFiles } from './programs.mjs';
 import { typeExports } from './type-exports.mjs';
 
-const CHECKS = [typeExports, paramFields];
+const CHECKS = [typeExports, paramFields, lintExemptions];
 
 const asked = process.argv.slice(2);
 const unknown = asked.filter((name) => !CHECKS.some((check) => check.name === name));

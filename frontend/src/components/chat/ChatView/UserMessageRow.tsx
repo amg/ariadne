@@ -22,10 +22,13 @@ export function UserMessageRow({
   const firedSlow = row.verdict?.fireChannel === 'slow';
 
   let bgClass = 'bg-primary text-primary-foreground';
+  let title: string | undefined;
   if (firedSlow) {
     bgClass = 'bg-green-700 text-green-50';
+    title = 'Slow topic drift: Page-Hinkley detected a gradual departure from the topic';
   } else if (fired) {
     bgClass = 'bg-purple-600 text-purple-50';
+    title = 'Topic drift: the thread-health gate judged this prompt a departure';
   }
 
   return (
@@ -43,13 +46,7 @@ export function UserMessageRow({
       ) : (
         <div
           className={`max-w-full self-end whitespace-pre-wrap break-words rounded-lg p-3 ${bgClass}`}
-          title={
-            firedSlow
-              ? 'Slow topic drift: Page-Hinkley detected a gradual departure from the topic'
-              : fired
-                ? 'Topic drift: the thread-health gate judged this prompt a departure'
-                : undefined
-          }
+          title={title}
         >
           {message.content}
         </div>

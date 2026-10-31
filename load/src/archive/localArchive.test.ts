@@ -46,6 +46,11 @@ const expected: ExpectedSource[] = [
 
 const REQUEST_KINDS_IN_FIXTURE = ['signin', 'chat', 'push'] as const;
 
+function outcomeOf(kind: string) {
+  if (kind === 'chat') return 'streamed';
+  return kind === 'push' ? 'held' : 'ok';
+}
+
 function requestLine(
   user: number,
   kind: (typeof REQUEST_KINDS_IN_FIXTURE)[number],
@@ -62,7 +67,7 @@ function requestLine(
     firstByteMs: 10,
     totalMs,
     status: 200,
-    outcome: kind === 'chat' ? 'streamed' : kind === 'push' ? 'held' : 'ok',
+    outcome: outcomeOf(kind),
     errorCode: null,
   })}`;
 }

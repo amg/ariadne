@@ -57,6 +57,11 @@ type Attempt = {
 const firstUserOf = (a: Attempt) => a.generator * 3;
 const endOf = (a: Attempt) => a.toldToStop ?? a.plannedEnd;
 
+function outcomeOf(kind: string) {
+  if (kind === 'chat') return 'streamed';
+  return kind === 'push' ? 'held' : 'ok';
+}
+
 const request = (
   a: Attempt,
   user: number,
@@ -74,7 +79,7 @@ const request = (
     firstByteMs: kind === 'push' ? 5 : 100,
     totalMs,
     status: 200,
-    outcome: kind === 'chat' ? 'streamed' : kind === 'push' ? 'held' : 'ok',
+    outcome: outcomeOf(kind),
     errorCode: null,
   })}`;
 

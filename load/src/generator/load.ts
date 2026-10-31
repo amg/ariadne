@@ -41,9 +41,13 @@ export async function runLoad(input: {
   for (let offset = 0; offset < plan.userCount && !interrupt.aborted; offset += 1) {
     const userNumber = plan.firstUser + offset;
     users.push(
-      runUser(plan, userNumber, levels, requests.forUser(userNumber), stop.signal).catch(
-        () => undefined,
-      ),
+      runUser({
+        plan,
+        userNumber,
+        levels,
+        requests: requests.forUser(userNumber),
+        signal: stop.signal,
+      }).catch(() => undefined),
     );
     const nextUserAt = rampStartedMs + (offset + 1) * gapMs;
     await pause(Math.max(0, nextUserAt - Date.now()) / 1_000, interrupt);

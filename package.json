@@ -1,7 +1,12 @@
 {
   "name": "alex-chat-bot",
   "private": true,
-  "workspaces": ["lib", "frontend", "backend", "load"],
+  "workspaces": [
+    "lib",
+    "frontend",
+    "backend",
+    "load"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cross-env FORCE_COLOR=1 npm run dev --workspace=backend",
@@ -25,11 +30,12 @@
     "audit:programs": "node scripts/checks/program-checks.mjs",
     "audit:types": "node scripts/checks/program-checks.mjs type-exports",
     "audit:params": "node scripts/checks/program-checks.mjs param-fields",
+    "audit:exemptions": "node scripts/checks/program-checks.mjs lint-exemptions",
     "gate": "npm run checks && npm run test && npm run bundle:frontend",
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.6",
     "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
     "dependency-cruiser": "^18.3.1",

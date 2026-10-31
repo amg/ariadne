@@ -1,24 +1,33 @@
-import { continuePaused, createThread, holdPush, sendChat, signIn, signUp } from './api.ts';
+import { type createSignedInUser, createUserClient } from './api.ts';
 import type { Levels } from './levels.ts';
 import { type Plan, emailOf, isChatting } from './plan.ts';
 import type { UserRequests } from './requestLog.ts';
 import { MAX_BACKOFF_SECONDS, backoffSeconds, pause, retried } from './retry.ts';
-import type { Session } from './session.ts';
 import { OFF_TOPIC_SHARE, messageOn, otherTopicThan, topicOf } from './topics.ts';
 
 /** The signal of seeding, which runs to its end: nothing tells it to stop. */
 const NEVER_STOPS = new AbortController().signal;
 
+type SignedInUser = ReturnType<typeof createSignedInUser>;
+
 /**
  * One account seeded: created, given a Thread, and one Exchange in it, so
  * restored databases start with realistic rows rather than empty tables.
  */
-export async function seedUser(plan: Plan, userNumber: number, requests: UserRequests) {
-  const signal = NEVER_STOPS;
-  const session = await signUp(plan, emailOf(plan, userNumber), requests, signal);
+export async function seedUser({
+  plan,
+  userNumber,
+  requests,
+}: {
+  plan: Plan;
+  userNumber: number;
+  requests: UserRequests;
+}) {
+  const client = createUserClient({ plan, requests, signal: NEVER_STOPS });
+  const user = await client.signUp(emailOf(plan, userNumber));
   if (!isChatting(plan, userNumber)) return;
-  const threadId = await createThread(plan, session, requests, signal);
-  await sendChat(plan, session, threadId, messageOn(topicOf(userNumber), 0), requests, signal);
+  const threadId = await user.createThread();
+  await user.sendChat({ threadId, text: messageOn(topicOf(userNumber), 0) });
 }
 
 /**
@@ -29,72 +38,74 @@ export async function seedUser(plan: Plan, userNumber: number, requests: UserReq
  * Everything stops when `signal` aborts. Every request is written to
  * `requests`.
  */
-export async function runUser(
-  plan: Plan,
-  userNumber: number,
-  levels: Levels,
-  requests: UserRequests,
-  signal: AbortSignal,
-) {
-  const session = await retried(signal, () =>
-    signIn(plan, emailOf(plan, userNumber), requests, signal),
-  );
-  if (session === null) return;
-  levels.move('usersSignedIn', 1);
-  try {
-    const push = keepPushOpen(plan, session, levels, requests, signal);
+export async function runUser({
+  plan,
+  userNumber,
+  levels,
+  requests,
+  signal,
+}: {
+  plan: Plan;
+  userNumber: number;
+  levels: Levels;
+  requests: UserRequests;
+  signal: AbortSignal;
+}) {
+  const client = createUserClient({ plan, requests, signal });
+  const user = await retried(signal, () => client.signIn(emailOf(plan, userNumber)));
+  if (user === null) return;
+  await levels.during('usersSignedIn', async () => {
+    const push = keepPushOpen({ user, levels, signal });
     if (isChatting(plan, userNumber)) {
-      levels.move('chattersActive', 1);
-      try {
-        await chatUntilStopped(plan, userNumber, session, requests, signal);
-      } finally {
-        levels.move('chattersActive', -1);
-      }
+      await levels.during('chattersActive', () =>
+        chatUntilStopped({ plan, userNumber, user, signal }),
+      );
     }
     await push;
-  } finally {
-    levels.move('usersSignedIn', -1);
-  }
+  });
 }
 
-async function keepPushOpen(
-  plan: Plan,
-  session: Session,
-  levels: Levels,
-  requests: UserRequests,
-  signal: AbortSignal,
-) {
+async function keepPushOpen({
+  user,
+  levels,
+  signal,
+}: {
+  user: SignedInUser;
+  levels: Levels;
+  signal: AbortSignal;
+}) {
   let failuresInARow = 0;
   while (!signal.aborted) {
-    levels.move('pushStreamsOpen', 1);
     try {
-      await holdPush(plan, session, signal, () => undefined, requests);
+      await levels.during('pushStreamsOpen', () => user.holdPush({ onEvent: () => undefined }));
       failuresInARow = 0;
     } catch {
       failuresInARow += 1;
-    } finally {
-      levels.move('pushStreamsOpen', -1);
     }
     await pause(backoffSeconds(failuresInARow), signal);
   }
 }
 
-async function chatUntilStopped(
-  plan: Plan,
-  userNumber: number,
-  session: Session,
-  requests: UserRequests,
-  signal: AbortSignal,
-) {
-  const newThread = () => retried(signal, () => createThread(plan, session, requests, signal));
+async function chatUntilStopped({
+  plan,
+  userNumber,
+  user,
+  signal,
+}: {
+  plan: Plan;
+  userNumber: number;
+  user: SignedInUser;
+  signal: AbortSignal;
+}) {
+  const newThread = () => retried(signal, () => user.createThread());
   let threadId = await newThread();
   let topic = topicOf(userNumber);
   for (let turn = 0; threadId !== null && !signal.aborted; turn += 1) {
     if (turn > 0 && Math.random() < OFF_TOPIC_SHARE) topic = otherTopicThan(topic);
-    let result = await sendChat(plan, session, threadId, messageOn(topic, turn), requests, signal);
+    let result = await user.sendChat({ threadId, text: messageOn(topic, turn) });
     // The Drift gate asks whether a change of subject belongs here; this user says it does.
     if (result.outcome === 'paused') {
-      result = await continuePaused(plan, session, threadId, requests, signal);
+      result = await user.continuePaused({ threadId });
     }
 
     // A Thread that conflicted or failed is left as it is; the user starts afresh.

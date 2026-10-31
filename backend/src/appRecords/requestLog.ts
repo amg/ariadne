@@ -5,6 +5,7 @@ import { logAppRecord, roundedToTenthMs } from './records';
  * A hook that logs a request as one record when its response ends, naming
  * the route that took it and never the address with its ids.
  */
+// biome-ignore lint/complexity/useMaxParams: Fastify's onResponseHookHandler fixes this signature
 export const logRequestEnded: onResponseHookHandler = (request, reply, done) => {
   logAppRecord({
     kind: 'request',

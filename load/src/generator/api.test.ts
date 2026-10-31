@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { continuePaused, createThread, holdPush, sendChat, signIn, signUp } from './api.ts';
+import { createSignedInUser, createUserClient } from './api.ts';
 import type { Plan } from './plan.ts';
 import type { UserRequests } from './requestLog.ts';
 
@@ -22,6 +22,11 @@ const session: Session = {
   refreshAfterRejection: async () => undefined,
 };
 
+/** A signed-in user whose session is the stand-in above. */
+function userOf({ requests, signal }: { requests: UserRequests; signal: AbortSignal }) {
+  return createSignedInUser({ plan, requests, signal, session });
+}
+
 function answering(status: number, body: string) {
   vi.stubGlobal(
     'fetch',
@@ -36,7 +41,10 @@ afterEach(() => {
 describe('sendChat', () => {
   it('reads a stream with text as a reply', async () => {
     answering(200, 'data: {"type":"text-delta","delta":"hi"}\n\n');
-    const result = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+    const result = await userOf({ requests, signal: never }).sendChat({
+      threadId: 'thread-1',
+      text: 'hello',
+    });
     expect(result.outcome).toBe('streamed');
   });
 
@@ -44,20 +52,29 @@ describe('sendChat', () => {
     'reads a 503 with %s as still checking',
     async (code) => {
       answering(503, JSON.stringify({ error: 'wait', errorCode: code }));
-      const result = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+      const result = await userOf({ requests, signal: never }).sendChat({
+        threadId: 'thread-1',
+        text: 'hello',
+      });
       expect(result).toMatchObject({ outcome: 'still-checking', errorCode: code });
     },
   );
 
   it('reads a 503 from a missing provider as a failure', async () => {
     answering(503, JSON.stringify({ error: 'no', errorCode: 'provider_not_configured' }));
-    const result = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+    const result = await userOf({ requests, signal: never }).sendChat({
+      threadId: 'thread-1',
+      text: 'hello',
+    });
     expect(result).toMatchObject({ outcome: 'failed', errorCode: 'provider_not_configured' });
   });
 
   it('reads a 409 as a conflict', async () => {
     answering(409, JSON.stringify({ error: 'busy', errorCode: 'exchange_in_flight' }));
-    const result = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+    const result = await userOf({ requests, signal: never }).sendChat({
+      threadId: 'thread-1',
+      text: 'hello',
+    });
     expect(result).toMatchObject({ outcome: 'conflict', errorCode: 'exchange_in_flight' });
   });
 });
@@ -102,29 +119,32 @@ describe('every request carries the stop signal', () => {
     [
       'a sign-in',
       'signin',
-      (stop: AbortSignal, requests: UserRequests) => signIn(plan, 'a@b.c', requests, stop),
+      (stop: AbortSignal, requests: UserRequests) =>
+        createUserClient({ plan, requests, signal: stop }).signIn('a@b.c'),
     ],
     [
       'a sign-up',
       'signup',
-      (stop: AbortSignal, requests: UserRequests) => signUp(plan, 'a@b.c', requests, stop),
+      (stop: AbortSignal, requests: UserRequests) =>
+        createUserClient({ plan, requests, signal: stop }).signUp('a@b.c'),
     ],
     [
       'a new thread',
       'thread',
-      (stop: AbortSignal, requests: UserRequests) => createThread(plan, session, requests, stop),
+      (stop: AbortSignal, requests: UserRequests) =>
+        userOf({ requests, signal: stop }).createThread(),
     ],
     [
       'a chat',
       'chat',
       (stop: AbortSignal, requests: UserRequests) =>
-        sendChat(plan, session, 't', 'hi', requests, stop),
+        userOf({ requests, signal: stop }).sendChat({ threadId: 't', text: 'hi' }),
     ],
     [
       'a continued chat',
       'chat-continue',
       (stop: AbortSignal, requests: UserRequests) =>
-        continuePaused(plan, session, 't', requests, stop),
+        userOf({ requests, signal: stop }).continuePaused({ threadId: 't' }),
     ],
   ] as const)(
     'ends %s at once, recorded as stopped and not as a failure',
@@ -156,7 +176,10 @@ describe('every request carries the stop signal', () => {
     );
     const { lines, requests } = recording();
 
-    const result = await sendChat(plan, session, 't', 'hi', requests, stop.signal);
+    const result = await userOf({ requests, signal: stop.signal }).sendChat({
+      threadId: 't',
+      text: 'hi',
+    });
 
     expect(result).toMatchObject({ outcome: 'stopped', status: 200 });
     expect(lines).toMatchObject([{ kind: 'chat', outcome: 'stopped', status: 200 }]);
@@ -167,7 +190,10 @@ describe('every request carries the stop signal', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('reset')));
     const { lines, requests } = recording();
 
-    const result = await sendChat(plan, session, 't', 'hi', requests, never);
+    const result = await userOf({ requests, signal: never }).sendChat({
+      threadId: 't',
+      text: 'hi',
+    });
 
     expect(result).toMatchObject({ outcome: 'failed', errorCode: 'unreachable' });
     expect(lines).toMatchObject([{ outcome: 'failed', errorCode: 'unreachable' }]);
@@ -184,7 +210,7 @@ describe('holdPush', () => {
     );
     const { requests } = recording();
 
-    await holdPush(plan, session, never, () => undefined, requests);
+    await userOf({ requests, signal: never }).holdPush({ onEvent: () => undefined });
 
     expect(turnedAway.cancelled()).toBe(true);
   });
@@ -194,7 +220,9 @@ describe('holdPush', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(refused.response));
     const { lines, requests } = recording();
 
-    await expect(holdPush(plan, session, never, () => undefined, requests)).rejects.toThrow('503');
+    await expect(
+      userOf({ requests, signal: never }).holdPush({ onEvent: () => undefined }),
+    ).rejects.toThrow('503');
 
     expect(refused.cancelled()).toBe(true);
     expect(lines).toMatchObject([{ kind: 'push', outcome: 'failed', status: 503 }]);
@@ -212,7 +240,7 @@ describe('holdPush', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(broken));
     const { lines, requests } = recording();
 
-    await holdPush(plan, session, never, () => undefined, requests);
+    await userOf({ requests, signal: never }).holdPush({ onEvent: () => undefined });
 
     expect(lines).toMatchObject([{ kind: 'push', outcome: 'failed', status: 200 }]);
   });
@@ -237,15 +265,11 @@ describe('holdPush', () => {
     let events = 0;
     const { requests } = recording();
 
-    await holdPush(
-      plan,
-      session,
-      never,
-      () => {
+    await userOf({ requests, signal: never }).holdPush({
+      onEvent: () => {
         events += 1;
       },
-      requests,
-    );
+    });
 
     expect(events).toBe(2);
   });

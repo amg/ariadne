@@ -160,10 +160,7 @@ async function listThreadModels(
  * Computes thread summary statistics on-the-fly from message_usage rows.
  * Returns null if thread not found or user doesn't have access.
  */
-export async function getThreadSummary(args: {
-  userId: string;
-  threadId: string;
-}) {
+export async function getThreadSummary(args: { userId: string; threadId: string }) {
   const { userId, threadId } = args;
 
   // Verify thread exists and belongs to user

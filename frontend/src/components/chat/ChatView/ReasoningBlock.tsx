@@ -6,7 +6,10 @@ import ThinkingIndicator from '../ThinkingIndicator';
 export function ReasoningBlock({
   reasoning,
   isThinking,
-}: { reasoning: string; isThinking?: boolean }) {
+}: {
+  reasoning: string;
+  isThinking?: boolean;
+}) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (

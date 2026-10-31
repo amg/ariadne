@@ -21,6 +21,7 @@ type ListLiveTailByThreadProps = {
  * model. Everything is read as one snapshot of the Thread. A target that
  * is not a live arrival of the Thread yields an empty tail.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: one snapshot query; splitting it would push Kysely expression types into signatures
 export async function listLiveTailByThread({
   threadId,
   arrivalId,

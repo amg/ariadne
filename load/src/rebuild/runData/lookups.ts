@@ -29,6 +29,7 @@ export function runWindowOf(data: RunData) {
     ...(data.jobs ?? []).map(({ finishedAt }) => finishedAt),
     ...(data.appRequests ?? []).map(({ endedAt }) => endedAt),
   ];
+  // biome-ignore lint/complexity/useMathMinMax: compares ISO timestamp strings, which Math.max cannot
   return { from: manifest.startedAt, to: moments.reduce((last, at) => (at > last ? at : last)) };
 }
 

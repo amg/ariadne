@@ -69,13 +69,7 @@ export async function currentSeed({ userId }: { userId: string }) {
  * right now; no Seed when there is nothing to say. Handover Threads record
  * theirs with the move itself.
  */
-export async function seedThread({
-  userId,
-  threadId,
-}: {
-  userId: string;
-  threadId: string;
-}) {
+export async function seedThread({ userId, threadId }: { userId: string; threadId: string }) {
   const seed = await currentSeed({ userId });
   if (seed.factCount === 0) return;
   await insertThreadSeed({ threadId, ...seed, handoverMessageId: null });

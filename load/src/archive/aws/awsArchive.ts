@@ -28,11 +28,7 @@ const planOfConfig = z.object({
  * the raise was made of, and how the run was described. A run folder that
  * has this and no manifest is visibly unsealed.
  */
-export function beginAwsRun(input: {
-  folder: string;
-  raise: Raise;
-  description: RunDescription;
-}) {
+export function beginAwsRun(input: { folder: string; raise: Raise; description: RunDescription }) {
   const { folder, raise, description } = input;
   mkdirSync(join(folder, LAYOUT.sourcesDir), { recursive: true });
   writeWhole(join(folder, LAYOUT.raise), JSON.stringify(raiseSchema.parse(raise), null, 2));

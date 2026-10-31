@@ -1,7 +1,7 @@
 import { pathOf } from '@ari/lib/api/schemas/common/endpoint';
 import { events } from '@ari/lib/api/schemas/events/events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { holdPush, sendChat } from './api.ts';
+import { createSignedInUser } from './api.ts';
 import type { Plan } from './plan.ts';
 import type { UserRequests } from './requestLog.ts';
 
@@ -78,7 +78,9 @@ function authCore() {
 
 const never = new AbortController().signal;
 
-const sessionOptions = (core: ReturnType<typeof authCore>) => ({
+const sessionInputs = (core: ReturnType<typeof authCore>) => ({
+  plan,
+  tokens: core.tokens,
   signal: never,
   signInAgain: core.signInAgain,
 });
@@ -96,13 +98,15 @@ describe('a session that expires while its user is busy', () => {
   it('refreshes once when the push stream and a chat need it at the same moment, and both carry on', async () => {
     const core = authCore();
     const { lines, requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, sessionOptions(core));
+    const session = createSession({ ...sessionInputs(core), requests });
     core.expireAccessToken();
     let eventsSeen = 0;
 
+    const user = createSignedInUser({ plan, requests, signal: never, session });
+
     const [, reply] = await Promise.all([
-      holdPush(plan, session, never, () => eventsSeen++, requests),
-      sendChat(plan, session, 'thread-1', 'hello', requests, never),
+      user.holdPush({ onEvent: () => eventsSeen++ }),
+      user.sendChat({ threadId: 'thread-1', text: 'hello' }),
     ]);
 
     expect(core.refreshesSeen).toEqual(['Bearer refresh-0']);
@@ -122,7 +126,7 @@ describe('a session that expires while its user is busy', () => {
   it('does not refresh again for a request that was sent before the first refresh landed', async () => {
     const core = authCore();
     const { requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, sessionOptions(core));
+    const session = createSession({ ...sessionInputs(core), requests });
     core.expireAccessToken();
     const sentWith = session.headers();
 
@@ -135,12 +139,14 @@ describe('a session that expires while its user is busy', () => {
   it('refreshes again when a later token expires, presenting the newest refresh token', async () => {
     const core = authCore();
     const { requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, sessionOptions(core));
+    const session = createSession({ ...sessionInputs(core), requests });
+
+    const user = createSignedInUser({ plan, requests, signal: never, session });
 
     core.expireAccessToken();
-    await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+    await user.sendChat({ threadId: 'thread-1', text: 'hello' });
     core.expireAccessToken();
-    const reply = await sendChat(plan, session, 'thread-1', 'hello again', requests, never);
+    const reply = await user.sendChat({ threadId: 'thread-1', text: 'hello again' });
 
     expect(core.refreshesSeen).toEqual(['Bearer refresh-0', 'Bearer refresh-1']);
     expect(reply.outcome).toBe('streamed');
@@ -151,16 +157,17 @@ describe('a session the auth core ends', () => {
   it('records the failed refresh, never presents its refresh token again, and fails the calls that need it', async () => {
     const core = authCore();
     const { lines, requests } = recorder();
-    const session = createSession(
-      plan,
-      { ...core.tokens, refreshToken: 'refresh-spent' },
+    const session = createSession({
+      ...sessionInputs(core),
+      tokens: { ...core.tokens, refreshToken: 'refresh-spent' },
       requests,
-      sessionOptions(core),
-    );
+    });
     core.expireAccessToken();
 
-    const first = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
-    const second = await sendChat(plan, session, 'thread-1', 'hello', requests, never);
+    const user = createSignedInUser({ plan, requests, signal: never, session });
+
+    const first = await user.sendChat({ threadId: 'thread-1', text: 'hello' });
+    const second = await user.sendChat({ threadId: 'thread-1', text: 'hello' });
 
     expect(first.outcome).toBe('failed');
     expect(second.outcome).toBe('failed');
@@ -178,7 +185,7 @@ describe('a session the auth core ends', () => {
   it('keeps the session, and its refresh token, when the auth core refuses a refresh without spending it', async () => {
     const core = authCore();
     const { requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, sessionOptions(core));
+    const session = createSession({ ...sessionInputs(core), requests });
     core.expireAccessToken();
     const reachable = fetch;
     vi.stubGlobal(
@@ -200,7 +207,7 @@ describe('a refresh that may have spent the refresh token', () => {
   async function refreshedWhen(failure: () => Promise<Response>) {
     const core = authCore();
     const { lines, requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, sessionOptions(core));
+    const session = createSession({ ...sessionInputs(core), requests });
     core.expireAccessToken();
     const reachable = fetch;
     vi.stubGlobal('fetch', vi.fn(failure));
@@ -239,8 +246,9 @@ describe('a refresh that may have spent the refresh token', () => {
   it('is treated as spent when it takes longer than the refresh timeout, and is cut short', async () => {
     const core = authCore();
     const { lines, requests } = recorder();
-    const session = createSession(plan, core.tokens, requests, {
-      ...sessionOptions(core),
+    const session = createSession({
+      ...sessionInputs(core),
+      requests,
       refreshTimeoutMs: 30,
     });
     core.expireAccessToken();
@@ -266,8 +274,9 @@ describe('a refresh that may have spent the refresh token', () => {
     const core = authCore();
     const { requests } = recorder();
     let signIns = 0;
-    const session = createSession(plan, core.tokens, requests, {
-      signal: never,
+    const session = createSession({
+      ...sessionInputs(core),
+      requests,
       signInAgain: async () => {
         signIns += 1;
         if (signIns === 1) throw new Error('down');
@@ -290,9 +299,10 @@ describe('a refresh that may have spent the refresh token', () => {
     const core = authCore();
     const { requests } = recorder();
     const stop = new AbortController();
-    const session = createSession(plan, core.tokens, requests, {
+    const session = createSession({
+      ...sessionInputs(core),
+      requests,
       signal: stop.signal,
-      signInAgain: core.signInAgain,
     });
     core.expireAccessToken();
     vi.stubGlobal(
@@ -314,9 +324,10 @@ describe('a refresh cut short by the stop signal', () => {
     const core = authCore();
     const { lines, requests } = recorder();
     const stop = new AbortController();
-    const session = createSession(plan, core.tokens, requests, {
+    const session = createSession({
+      ...sessionInputs(core),
+      requests,
       signal: stop.signal,
-      signInAgain: core.signInAgain,
     });
     core.expireAccessToken();
     vi.stubGlobal(

@@ -1,27 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLevels } from './levels.ts';
 import type { Plan } from './plan.ts';
-import type { Session } from './session.ts';
+
+const { signIn, holdPush } = vi.hoisted(() => ({ signIn: vi.fn(), holdPush: vi.fn() }));
 
 vi.mock('./api.ts', () => ({
-  signIn: vi.fn(),
-  signUp: vi.fn(),
-  createThread: vi.fn(),
-  sendChat: vi.fn(),
-  continuePaused: vi.fn(),
-  holdPush: vi.fn(),
+  createUserClient: () => ({ signIn, signUp: vi.fn() }),
 }));
 
-const { signIn, holdPush } = await import('./api.ts');
 const { runUser } = await import('./virtualUser.ts');
 
 const requests = { record: () => undefined };
 
-const session: Session = {
-  headers: () => ({}),
-  canRefresh: () => true,
-  refreshAfterRejection: async () => undefined,
-};
+/** A signed-in user whose push stream stays open until the run stops. */
+const user = { createThread: vi.fn(), sendChat: vi.fn(), continuePaused: vi.fn(), holdPush };
 
 const plan: Plan = {
   mode: 'load',
@@ -55,20 +47,25 @@ describe('runUser sign-in', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
-    vi.mocked(holdPush).mockImplementation(
-      (_plan, _session, signal) =>
-        new Promise((resolve) => signal.addEventListener('abort', () => resolve())),
-    );
   });
 
-  it('tries again after a growing pause until sign-in works', async () => {
-    vi.mocked(signIn)
-      .mockRejectedValueOnce(new Error('down'))
-      .mockRejectedValueOnce(new Error('down'))
-      .mockResolvedValue(session);
-    const levels = createLevels();
+  /** A run that stops when told to: its push stream stays open until then. */
+  function stoppingRun() {
     const stop = new AbortController();
-    const user = runUser(plan, 0, levels, requests, stop.signal);
+    holdPush.mockImplementation(
+      () => new Promise<void>((resolve) => stop.signal.addEventListener('abort', () => resolve())),
+    );
+    return stop;
+  }
+
+  it('tries again after a growing pause until sign-in works', async () => {
+    signIn
+      .mockRejectedValueOnce(new Error('down'))
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValue(user);
+    const levels = createLevels();
+    const stop = stoppingRun();
+    const running = runUser({ plan, userNumber: 0, levels, requests, signal: stop.signal });
 
     await vi.advanceTimersByTimeAsync(0);
     expect(signIn).toHaveBeenCalledTimes(1);
@@ -83,19 +80,19 @@ describe('runUser sign-in', () => {
     expect(levels.now()).toMatchObject({ usersSignedIn: 1, pushStreamsOpen: 1 });
 
     stop.abort();
-    await user;
+    await running;
     expect(levels.now()).toMatchObject({ usersSignedIn: 0, pushStreamsOpen: 0 });
   });
 
   it('gives up on sign-in when the run stops first', async () => {
-    vi.mocked(signIn).mockRejectedValue(new Error('down'));
+    signIn.mockRejectedValue(new Error('down'));
     const levels = createLevels();
-    const stop = new AbortController();
-    const user = runUser(plan, 0, levels, requests, stop.signal);
+    const stop = stoppingRun();
+    const running = runUser({ plan, userNumber: 0, levels, requests, signal: stop.signal });
 
     await vi.advanceTimersByTimeAsync(0);
     stop.abort();
-    await user;
+    await running;
     expect(levels.now()).toEqual({ usersSignedIn: 0, pushStreamsOpen: 0, chattersActive: 0 });
     expect(holdPush).not.toHaveBeenCalled();
   });

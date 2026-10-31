@@ -1,6 +1,6 @@
 # Drift Gate: Keeping Count Without Looking Back
 
-Picture the tracker from [THREAD-DRIFT-MATH.md](THREAD-DRIFT-MATH.md) following the hiker through the forest. Every time a new footprint lands, the tracker has to say straight away whether the hiker is still on the path.
+Picture the tracker from [thread-drift-math.md](thread-drift-math.md) following the hiker through the forest. Every time a new footprint lands, the tracker has to say straight away whether the hiker is still on the path.
 
 There are two ways to keep track. A forgetful tracker walks back to the trailhead at every step, re-reads every footprint since the start, rebuilds a picture of the path, and only then judges the new step. A careful tracker keeps a small notebook. After each step it writes down a few running totals, and at the next step it reads the notebook, adds one footprint, and judges.
 

@@ -217,7 +217,7 @@ async function guardOrSettleStaleExchange({
   memory: MemoryFeature;
 }) {
   const newestAssistant = rows.findLast((row) => row.role === 'assistant');
-  if (!newestAssistant || newestAssistant.exchangeStatus !== 'pending') return null;
+  if (newestAssistant?.exchangeStatus !== 'pending') return null;
   if (isLivePending(newestAssistant)) return err('exchange_in_flight', EXCHANGE_IN_FLIGHT_MESSAGE);
 
   const systemPrompt = await assembledSystemPrompt({
@@ -231,13 +231,7 @@ async function guardOrSettleStaleExchange({
 }
 
 /** The live replies grown beneath the user Message at `userIndex`. */
-function liveReplyIdsBeneath({
-  rows,
-  userIndex,
-}: {
-  rows: Message[];
-  userIndex: number;
-}) {
+function liveReplyIdsBeneath({ rows, userIndex }: { rows: Message[]; userIndex: number }) {
   return rows
     .slice(userIndex + 1)
     .filter((row) => row.role === 'assistant' && !row.abandoned)

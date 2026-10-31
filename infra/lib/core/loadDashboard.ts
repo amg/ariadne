@@ -110,6 +110,7 @@ function capsOfSteps() {
 export class LoadDashboard extends Construct {
   readonly dashboard: cloudwatch.Dashboard;
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: a dashboard declaration, one widget after another
   constructor(scope: Construct, id: string) {
     super(scope, id);
     this.dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {

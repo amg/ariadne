@@ -29,16 +29,6 @@ export type Session = {
   refreshAfterRejection: (sentWith: Record<string, string>) => Promise<void>;
 };
 
-/** What a session needs beyond its tokens. */
-type SessionOptions = {
-  /** Cuts short every request the session makes, once it aborts. */
-  signal: AbortSignal;
-  /** Signs the user in afresh. The session does so when its refresh token may have been spent. */
-  signInAgain: () => Promise<Tokens>;
-  /** How long a refresh may take before it is given up on; the default unless a test says otherwise. */
-  refreshTimeoutMs?: number;
-};
-
 /** The header that lets a request through the edge, when the run goes that way. */
 export function edgeHeaders(plan: Plan) {
   return { [plan.loadKeyHeader]: plan.loadKey };
@@ -58,66 +48,71 @@ function mayHaveSpentToken(error: unknown) {
   return error.status >= 500 || error.status < 300;
 }
 
-/** What a session knows of its tokens, which renewing them changes. */
-type TokenState = {
-  current: Tokens;
+/**
+ * A session for a user who has just signed in. When its refresh token may
+ * have been spent, the session signs the user in afresh through
+ * `signInAgain`. A refresh that takes longer than `refreshTimeoutMs` is
+ * given up on. Once `signal` aborts, every request the session makes is
+ * cut short.
+ */
+export function createSession({
+  plan,
+  tokens,
+  requests,
+  signal,
+  signInAgain,
+  refreshTimeoutMs = REFRESH_TIMEOUT_MS,
+}: {
+  plan: Plan;
+  tokens: Tokens;
+  requests: UserRequests;
+  signal: AbortSignal;
+  signInAgain: () => Promise<Tokens>;
+  refreshTimeoutMs?: number;
+}): Session {
+  let current = tokens;
   /** The auth core has ended the session. */
-  ended: boolean;
+  let ended = false;
   /** The refresh token may have been used up, so it is not presented again. */
-  maybeSpent: boolean;
-};
-
-/** Renews the tokens: by refresh while the refresh token can be trusted, else by signing in. */
-async function renew(
-  plan: Plan,
-  requests: UserRequests,
-  options: SessionOptions,
-  state: TokenState,
-) {
-  const { signal } = options;
-  if (!state.maybeSpent) {
-    try {
-      // The refresh token rotates, so it is presented once and the reply replaces it.
-      state.current = await requestRefresh(
-        plan,
-        state.current.refreshToken,
-        requests,
-        signal,
-        options.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS,
-      );
-      return;
-    } catch (error) {
-      // A 401 means the auth core has ended the session.
-      if (error instanceof RequestFailed && error.status === 401) state.ended = true;
-      if (signal.aborted || !mayHaveSpentToken(error)) throw error;
-      state.maybeSpent = true;
-    }
-  }
-  state.current = await options.signInAgain();
-  state.maybeSpent = false;
-}
-
-export function createSession(
-  plan: Plan,
-  tokens: Tokens,
-  requests: UserRequests,
-  options: SessionOptions,
-): Session {
-  const state: TokenState = { current: tokens, ended: false, maybeSpent: false };
+  let maybeSpent = false;
   let running: Promise<void> | null = null;
   const headers = () => ({
     ...edgeHeaders(plan),
-    authorization: `Bearer ${state.current.accessToken}`,
+    authorization: `Bearer ${current.accessToken}`,
   });
+
+  /** Renews the tokens: by refresh while the refresh token can be trusted, else by signing in. */
+  async function renew() {
+    if (!maybeSpent) {
+      try {
+        // The refresh token rotates, so it is presented once and the reply replaces it.
+        current = await requestRefresh({
+          plan,
+          refreshToken: current.refreshToken,
+          requests,
+          stop: signal,
+          timeoutMs: refreshTimeoutMs,
+        });
+        return;
+      } catch (error) {
+        // A 401 means the auth core has ended the session.
+        if (error instanceof RequestFailed && error.status === 401) ended = true;
+        if (signal.aborted || !mayHaveSpentToken(error)) throw error;
+        maybeSpent = true;
+      }
+    }
+    current = await signInAgain();
+    maybeSpent = false;
+  }
 
   return {
     headers,
-    canRefresh: () => !state.ended,
+    canRefresh: () => !ended,
     refreshAfterRejection(sentWith) {
       if (sentWith.authorization !== headers().authorization) return Promise.resolve();
       if (running !== null) return running;
-      if (state.ended) return Promise.reject(new RequestFailed('session refresh', 401));
-      const refresh = renew(plan, requests, options, state).finally(() => {
+      if (ended) return Promise.reject(new RequestFailed('session refresh', 401));
+      const refresh = renew().finally(() => {
         running = null;
       });
       running = refresh;
@@ -126,13 +121,19 @@ export function createSession(
   };
 }
 
-async function requestRefresh(
-  plan: Plan,
-  refreshToken: string,
-  requests: UserRequests,
-  stop: AbortSignal,
-  timeoutMs: number,
-): Promise<Tokens> {
+async function requestRefresh({
+  plan,
+  refreshToken,
+  requests,
+  stop,
+  timeoutMs,
+}: {
+  plan: Plan;
+  refreshToken: string;
+  requests: UserRequests;
+  stop: AbortSignal;
+  timeoutMs: number;
+}): Promise<Tokens> {
   const clock = startStopwatch();
   // A refresh that hangs holds the user's whole session, so it is given up on.
   const signal = AbortSignal.any([stop, AbortSignal.timeout(timeoutMs)]);
@@ -146,13 +147,15 @@ async function requestRefresh(
     },
     signal,
   }).catch((error: unknown) => {
-    requests.record(unanswered('refresh', clock, stop));
+    requests.record(unanswered({ kind: 'refresh', clock, signal: stop }));
     throw error;
   });
   const firstByteMs = clock.elapsedMs();
   const text = await bodyOrNull(response, stop);
   if (text === null) {
-    requests.record(cutShort('refresh', clock, { status: response.status, firstByteMs }));
+    requests.record(
+      cutShort({ kind: 'refresh', clock, begun: { status: response.status, firstByteMs } }),
+    );
     throw new Error('stopped');
   }
   const accessToken = response.headers.get('st-access-token');

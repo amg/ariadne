@@ -424,7 +424,7 @@ async function foldTurnOfArrival(input: {
 }): Promise<Result<{ fold: TurnFoldValues | null; chain: LiveChain }>> {
   const { chain } = input;
   const arrival = arrivalAt({ chain, position: input.arrivalIndex });
-  if (!arrival || !arrival.assistantReply) return ok({ fold: null, chain });
+  if (!arrival?.assistantReply) return ok({ fold: null, chain });
   const reply = arrival.assistantReply;
 
   // A fold's row needs its reply's embedding, so a reply without one has no fold.

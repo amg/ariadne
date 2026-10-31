@@ -24,6 +24,7 @@ initAuth();
  * only its status code.
  */
 class AppLogController extends LogController {
+  // biome-ignore lint/complexity/useMaxParams: Fastify's LogController fixes this signature
   override defaultErrorLog(error: Error, _request: FastifyRequest, reply: FastifyReply): void {
     if (reply.statusCode >= 500) {
       reply.log.error({ err: error }, error.message);

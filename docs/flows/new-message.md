@@ -6,9 +6,9 @@ possible outcome reaches the user. The code is the source of truth.
 This page is the map for reading it.
 
 How the queue, the event bus and push work, and the full list of
-failure answers, is covered in [BACKGROUND-WORK.md](BACKGROUND-WORK.md).
+failure answers, is covered in [background-work.md](background-work.md).
 How the Drift gate judges an arrival is covered in ADR 0006, ADR 0007
-and `docs/maths/THREAD-DRIFT-MATH.md`. Terms are defined in `CONTEXT.md`.
+and `docs/maths/thread-drift-math.md`. Terms are defined in `CONTEXT.md`.
 
 ## 1. Submit: store, judge, then answer
 

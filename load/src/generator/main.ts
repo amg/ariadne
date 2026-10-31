@@ -34,11 +34,11 @@ if (givenPlan.mode === 'load') {
 if (givenPlan.direct !== null) takeDirectPath(givenPlan.direct);
 const plan = planAt(givenPlan, Date.now());
 const levels = createLevels();
-const requests = createRequestLog(
-  { run: plan.runId, generator: plan.generator, attempt: plan.attempt },
-  (line) => console.log(line),
-  plan.publishMetrics,
-);
+const requests = createRequestLog({
+  who: { run: plan.runId, generator: plan.generator, attempt: plan.attempt },
+  emit: (line) => console.log(line),
+  publishMetrics: plan.publishMetrics,
+});
 const startedAt = new Date();
 const state = setInterval(() => printState(plan, levels), plan.stateSeconds * 1_000);
 
@@ -78,12 +78,14 @@ async function seedAll(plan: Plan, requests: RequestLog) {
 
   const worker = async () => {
     for (let user = claimNextUser(); user !== null; user = claimNextUser()) {
-      await seedUser(plan, user, requests.forUser(user)).catch((error) => {
-        if (loggedErrors < 5) {
-          loggedErrors += 1;
-          console.error(`[seedUser error ${loggedErrors}/5]`, error);
-        }
-      });
+      await seedUser({ plan, userNumber: user, requests: requests.forUser(user) }).catch(
+        (error) => {
+          if (loggedErrors < 5) {
+            loggedErrors += 1;
+            console.error(`[seedUser error ${loggedErrors}/5]`, error);
+          }
+        },
+      );
     }
   };
   await Promise.all(Array.from({ length: plan.seedConcurrency }, worker));

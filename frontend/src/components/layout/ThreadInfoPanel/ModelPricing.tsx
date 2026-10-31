@@ -6,8 +6,10 @@ type ModelInfo = ThreadSummary['models'][number];
  * Formats model pricing for display
  */
 export function ModelPricing({ pricing }: { pricing: NonNullable<ModelInfo['pricing']> }) {
-  const formatPrice = (price: number | null | undefined) =>
-    price == null ? '—' : price < 0.01 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
+  const formatPrice = (price: number | null | undefined) => {
+    if (price == null) return '—';
+    return price < 0.01 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
+  };
 
   const savingsPct =
     pricing.cachedRateMultiplier != null

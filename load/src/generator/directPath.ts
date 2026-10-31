@@ -27,6 +27,7 @@ export function takeDirectPath(
         // Only Cloudflare's Origin CA signs the origin's certificate, and the
         // public authorities do not, so it is the one authority trusted here.
         ca: trustedAuthority,
+        // biome-ignore lint/complexity/useMaxParams: Node's dns lookup option fixes this signature
         lookup: (_hostname, options, callback) => lookup(direct.originAddress, options, callback),
       },
     }),
