@@ -135,6 +135,7 @@ describe('crossCheckChats', () => {
   });
 });
 
+const MINUTE_0 = '2026-10-15T00:00:00.000Z';
 const MINUTE_1 = '2026-10-15T00:01:00.000Z';
 const MINUTE_2 = '2026-10-15T00:02:00.000Z';
 const sent = (minute: string, count: number, status: number | null = 200) =>
@@ -433,6 +434,39 @@ describe('crossCheckLoadBalancer on a run of step50’s size', () => {
     expect(checks.map(({ result }) => result)).toEqual(['agree', 'agree', 'agree']);
     // Copying a minute's lines for every line takes minutes at this size.
     expect(performance.now() - started).toBeLessThan(3_000);
+  });
+});
+
+describe('crossCheckLoadBalancer, the minutes the generators carried the load', () => {
+  it('leaves out the minute a generator starts in and the minute its hold ends in, and says how many', () => {
+    const held = sliceWith({ startedAt: at(1), hold: { from: at(30), to: at(150) } });
+    const data = runDataWith({
+      manifest: manifestWith({ target: 'aws-prod', slices: [held] }),
+      slices: [
+        sliceDataWith(held, {
+          requests: [...sent(MINUTE_0, 10), ...sent(MINUTE_1, 100), ...sent(MINUTE_2, 30)],
+        }),
+      ],
+      awsMetrics: [
+        balancerSaw([
+          { minute: MINUTE_0, count: 40 },
+          { minute: MINUTE_1, count: 100 },
+          { minute: MINUTE_2, count: 90 },
+        ]),
+      ],
+    });
+
+    const [perMinute, serverErrors] = balancerChecks(data);
+
+    // The generator starts 1 s in and the hold ends 150 s in, so only the minute from 60 s is compared.
+    expect(perMinute).toMatchObject({
+      result: 'agree',
+      generators: 100,
+      other: 100,
+      detail:
+        'all 1 minutes within tolerance; left out as a generator starting or its users stopping: 2 minutes',
+    });
+    expect(serverErrors?.detail).toContain('a generator starting or its users stopping: 2 minutes');
   });
 });
 

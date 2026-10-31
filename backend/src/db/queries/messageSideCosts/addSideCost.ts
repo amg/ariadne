@@ -1,6 +1,6 @@
 import { db } from '@db/db';
 import { tagQuery } from '@db/queryTag';
-import type { SideCostKind } from '@db/types';
+import type { DbExecutor, SideCostKind } from '@db/types';
 
 type AddSideCostRow = {
   messageId: string;
@@ -16,18 +16,19 @@ type AddSideCostRow = {
 /**
  * Adds spend to the `(messageId, kind, model)` row, creating it on first
  * use: a repeated run accumulates what it burned instead of replacing
- * the earlier record. A null token count means unknown: added to a known
- * count it leaves that count as it is, and two unknowns stay unknown.
- * Throws on a cost that is not a finite, non-negative number, since one
- * NaN would poison the row's total for good.
+ * the earlier record. Given a transaction, the spend commits or rolls back
+ * with the caller's other writes. A null token count means unknown: added
+ * to a known count it leaves that count as it is, and two unknowns stay
+ * unknown. Throws on a cost that is not a finite, non-negative number,
+ * since one NaN would poison the row's total for good.
  */
-export async function addSideCost(row: AddSideCostRow) {
+export async function addSideCost(row: AddSideCostRow, executor: DbExecutor = db) {
   const cost = Number(row.costUsd);
   if (row.costUsd.trim() === '' || !Number.isFinite(cost) || cost < 0) {
     throw new Error(`addSideCost: invalid costUsd "${row.costUsd}" for ${row.kind}`);
   }
 
-  await db
+  await executor
     .withPlugin(tagQuery('messageSideCosts/addSideCost'))
     .insertInto('billing.messageSideCosts')
     .values(row)

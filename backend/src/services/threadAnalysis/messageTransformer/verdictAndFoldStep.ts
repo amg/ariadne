@@ -26,8 +26,12 @@ import {
   snapshotOfVerdictState,
 } from '../verdict';
 import {
+  arrivalAt,
+  completedTurnsBefore,
   isArrivalFinished,
+  positionOf,
   readLiveChain,
+  readLiveTail,
   readStoredJudgments,
   storedVectorAndChainOrNull,
   withEmbedding,
@@ -180,7 +184,39 @@ function snapshotOfStateRow(row: ArrivalJudgmentState) {
   };
 }
 
-/** The keep-two survivors for the verdict of the arrival at `arrivalIndex`. */
+/**
+ * The newest live completed Turn before the arrival at `position`, with
+ * the position of the arrival it completed; null when the chain holds
+ * none. Arrivals that never got a reply are passed over.
+ */
+function newestTurnBefore({ chain, position }: { chain: LiveChain; position: number }) {
+  for (let earlier = position - 1; earlier >= chain.before.arrivals; earlier -= 1) {
+    const reply = arrivalAt({ chain, position: earlier })?.assistantReply;
+    if (reply) return { position: earlier, reply };
+  }
+  return null;
+}
+
+/**
+ * Whether the fold of the Turn completed at `from` still describes the
+ * segment at `to`. Every arrival between them never got a reply, so none
+ * of them folded anything. Each must have a stored verdict that did not
+ * fire, because a fire opens a segment that no fold describes.
+ */
+function foldReaches({ chain, from, to }: { chain: LiveChain; from: number; to: number }) {
+  for (let between = from + 1; between < to; between += 1) {
+    const arrival = arrivalAt({ chain, position: between });
+    const verdict = arrival && chain.verdicts.get(arrival.userMessage.id);
+    if (!verdict || verdict.verdict === 'fire') return false;
+  }
+  return true;
+}
+
+/**
+ * The keep-two survivors for the verdict of the arrival at `arrivalIndex`:
+ * its own checkpoints, the previous arrival's judgment state, and the fold
+ * of the newest completed Turn before it.
+ */
 function checkpointsToKeep({
   chain,
   arrivalIndex,
@@ -188,15 +224,15 @@ function checkpointsToKeep({
   chain: LiveChain;
   arrivalIndex: number;
 }): KeptCheckpoints {
-  const stateMessageIds: string[] = [];
-  const foldMessageIds: string[] = [];
-  for (const index of [arrivalIndex - 1, arrivalIndex]) {
-    const arrival = chain.arrivals[index];
-    if (!arrival) continue;
-    stateMessageIds.push(arrival.userMessage.id);
-    if (arrival.assistantReply) foldMessageIds.push(arrival.assistantReply.id);
-  }
-  return { stateMessageIds, foldMessageIds };
+  const arrival = arrivalAt({ chain, position: arrivalIndex });
+  const previous = arrivalAt({ chain, position: arrivalIndex - 1 });
+  const previousReply = newestTurnBefore({ chain, position: arrivalIndex })?.reply;
+  return {
+    stateMessageIds: [previous, arrival].flatMap((row) => (row ? [row.userMessage.id] : [])),
+    foldMessageIds: [previousReply, arrival?.assistantReply].flatMap((reply) =>
+      reply ? [reply.id] : [],
+    ),
+  };
 }
 
 /**
@@ -347,6 +383,33 @@ function foldValues(input: {
 }
 
 /**
+ * Where the sums of this arrival's unfired Turn start: from its own
+ * vector for the Thread's first Turn (`start`), or from the stored fold
+ * of the newest live completed Turn before it (`accumulate`). `unknown`
+ * when no honest starting point is at hand: that Turn's fold is missing
+ * or stale, it lies before the arrivals the chain holds, or an unanswered
+ * arrival after it fired.
+ */
+async function sumsStartOf({ chain, arrivalIndex }: { chain: LiveChain; arrivalIndex: number }) {
+  const turnsBefore = completedTurnsBefore({ chain, position: arrivalIndex });
+  const previous = newestTurnBefore({ chain, position: arrivalIndex });
+  if (previous === null) return turnsBefore === 0 ? START_FROM_TURN : UNKNOWN_START;
+  if (!foldReaches({ chain, from: previous.position, to: arrivalIndex })) return UNKNOWN_START;
+  // A fold's row needs its reply's embedding, so a reply without one has no fold.
+  if (!chain.embedded.has(previous.reply.id)) return UNKNOWN_START;
+  const stored = await findTurnFoldOrNull({
+    messageId: previous.reply.id,
+    modelId: EMBEDDING_MODEL_ID,
+  });
+  if (stored === null || stored.completedTurns !== turnsBefore) return UNKNOWN_START;
+  return { kind: 'accumulate' as const, fold: foldValuesOfRow(stored) };
+}
+
+const START_FROM_TURN = { kind: 'start' } as const;
+
+const UNKNOWN_START = { kind: 'unknown' } as const;
+
+/**
  * Folds the arrival's completed Turn and stores its checkpoint. The
  * fold already stored is the answer (the queue task or another pass got
  * there first — the values are the same either way); null when nothing
@@ -360,40 +423,35 @@ async function foldTurnOfArrival(input: {
   arrivalIndex: number;
 }): Promise<Result<{ fold: TurnFoldValues | null; chain: LiveChain }>> {
   const { chain } = input;
-  const arrival = chain.arrivals[input.arrivalIndex];
+  const arrival = arrivalAt({ chain, position: input.arrivalIndex });
   if (!arrival || !arrival.assistantReply) return ok({ fold: null, chain });
   const reply = arrival.assistantReply;
 
-  const storedFold = await findTurnFoldOrNull({
-    messageId: reply.id,
-    modelId: EMBEDDING_MODEL_ID,
-  });
-  if (storedFold !== null) return ok({ fold: foldValuesOfRow(storedFold), chain });
+  // A fold's row needs its reply's embedding, so a reply without one has no fold.
+  if (chain.embedded.has(reply.id)) {
+    const storedFold = await findTurnFoldOrNull({
+      messageId: reply.id,
+      modelId: EMBEDDING_MODEL_ID,
+    });
+    if (storedFold !== null) return ok({ fold: foldValuesOfRow(storedFold), chain });
+  }
 
   const verdict = chain.verdicts.get(arrival.userMessage.id);
   if (!verdict) return ok({ fold: null, chain });
   const fired = verdict.verdict === 'fire';
 
-  // The accumulate-from point: the previous Turn's fold — the segment's
-  // running sums as this Thread last left them.
-  let prev: TurnFoldValues | null = null;
-  const prevArrival = chain.arrivals[input.arrivalIndex - 1];
-  if (prevArrival?.assistantReply) {
-    const prevFold = await findTurnFoldOrNull({
-      messageId: prevArrival.assistantReply.id,
-      modelId: EMBEDDING_MODEL_ID,
-    });
-    if (prevFold !== null) prev = foldValuesOfRow(prevFold);
-  }
-  // A fire reseeds; so does the Thread's first Turn. Anything else with
-  // no previous fold cannot be accumulated honestly.
-  if (prev === null && !fired && input.arrivalIndex > 0) return ok({ fold: null, chain });
+  // A fire reseeds the segment it opened from this Turn alone. Any other
+  // Turn accumulates onto the segment's running sums as the newest
+  // earlier Turn left them.
+  const sumsStart = fired ? START_FROM_TURN : await sumsStartOf(input);
+  if (sumsStart.kind === 'unknown') return ok({ fold: null, chain });
+  const prev = sumsStart.kind === 'accumulate' ? sumsStart.fold : null;
 
   // The segment this fold lands in: the one its own arrival's fire
-  // opened, else the one the conversation already sits in — the Thread's
-  // first Turn reads its arrival's own judged-in segment (no previous
-  // fold exists to carry it).
-  const segmentId = chain.segmentIdByStart.get(arrival.userMessage.id) ?? prev?.segmentId ?? null;
+  // opened, else the one the arrival was judged in.
+  const segmentId = fired
+    ? (chain.segmentIdByStart.get(arrival.userMessage.id) ?? null)
+    : verdict.segmentId;
   if (segmentId === null) return ok({ fold: null, chain });
 
   const completion = completedTurnOf(arrival);
@@ -407,13 +465,10 @@ async function foldTurnOfArrival(input: {
   const { vector, chain: withVector } = resolved.data;
 
   const values = foldValues({
-    // A fire shredded the segment this Turn lands in: its fold re-seeds
-    // the sums from its own vector instead of accumulating onto the
-    // burned one's.
-    prev: fired ? null : prev,
+    prev,
     vector,
     segmentId,
-    completedTurns: (prev?.completedTurns ?? 0) + 1,
+    completedTurns: completedTurnsBefore({ chain, position: input.arrivalIndex }) + 1,
   });
   const stored = await insertTurnFoldIfAbsent({
     fold: {
@@ -470,10 +525,12 @@ async function commitJudgment(input: {
 
 /**
  * How a fill-forward pass ended: every arrival through the target judged
- * and folded, with the chain holding all of it, or stopped at the first
- * arrival another pass stored first.
+ * and folded, or stopped at the first arrival another pass stored first.
+ * Either way it carries the chain the pass worked on.
  */
-type FillEnded = { kind: 'filled'; chain: LiveChain } | { kind: 'written-by-another-pass' };
+type FillEnded =
+  | { kind: 'filled'; chain: LiveChain }
+  | { kind: 'written-by-another-pass'; chain: LiveChain };
 
 /**
  * Judges one arrival against the given gate state and commits it — the
@@ -529,8 +586,9 @@ async function judgeAndCommit(input: {
     case 'committed':
       return ok({ kind: 'filled', chain: commit.chain });
     case 'written-by-another-pass':
-      return ok({ kind: 'written-by-another-pass' });
+      return ok({ kind: 'written-by-another-pass', chain });
     case 'opener-abandoned':
+    case 'arrival-abandoned':
       return err('arrival_not_live', 'The arrival was abandoned while it was judged.');
     default: {
       const _check: never = commit;
@@ -657,7 +715,7 @@ async function fillForwardToArrival(
   // The walk measures every arrival and folds every Turn, so it reads every vector at once.
   let current = await withEveryVector(chain);
   for (let i = 0; i <= targetIndex; i += 1) {
-    const arrival = current.arrivals[i];
+    const arrival = arrivalAt({ chain: current, position: i });
     if (!arrival) continue;
     const processed = await processArrival({ state, chain: current, arrival, arrivalIndex: i });
     if (processed.type === 'error') return processed;
@@ -679,30 +737,36 @@ async function fillForwardToArrival(
 /**
  * Judges the target arrival from the stored checkpoints: the previous
  * arrival's judgment state (the baseline and the patrol it left) and the
- * previous Turn's fold (the segment geometry as the conversation left
- * it). The fold task lagging is not a rebuild: the previous Turn folds
- * inline first. Anything else missing or stale — no checkpoint rows, a
- * fold whose completed-Turn count no longer matches the live chain (an
- * arrival abandoned beneath it) — says the checkpoints cannot speak for
- * the chain, and the rebuild is the honest answer.
+ * fold of the newest completed Turn before it (the segment geometry as
+ * the conversation left it). The fold task lagging is not a rebuild: that
+ * Turn folds inline first. Anything else missing or stale — an earlier
+ * arrival without a verdict, no checkpoint rows, a fold whose
+ * completed-Turn count no longer matches the live chain (a row that
+ * appeared or left beneath it) — says the checkpoints cannot speak for the
+ * chain, and the rebuild is the honest answer.
  */
-async function judgeFromCheckpoints(
-  chain: LiveChain,
-  targetIndex: number,
-): Promise<Result<FillEnded | { kind: 'rebuild' }>> {
-  const target = chain.arrivals[targetIndex];
+async function judgeFromCheckpoints({
+  chain,
+  targetIndex,
+}: {
+  chain: LiveChain;
+  targetIndex: number;
+}): Promise<Result<FillEnded | { kind: 'rebuild' }>> {
+  const target = arrivalAt({ chain, position: targetIndex });
   if (!target) return err('thread_not_found');
-  const previous = chain.arrivals.slice(0, targetIndex);
-  if (previous.some((arrival) => !chain.verdicts.has(arrival.userMessage.id))) {
+  const previous = chain.arrivals.filter((arrival) => arrival.turnNumber <= targetIndex);
+  if (
+    chain.before.unjudged ||
+    previous.some((arrival) => !chain.verdicts.has(arrival.userMessage.id))
+  ) {
     return ok({ kind: 'rebuild' });
   }
 
   const judging = JUDGING_DEFAULTS;
-  const prev = previous[previous.length - 1] ?? null;
 
   // The Thread's first arrival judges from scratch: no checkpoint exists
   // to read, and none is needed.
-  if (prev === null) {
+  if (targetIndex === 0) {
     const state: RunningGateState = {
       judging,
       verdictState: createVerdictState(judging),
@@ -715,14 +779,21 @@ async function judgeFromCheckpoints(
     return judgeAndCommit({ state, chain, arrival: target, arrivalIndex: targetIndex });
   }
 
-  if (!prev.assistantReply) return ok({ kind: 'rebuild' });
-  const inlineFold = await foldTurnOfArrival({ chain, arrivalIndex: targetIndex - 1 });
+  const prev = arrivalAt({ chain, position: targetIndex - 1 });
+  const prevTurn = newestTurnBefore({ chain, position: targetIndex });
+  if (!prev || prevTurn === null) return ok({ kind: 'rebuild' });
+  if (!foldReaches({ chain, from: prevTurn.position, to: targetIndex })) {
+    return ok({ kind: 'rebuild' });
+  }
+  const inlineFold = await foldTurnOfArrival({ chain, arrivalIndex: prevTurn.position });
   if (inlineFold.type === 'error') return inlineFold;
   const prevFold = inlineFold.data.fold;
   if (prevFold === null) return ok({ kind: 'rebuild' });
   // The fold's completed-Turn count must equal the live Turns before the
-  // target: a mismatch means something under the fold left the chain.
-  if (prevFold.completedTurns !== targetIndex) return ok({ kind: 'rebuild' });
+  // target: a mismatch means a row under the fold left or joined the chain.
+  if (prevFold.completedTurns !== completedTurnsBefore({ chain, position: targetIndex })) {
+    return ok({ kind: 'rebuild' });
+  }
 
   const prevState = await findArrivalJudgmentStateOrNull({
     messageId: prev.userMessage.id,
@@ -758,14 +829,21 @@ async function judgeFromCheckpoints(
  * per arrival, plus the one that finishes. The target's own Turn folds
  * here too, when its reply has completed — the queue task may not
  * have run yet, and the next arrival's judgment would fold it inline
- * anyway.
+ * anyway. A rebuild on any attempt switches the pass to the whole live
+ * chain, so the target is found again by its Message on each attempt.
  */
-async function fillPastOtherPasses(
-  chain: LiveChain,
-  arrivalIndex: number,
-  attemptsLeft: number,
-): Promise<Result<LiveChain>> {
-  const target = chain.arrivals[arrivalIndex];
+async function fillPastOtherPasses({
+  chain,
+  messageId,
+  attemptsLeft,
+}: {
+  chain: LiveChain;
+  /** The target arrival's user Message. */
+  messageId: string;
+  attemptsLeft: number;
+}): Promise<Result<LiveChain>> {
+  const arrivalIndex = positionOf({ chain, messageId });
+  const target = arrivalAt({ chain, position: arrivalIndex });
   if (!target) return err('thread_not_found');
   if (isArrivalFinished(chain, target)) return ok(chain);
   if (attemptsLeft === 0) {
@@ -780,29 +858,64 @@ async function fillPastOtherPasses(
     // Only the fold is owed; a judgment would re-decide nothing.
     filled = ok({ kind: 'filled', chain });
   } else {
-    const judged = await judgeFromCheckpoints(chain, arrivalIndex);
+    const judged = await judgeFromCheckpoints({ chain, targetIndex: arrivalIndex });
     if (judged.type === 'error') return judged;
     if (judged.data.kind === 'rebuild') {
-      filled = await fillForwardToArrival(chain, arrivalIndex);
+      filled = await rebuildThroughArrival({ chain, messageId });
     } else {
       filled = ok(judged.data);
     }
   }
   if (filled.type === 'error') return filled;
+  const reached = filled.data.chain;
   if (filled.data.kind === 'written-by-another-pass') {
-    const reread: LiveChain = { ...chain, ...(await readStoredJudgments(chain)) };
-    return fillPastOtherPasses(reread, arrivalIndex, attemptsLeft - 1);
+    const reread: LiveChain = { ...reached, ...(await readStoredJudgments(reached)) };
+    return fillPastOtherPasses({ chain: reread, messageId, attemptsLeft: attemptsLeft - 1 });
   }
 
-  const folded = await foldTurnOfArrival({ chain: filled.data.chain, arrivalIndex });
+  const folded = await foldTurnOfArrival({
+    chain: reached,
+    arrivalIndex: positionOf({ chain: reached, messageId }),
+  });
   if (folded.type === 'error') return folded;
   return ok(folded.data.chain);
 }
 
+/**
+ * Rebuilds the gate's state from the first live arrival through the
+ * target. A chain that holds only the newest arrivals is read again in
+ * whole first. That read comes later than the newest rows, so the target
+ * is found again by its Message, and an arrival abandoned meanwhile is no
+ * longer live.
+ */
+async function rebuildThroughArrival({
+  chain,
+  messageId,
+}: {
+  chain: LiveChain;
+  /** The target arrival's user Message. */
+  messageId: string;
+}) {
+  const whole = chain.before.arrivals === 0 ? chain : await readLiveChain(chain.threadId);
+  const targetIndex = positionOf({ chain: whole, messageId });
+  if (targetIndex < 0) {
+    return err('arrival_not_live', 'The arrival was abandoned while it was judged.');
+  }
+  return fillForwardToArrival(whole, targetIndex);
+}
+
 export const verdictAndFoldStep: MessageStep = {
   name: 'verdict-and-fold',
-  run: ({ chain, arrivalIndex }) =>
-    fillPastOtherPasses(chain, arrivalIndex, chain.arrivals.length + 1),
+  async run({ chain, arrivalIndex }) {
+    const target = arrivalAt({ chain, position: arrivalIndex });
+    if (!target) return err('thread_not_found');
+    return fillPastOtherPasses({
+      chain,
+      messageId: target.userMessage.id,
+      // One attempt per live arrival through the target, plus the one that finishes.
+      attemptsLeft: chain.before.arrivals + chain.arrivals.length + 1,
+    });
+  },
 };
 
 /**
@@ -825,15 +938,14 @@ export async function foldTurnOfReply({
   mode: ThreadAnalysisMode;
 }) {
   if (mode === 'off') return ok(null);
-  const chain = await readLiveChain(threadId);
-  const arrivalIndex = chain.arrivals.findIndex(
-    (arrival) => arrival.assistantReply?.id === replyMessageId,
-  );
-  if (arrivalIndex < 0) return ok(null);
-  if (chain.arrivals.slice(arrivalIndex + 1).some((arrival) => arrival.assistantReply)) {
+  // A reply missing from the newest live rows is no longer live, or a later Turn completed.
+  const chain = await readLiveTail({ threadId, arrivalId: null });
+  const arrival = chain.arrivals.find((row) => row.assistantReply?.id === replyMessageId);
+  if (!arrival) return ok(null);
+  if (chain.arrivals.some((row) => row.turnNumber > arrival.turnNumber && row.assistantReply)) {
     return ok(null);
   }
-  const folded = await foldTurnOfArrival({ chain, arrivalIndex });
+  const folded = await foldTurnOfArrival({ chain, arrivalIndex: arrival.turnNumber - 1 });
   if (folded.type === 'error') return folded;
   return ok(null);
 }

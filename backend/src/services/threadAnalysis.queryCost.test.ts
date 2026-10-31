@@ -4,7 +4,7 @@ import { listSegmentDriftLogsByThread } from '@queries/segmentDriftLogs/listSegm
 import { insertThread } from '@queries/threads/insertThread';
 import { insertUserIfNotExists } from '@queries/users/insertUserIfNotExists';
 import { EMBEDDING_MODEL_ID } from '@services/aiService';
-import { runLiveGate } from '@services/threadAnalysis';
+import { foldTurnOfReply, runLiveGate } from '@services/threadAnalysis';
 import { DEFAULT_USER_ID } from '@services/userService';
 import { useTestDb } from '@test/test-db';
 import type { KyselyPlugin } from 'kysely';
@@ -122,6 +122,68 @@ async function judgmentCost(turns: number) {
   expect(logs).toHaveLength(turns + 1);
   return queries;
 }
+
+/** Runs `fn` and reports how many queries it sent and how many rows the database sent back. */
+async function countReads<T>(fn: () => Promise<T>) {
+  let queries = 0;
+  let rows = 0;
+  const counting: KyselyPlugin = {
+    transformQuery: (args) => args.node,
+    transformResult: async (args) => {
+      queries += 1;
+      rows += args.result.rows.length;
+      return args.result;
+    },
+  };
+  const result = await requestDbScope.run(db.withPlugin(counting), fn);
+  return { result, queries, rows };
+}
+
+async function judgmentReads(turns: number) {
+  const { threadId, arrivalId } = await liveThreadAwaitingVerdict(turns);
+  const { result, queries, rows } = await countReads(() =>
+    runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' }),
+  );
+  expect(result.type).toBe('success');
+  return { queries, rows };
+}
+
+/** What the queue's fold of the newest Turn costs, once its arrival was judged and its reply landed. */
+async function foldReads(turns: number) {
+  const { threadId, arrivalId } = await liveThreadAwaitingVerdict(turns);
+  const judged = await runLiveGate({ threadId, upToMessageId: arrivalId, mode: 'heuristic' });
+  expect(judged.type).toBe('success');
+  const answer = await insertMessage({
+    threadId,
+    role: 'assistant',
+    content: `answer ${turns}${PAD}`,
+  });
+  const { result, queries, rows } = await countReads(() =>
+    foldTurnOfReply({ threadId, replyMessageId: answer.id, mode: 'heuristic' }),
+  );
+  expect(result.type).toBe('success');
+  const fold = await db
+    .selectFrom('analysis.turnFolds')
+    .select('completedTurns')
+    .where('messageId', '=', answer.id)
+    .executeTakeFirst();
+  expect(fold?.completedTurns).toBe(turns + 1);
+  return { queries, rows };
+}
+
+describe('the rows a judgment and a fold read', () => {
+  it('stay the same for a judgment however long the Thread is', async () => {
+    const short = await judgmentReads(2);
+    const long = await judgmentReads(16);
+    expect(long).toEqual(short);
+  });
+
+  it('stay the same for a fold however long the Thread is', async () => {
+    const short = await foldReads(2);
+    const long = await foldReads(16);
+    expect(long).toEqual(short);
+  });
+});
 
 describe('the cost of judging an arrival', () => {
   it('stays the same number of queries however long the Thread is', async () => {

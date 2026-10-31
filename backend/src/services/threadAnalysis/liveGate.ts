@@ -1,7 +1,13 @@
 import type { FireChannel, GateVerdict } from '@ari/lib/api/schemas/common/driftGate';
 import type { ThreadAnalysisMode } from '@ari/lib/api/schemas/threads/analysis';
 import { type Result, err, ok } from '../../types/result';
-import { isArrivalFinished, readLiveChain } from './messageTransformer/liveChain';
+import {
+  arrivalAt,
+  isArrivalFinished,
+  positionOf,
+  readLiveChain,
+  readLiveTail,
+} from './messageTransformer/liveChain';
 import { transformMessage } from './messageTransformer/transformMessage';
 import type { JudgingMode, LiveChain } from './types';
 
@@ -23,6 +29,8 @@ interface LiveArrivalOutcome {
   slowDriftStartMessageId: string | null;
   /** The user Message the last arrival landed on; null when nothing arrived. */
   messageId: string | null;
+  /** The segment the last arrival was judged in, which a fire closes; null when nothing arrived. */
+  segmentId: string | null;
 }
 
 type RunLiveGateProps = {
@@ -42,6 +50,7 @@ const EMPTY_OUTCOME: LiveArrivalOutcome = {
   fireChannel: null,
   slowDriftStartMessageId: null,
   messageId: null,
+  segmentId: null,
 };
 
 /**
@@ -67,18 +76,28 @@ export async function runLiveGate({ threadId, upToMessageId, mode }: RunLiveGate
  * judgment, which folds it in the same rebuild, unless it is the last
  * arrival this pass judges.
  */
-function owesWork(chain: LiveChain, index: number, targetIndex: number) {
-  const arrival = chain.arrivals[index];
+function owesWork({
+  chain,
+  index,
+  isTarget,
+}: {
+  chain: LiveChain;
+  index: number;
+  isTarget: boolean;
+}) {
+  const arrival = arrivalAt({ chain, position: index });
   if (!arrival || isArrivalFinished(chain, arrival)) return false;
-  return index === targetIndex || !chain.verdicts.has(arrival.userMessage.id);
+  return isTarget || !chain.verdicts.has(arrival.userMessage.id);
 }
 
 /**
  * The fill-forward pass: reads the thread's live chain once, then
  * transforms the user Messages that still owe work, in chronology, up to
- * (and including) the target. Finished arrivals cost nothing, so a thread
- * that is already done degrades to a fixed handful of reads and a broken
- * one resumes where it stopped.
+ * (and including) the target. A pass with a target reads only the newest
+ * live arrivals up to it, unless an earlier arrival was never judged; a
+ * pass without one reads the whole chain. Finished arrivals cost nothing,
+ * so a thread that is already done degrades to a fixed handful of reads
+ * and a broken one resumes where it stopped.
  *
  * Failure codes: `arrival_not_live` (the target is not a live arrival:
  * abandoned, or never one), plus any step failure (`provider_not_configured`, `embed_failed`,
@@ -91,22 +110,38 @@ async function transformArrivals({
   mode,
 }: Omit<RunLiveGateProps, 'mode'> & { mode: JudgingMode }): Promise<Result<LiveArrivalOutcome>> {
   // Only the live conversation is gated; abandoned rows keep what they had.
-  const chain = await readLiveChain(threadId);
-  if (chain.arrivals.length === 0) return ok(EMPTY_OUTCOME);
-
-  const targetIndex =
+  const read =
     upToMessageId === undefined
-      ? chain.arrivals.length - 1
-      : chain.arrivals.findIndex((turn) => turn.userMessage.id === upToMessageId);
-  const target = chain.arrivals[targetIndex];
+      ? await readLiveChain(threadId)
+      : await readLiveTail({ threadId, arrivalId: upToMessageId });
+  // An unjudged arrival before the newest rows, or an unjudged first one
+  // among them, is owed its whole pipeline, and that pipeline reads the
+  // arrival before it: the pass takes the whole chain.
+  const first = read.arrivals[0];
+  const firstUnjudged =
+    read.before.arrivals > 0 && first !== undefined && !read.verdicts.has(first.userMessage.id);
+  const chain = read.before.unjudged || firstUnjudged ? await readLiveChain(threadId) : read;
+  if (upToMessageId === undefined && chain.arrivals.length === 0) return ok(EMPTY_OUTCOME);
+
+  const target =
+    upToMessageId === undefined
+      ? chain.arrivals[chain.arrivals.length - 1]
+      : chain.arrivals.find((turn) => turn.userMessage.id === upToMessageId);
   if (!target) return err('arrival_not_live');
 
+  // Each arrival is found again by its Message: a rebuild may have swapped
+  // in the whole chain, read later than the newest rows.
   let current = chain;
-  for (let i = 0; i <= targetIndex; i += 1) {
-    if (!owesWork(current, i, targetIndex)) continue;
+  for (const { userMessage } of chain.arrivals.filter(
+    (arrival) => arrival.turnNumber <= target.turnNumber,
+  )) {
+    const index = positionOf({ chain: current, messageId: userMessage.id });
+    if (!owesWork({ chain: current, index, isTarget: userMessage.id === target.userMessage.id })) {
+      continue;
+    }
     const transformed = await transformMessage({
       chain: current,
-      arrivalIndex: i,
+      arrivalIndex: index,
       mode,
     });
     if (transformed.type === 'error') return transformed;
@@ -125,5 +160,6 @@ async function transformArrivals({
     fireChannel: logged.fireChannel,
     slowDriftStartMessageId: logged.slowDriftStartMessageId,
     messageId: target.userMessage.id,
+    segmentId: logged.segmentId,
   });
 }

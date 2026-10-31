@@ -7,9 +7,9 @@ copied here with their run id. How a run is driven and judged is in
 
 ## Where we stand
 
-Step10 passes on the direct path: `20261029T053022Z-step10-load-direct`.
-It held 9,999 push streams and 2,000 chatters, with no sign-in failures.
-Chat first byte p95 was 637 ms and the busiest generator used 33.6% CPU.
+Step10 passes on the direct path: `20261030T060616Z-step10-load-direct`.
+It held 10,000 push streams and 2,000 chatters, with no sign-in failures.
+Chat first byte p95 was 480 ms and the busiest generator used 30.8% CPU.
 
 ## What strained, and the fix
 
@@ -46,9 +46,18 @@ warm-up the generators stalled for up to 12 s at a time, and the ramp ran
 late until the generators hit their time limit (`20261029T035850Z`).
 Fixed by giving each user its own start time on the ramp.
 
-**Generator CPU was judged while the generators stopped their users.**
-That minute read 74.9% and 99.7%, against at most 40.3% under load. Fixed
-by judging generator CPU only up to the end of the hold.
+**Generator CPU was judged while the generators started and stopped.**
+The minute the users were stopped read 74.9% and 99.7%, against at most
+40.3% under load. The minute a generator boots in read 99.7% against
+24.7% under load (`20261030T014328Z`).
+
+**The per-minute request check split the end of the hold.** Thousands of
+push streams close together when the hold ends, and the generators and
+the load balancer put about 2,090 of them on different sides of a
+minute's edge (`20261030T014328Z`).
+
+Both are fixed by judging only the whole minutes in which the generators
+carried the load: from the last generator's start to the end of the hold.
 
 **A printed step configuration lost a field.** A sized step was refused
 because the run command dropped the share of users who chat. Fixed by
@@ -57,13 +66,34 @@ keeping the whole configuration and refusing one without that field.
 **The quota check counted a deploy surge** that a first raise never uses.
 Fixed by giving each step its own deploy policy.
 
+**Every queue commit waited for the log to reach disk.** A commit that
+notifies workers holds one database-wide lock until its log is flushed,
+so enqueues lined up behind each other's flush. Log write waits averaged
+1.43 sessions and the enqueue lock 0.59 (`20261030T014328Z`). Fixed by
+letting the queue's own commits and standalone enqueues return before
+the flush. At the same load these fell to 0.73 and 0.17, and job wait
+p95 from 49 to 33 ms (`20261030T060616Z`). Database CPU and what users
+see did not move: the gain is headroom on a lock that grows with the
+chat rate.
+
+**The notification lock ran out at step50.** Every enqueue sent workers
+a notification, and commits that notify take one database-wide lock in
+turn. Near 8,000 chatters the enqueues fell behind it. `Lock:object`
+averaged 497 sessions with a peak of 899, database CPU fell from 71% to
+16%, and 48,843 chats timed out with a 504 (`20261030T084021Z`).
+Performance Insights put nearly all of that wait on `commit`, so the
+cause is measured. Fixed by adding jobs without a notification, with
+idle workers polling for new jobs instead.
+
 ## Still open
 
-- **The enqueue lock.** `Lock:object` waits sit on `queue/enqueueJob` and
-  `commit`. Each enqueue calls `pg_notify`, and Postgres holds one
-  database-wide lock from that commit until its WAL is flushed. Peaks
-  varied between runs on the same load: 7.6 sessions in
-  `20261029T042655Z`, 2.57 in `20261029T053022Z`. A reading, not tested.
+- **What polling costs.** An idle worker waits up to one polling
+  interval for a new job, and every hop of a chat's background work can
+  meet one. A step10 rerun shows what it adds to first byte.
+- **The API's database pool fills in bursts.** Both copies reached all 40
+  connections, with up to 16 waiting, in the run's slowest minute for
+  first byte: p95 878 ms against 467 ms across the hold
+  (`20261030T060616Z`).
 - **API CPU climbs across the hold.** The busiest task went from 58% to
   81% on a flat 4,350 replies a minute (`20261029T053022Z`). It is the
   nearest limit for step50.

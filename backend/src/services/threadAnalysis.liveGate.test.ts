@@ -424,6 +424,7 @@ describe('runLiveGate — the fill-forward walk', () => {
       fireChannel: lastExpected?.fireChannel ?? null,
       slowDriftStartMessageId: idAt(userMessageIds, lastExpected?.slowDriftStartIndex ?? null),
       messageId: userMessageIds[userMessageIds.length - 1] ?? null,
+      segmentId: expect.any(String),
     });
 
     const { segments, logs } = await readChain(threadId);
@@ -602,6 +603,7 @@ describe('runLiveGate — the fill-forward walk', () => {
       slowDriftStartMessageId: null,
       fireChannel: null,
       messageId: null,
+      segmentId: null,
     });
     // A user-only thread owns exactly one arrival — judged from scratch,
     // muted against an empty segment, and never folded into anything.
@@ -664,7 +666,13 @@ describe('runLiveGate — failure is a failed exchange, progress survives', () =
     const outcome = await runLiveGate({ threadId, mode: 'off' });
     expect(outcome).toEqual({
       type: 'success',
-      data: { verdict: null, slowDriftStartMessageId: null, fireChannel: null, messageId: null },
+      data: {
+        verdict: null,
+        slowDriftStartMessageId: null,
+        fireChannel: null,
+        messageId: null,
+        segmentId: null,
+      },
     });
     const { logs, segments } = await readChain(threadId);
     expect(logs).toHaveLength(0);

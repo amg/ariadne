@@ -320,6 +320,8 @@ export type RunFacts = {
   chats: ChatCounts;
   /** Whether every slice's request lines could be read. */
   requestLinesWhole: boolean;
+  /** The whole minutes in which the generators carried the run's load, each as the millisecond it starts. */
+  loadMinutes: readonly number[];
   summary: Summary;
   timeline: readonly TimelineEntry[];
   /** The moments the charts mark. */

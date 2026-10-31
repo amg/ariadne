@@ -5,6 +5,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDbFromPool } from '@db/db';
+import { silenceJobInserts } from '@queries/queue/silenceJobInserts';
 import { QUEUE_SCHEMA } from '@queue/index';
 import { runMigrations } from 'graphile-worker';
 import { sql } from 'kysely';
@@ -161,6 +162,8 @@ function redactUrl(url: string) {
 /**
  * Recreate `<template>_w1`…`<template>_wN` as copies of the migrated
  * template. The template must have no open connections while copying.
+ * Each copy commits durably by default, as production does, even on a
+ * server started with that turned off for speed.
  */
 async function cloneWorkerDatabases(templateUrl: string, workers: number) {
   const url = new URL(templateUrl);
@@ -172,6 +175,7 @@ async function cloneWorkerDatabases(templateUrl: string, workers: number) {
       const clone = escapeIdentifier(workerDatabaseName(templateName, poolId));
       await admin.query(`drop database if exists ${clone} with (force)`);
       await admin.query(`create database ${clone} template ${escapeIdentifier(templateName)}`);
+      await admin.query(`alter database ${clone} set synchronous_commit = on`);
     }
   } finally {
     await admin.end();
@@ -214,6 +218,7 @@ export default async function globalSetup(project: TestProject): Promise<void> {
     if (error) throw error;
     console.log(`[test-db] applied ${results?.length ?? 0} migrations`);
     await runMigrations({ connectionString: databaseUrl, schema: QUEUE_SCHEMA });
+    await silenceJobInserts({ schema: QUEUE_SCHEMA }, db);
     console.log(`[test-db] installed the "${QUEUE_SCHEMA}" queue schema`);
   } finally {
     await db.destroy();

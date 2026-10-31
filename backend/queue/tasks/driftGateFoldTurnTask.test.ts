@@ -16,6 +16,8 @@ import { EMBEDDING_MODEL_ID } from '@services/aiService';
 import { runLiveGate } from '@services/threadAnalysis';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
+import { sideCostsOfThread } from '@test/sideCosts';
+import { useStoppableWrites } from '@test/stoppedWrites';
 import { useTestDb } from '@test/test-db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -82,6 +84,7 @@ afterAll(async () => {
 });
 
 useTestDb();
+const stopWritesTo = useStoppableWrites();
 
 /**
  * One live exchange: the arrival judged before its reply lands, the way
@@ -105,6 +108,31 @@ async function foldsOf(threadId: string) {
     .orderBy('f.completedTurns asc')
     .select(['f.messageId', 'f.completedTurns', 'f.anchorCount'])
     .execute();
+}
+
+/** The thread's stored folds, with the sums a later judgment reads. */
+async function foldValuesOf(threadId: string) {
+  return db
+    .selectFrom('analysis.turnFolds as f')
+    .innerJoin('chat.messages as m', 'm.id', 'f.messageId')
+    .where('m.threadId', '=', threadId)
+    .orderBy('f.completedTurns asc')
+    .select(['f.completedTurns', 'f.anchorCount', 'f.gravitySum', 'f.anchorSum'])
+    .execute();
+}
+
+/** A thread of two exchanges, the second Turn's fold still owed to the queue. */
+async function threadOwingItsNewestFold() {
+  const userId = randomUUID();
+  await insertUserIfNotExists({ id: userId });
+  const { id: threadId } = await insertThread({ userId });
+  await exchange(threadId, 'How do sourdough starters stay healthy', 'Feed and hydrate them');
+  const second = await exchange(
+    threadId,
+    'How do jet turbines compress air',
+    'Through axial stages',
+  );
+  return { threadId, turn: { threadId, messageId: second.replyId } };
 }
 
 describe('foldTurn', () => {
@@ -225,6 +253,44 @@ describe('foldTurn', () => {
     });
 
     expect(await foldsOf(threadId)).toEqual(before);
+  });
+
+  it('stores no second fold and pays for no second embedding when run again', async () => {
+    const { threadId, turn } = await threadOwingItsNewestFold();
+    await foldTurn({ turn, threadAnalysisMode: 'heuristic' });
+    const folds = await foldValuesOf(threadId);
+    const spend = await sideCostsOfThread(threadId);
+    const embeddingCalls = mock.embeddings.requestCount();
+
+    await foldTurn({ turn, threadAnalysisMode: 'heuristic' });
+
+    expect(await foldValuesOf(threadId)).toEqual(folds);
+    expect(await sideCostsOfThread(threadId)).toEqual(spend);
+    expect(mock.embeddings.requestCount()).toBe(embeddingCalls);
+  });
+
+  it('folds to the uninterrupted result when rerun after stopping between its embedding and its fold', async () => {
+    const uninterrupted = await threadOwingItsNewestFold();
+    await foldTurn({ turn: uninterrupted.turn, threadAnalysisMode: 'heuristic' });
+
+    const { threadId, turn } = await threadOwingItsNewestFold();
+    const release = await stopWritesTo('analysis.turn_folds');
+    const stopped = await foldTurn({ turn, threadAnalysisMode: 'heuristic' }).catch(
+      (error: unknown) => error,
+    );
+    await release();
+    expect(stopped).toBeInstanceOf(Error);
+    expect((await foldValuesOf(threadId)).map((fold) => fold.completedTurns)).toEqual([1]);
+    const embeddingCalls = mock.embeddings.requestCount();
+
+    await foldTurn({ turn, threadAnalysisMode: 'heuristic' });
+
+    // The reply's embedding stored by the stopped run is reused, not bought again.
+    expect(mock.embeddings.requestCount()).toBe(embeddingCalls);
+    expect(await foldValuesOf(threadId)).toEqual(await foldValuesOf(uninterrupted.threadId));
+    expect(await sideCostsOfThread(threadId)).toEqual(
+      await sideCostsOfThread(uninterrupted.threadId),
+    );
   });
 
   it('fails recoverably when the provider does', async () => {

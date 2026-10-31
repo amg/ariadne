@@ -22,6 +22,6 @@ export interface MessageStep {
 
 export interface MessageStepInput {
   chain: LiveChain;
-  /** Position in the chain's arrivals of the user Message the step processes. */
+  /** Position in the whole live chain of the user Message the step processes. */
   arrivalIndex: number;
 }

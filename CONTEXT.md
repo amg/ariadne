@@ -44,8 +44,7 @@ live in the thread (empty assistant rows are skipped in model context
 but remain in DB/UI). A still-untitled Thread titles from a short preview
 of the arrival text. Abandoned rows stay in the Thread with their usages
 intact (spend keeps tracking them) but vanish from the chat stream and
-the live analysis. A retry revives the user arrival it re-exchanges; the
-mark is otherwise historical.
+the live analysis. Nothing ever revives an abandoned row.
 _Avoid_: hidden, orphaned, dead
 
 **Resume Draft**:
@@ -70,8 +69,8 @@ _Avoid_: message update, in-place rewrite
 
 **Retry**:
 The user's *regenerate* of an Exchange — a deliberate user action that
-abandons. The server picks the newest user Message (abandoned or not),
-revives it, flags the stale assistant rows beneath it abandoned in place,
+abandons. The server picks the newest live user Message, flags the
+stale assistant rows beneath it abandoned in place,
 and grows the fresh reply beneath those — nothing is ever deleted, every
 burnt usage keeps counting. The client's message list serves only the
 SDK's last-message guard.

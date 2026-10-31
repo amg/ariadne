@@ -260,7 +260,9 @@ export const STEPS: Record<StepName, Step> = {
   step50: {
     name: 'step50',
     deploy: REPLACE_DEPLOY,
-    database: { instanceClass: 'r7g.2xlarge', storageGiB: 400, source: 'seedSnapshot' },
+    // Larger than step50 is expected to need, so that a run reads the
+    // database's demand at the full chat rate instead of its ceiling.
+    database: { instanceClass: 'r7g.4xlarge', storageGiB: 400, source: 'seedSnapshot' },
     cache: { maxStorageGb: 5, maxEcpuPerSecond: 250_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {

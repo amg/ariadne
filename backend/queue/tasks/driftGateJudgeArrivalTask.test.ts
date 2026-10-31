@@ -16,6 +16,8 @@ import { subscribe } from '@services/events';
 import { someoneWaitsOnALock, useHeldTransactions } from '@test/locks';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
+import { sideCostsOfThread } from '@test/sideCosts';
+import { useStoppableWrites } from '@test/stoppedWrites';
 import { useTestDb } from '@test/test-db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type MockInferenceServer, startMockInferenceServer } from '../../mock/inferenceServer';
@@ -39,6 +41,7 @@ afterAll(async () => {
 
 useTestDb();
 const holdTransaction = useHeldTransactions();
+const stopWritesTo = useStoppableWrites();
 
 /** A thread with one settled Turn, and a second arrival on a new topic. */
 async function threadWithShift() {
@@ -127,6 +130,46 @@ describe('judgeArrival', () => {
     expect(await chainRowCounts(threadId)).toEqual(once);
     expect(mock.embeddings.requestCount()).toBe(embedsOnce);
     expect(again).toMatchObject({ kind: 'judged', verdict: 'fire', messageId: shiftId });
+  });
+
+  it('judges to the uninterrupted result when rerun after stopping between its embedding and its verdict', async () => {
+    const uninterrupted = await threadWithShift();
+    const callsBefore = mock.embeddings.requestCount();
+    const expected = await judgeArrival({
+      arrival: {
+        userId: uninterrupted.userId,
+        threadId: uninterrupted.threadId,
+        messageId: uninterrupted.shiftId,
+      },
+      threadAnalysisMode: 'heuristic',
+    });
+    const callsOfOneRun = mock.embeddings.requestCount() - callsBefore;
+
+    const { userId, threadId, shiftId } = await threadWithShift();
+    const params = { userId, threadId, messageId: shiftId };
+    const callsAtStart = mock.embeddings.requestCount();
+    const release = await stopWritesTo('analysis.segment_drift_logs');
+    const stopped = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' }).catch(
+      (error: unknown) => error,
+    );
+    await release();
+    expect(stopped).toBeInstanceOf(Error);
+    const afterStop = await chainRowCounts(threadId);
+    expect(afterStop.logs).toBe('0');
+    expect(Number(afterStop.embeddings)).toBeGreaterThan(0);
+    const callsAtStop = mock.embeddings.requestCount();
+
+    const rerun = await judgeArrival({ arrival: params, threadAnalysisMode: 'heuristic' });
+
+    expect(rerun).toMatchObject({ kind: 'judged', verdict: 'fire', messageId: shiftId });
+    expect(expected).toMatchObject({ kind: 'judged', verdict: 'fire' });
+    // Every embedding the first run stored is reused; only what it never reached is paid for.
+    expect(mock.embeddings.requestCount() - callsAtStart).toBe(callsOfOneRun);
+    expect(callsAtStop - callsAtStart).toBeLessThan(callsOfOneRun);
+    expect(await chainRowCounts(threadId)).toEqual(await chainRowCounts(uninterrupted.threadId));
+    expect(await sideCostsOfThread(threadId)).toEqual(
+      await sideCostsOfThread(uninterrupted.threadId),
+    );
   });
 
   it('reports an abandoned arrival and a deleted thread gone', async () => {

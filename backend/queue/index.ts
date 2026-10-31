@@ -1,6 +1,9 @@
 import { env } from '@config/env';
 import { queuePoolSize } from '@db/poolSize';
+import { silenceJobInserts } from '@queries/queue/silenceJobInserts';
 import { type Runner, type WorkerUtils, makeWorkerUtils, run } from 'graphile-worker';
+import { Pool } from 'pg';
+import { logger } from '../src/logger';
 import { keepReleasingStaleLocks } from './staleLocks';
 import { queueRuntime, queueTasks } from './worker';
 
@@ -21,7 +24,19 @@ const FETCHED_JOB_TTL_MS = 60_000;
  */
 const FINISHED_JOBS_BATCH_MS = 250;
 
-let active: { runner: Runner; utils: WorkerUtils; stopSweep: () => void } | null = null;
+/**
+ * How often a worker with nothing to run looks for new jobs. Adding a job
+ * notifies no worker, so this is the longest a new job waits for an idle
+ * worker.
+ */
+const NEW_JOBS_POLL_MS = 100;
+
+let active: {
+  runner: Runner;
+  pool: Pool;
+  utils: WorkerUtils;
+  stopSweep: () => void;
+} | null = null;
 
 /**
  * Installs or upgrades the queue's schema, then starts working every task
@@ -31,7 +46,14 @@ let active: { runner: Runner; utils: WorkerUtils; stopSweep: () => void } | null
  * not run stay queued, untouched, until it does. Jobs run side by side,
  * up to the worker's job concurrency; work on one Thread still serializes
  * on its own lock. A worker fetches up to as many jobs as it runs at once
- * in one query, and finished jobs leave the queue together.
+ * in one query, and finished jobs leave the queue together. A worker
+ * learns of new jobs by looking for them, not by being told.
+ *
+ * The engine works through a pool of its own, whose commits return before
+ * they are flushed to disk. A crash can then lose the engine's latest
+ * bookkeeping: a job it fetched goes back to waiting, and one it finished
+ * runs again. Tasks write through the app's pool, whose commits are
+ * flushed before they return.
  */
 export async function startQueue({ memory, threadAnalysisMode }: Parameters<typeof queueTasks>[0]) {
   if (active) return;
@@ -40,33 +62,49 @@ export async function startQueue({ memory, threadAnalysisMode }: Parameters<type
     schema: QUEUE_SCHEMA,
   });
   await utils.migrate();
+  const stillNotifying = await silenceJobInserts({ schema: QUEUE_SCHEMA });
+  // The queue still works while it notifies; enqueues only take turns again under heavy load.
+  if (stillNotifying.length > 0) {
+    logger.error({ functions: stillNotifying }, 'queue still notifies workers of new jobs');
+  }
   const stopSweep = keepReleasingStaleLocks(utils);
   const runtime = queueRuntime(queueTasks({ memory, threadAnalysisMode }), utils);
-  const runner = await run({
+  const pool = new Pool({
     connectionString: env.DATABASE_URL,
+    max: queuePoolSize(env.WORKER_JOB_CONCURRENCY),
+    options: '-c synchronous_commit=off',
+  });
+  // A connection the server drops must not crash the process, idle or checked out.
+  const logConnectionError = (error: Error) =>
+    logger.error({ err: error }, 'queue pool connection failed');
+  pool.on('error', logConnectionError);
+  pool.on('connect', (client) => client.on('error', logConnectionError));
+  const runner = await run({
+    pgPool: pool,
     schema: QUEUE_SCHEMA,
     concurrency: env.WORKER_JOB_CONCURRENCY,
-    maxPoolSize: queuePoolSize(env.WORKER_JOB_CONCURRENCY),
     noHandleSignals: true,
     preset: {
       worker: {
         localQueue: { size: env.WORKER_JOB_CONCURRENCY, ttl: FETCHED_JOB_TTL_MS },
         completeJobBatchDelay: FINISHED_JOBS_BATCH_MS,
+        pollInterval: NEW_JOBS_POLL_MS,
       },
     },
     taskList: runtime.taskList,
     events: runtime.events,
     logger: runtime.logger,
   });
-  active = { runner, utils, stopSweep };
+  active = { runner, pool, utils, stopSweep };
 }
 
 /** Lets running jobs finish, within the engine's grace period, then stops the worker. */
 export async function stopQueue() {
   if (!active) return;
-  const { runner, utils, stopSweep } = active;
+  const { runner, pool, utils, stopSweep } = active;
   active = null;
   stopSweep();
   await runner.stop();
+  await pool.end();
   await utils.release();
 }

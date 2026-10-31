@@ -419,6 +419,43 @@ describe('submitChat', () => {
     expect(title).not.toBe('Hello world');
   });
 
+  it('queues the titling again on the next exchange when the first one\u2019s queueing was lost', async () => {
+    const userId = randomUUID();
+    await insertUserIfNotExists({ id: userId });
+    const thread = await insertThread({ userId });
+    const lostTitling = { enqueueThreadGenerateTitle: async () => {} };
+    const first = await assertSuccess(
+      await submitChat({
+        userId,
+        threadId: thread.id,
+        content: 'Hello world',
+        judging,
+        titling: lostTitling,
+        memory: memoryOn,
+        threadAnalysisMode: 'heuristic',
+      }),
+    );
+    await drain(first);
+    await first.outcome;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title).toBeNull();
+
+    // The second arrival is a topic shift and pauses; continuing past it exchanges.
+    await submit({ userId, threadId: thread.id, content: 'Explain how espresso machines work' });
+    await drain(
+      await assertSuccess(await retryExchange({ userId, threadId: thread.id }, 'continue')),
+    );
+
+    const deadline = Date.now() + 20_000;
+    let title: string | null = null;
+    while (Date.now() < deadline) {
+      title = (await findThreadByIdAndUser({ userId, threadId: thread.id }))?.title ?? null;
+      if (title) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(title).toBeTruthy();
+  });
+
   it('an interrupted exchange leaves no resume draft; retrying completes it', async () => {
     const userId = randomUUID();
     await insertUserIfNotExists({ id: userId });

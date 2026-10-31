@@ -10,6 +10,7 @@ import { queueTasks } from '@queue/worker';
 import { subscribe } from '@services/events';
 import { memoryOff } from '@test/memory';
 import { drainQueue } from '@test/queue';
+import { sideCostsOfThread } from '@test/sideCosts';
 import { useTestDb } from '@test/test-db';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ServerEvent } from '../../src/types/events';
@@ -186,6 +187,19 @@ describe('titleThread', () => {
       expect(second).toEqual({ kind: 'settled' });
       expect(provider.requests.count).toBe(1);
       expect(await titleOf(userId, threadId)).toBe('Steam Engine Basics');
+    } finally {
+      await provider.stop();
+    }
+  });
+
+  it('records no spend for a title, so a second run cannot record it twice', async () => {
+    const { userId, threadId } = await untitledThreadWithExchange();
+    const provider = await startProvider({ title: 'Steam Engine Basics' });
+    try {
+      await titleThread({ userId, threadId, forced: false });
+      await titleThread({ userId, threadId, forced: false });
+
+      expect(await sideCostsOfThread(threadId)).toEqual([]);
     } finally {
       await provider.stop();
     }

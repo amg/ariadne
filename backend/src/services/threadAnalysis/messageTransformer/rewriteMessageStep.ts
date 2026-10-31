@@ -14,7 +14,7 @@ import {
   parseRewrite,
 } from '../rewrite';
 import type { JudgingMode, LiveArrival } from '../types';
-import { withExpansion } from './liveChain';
+import { arrivalAt, withExpansion } from './liveChain';
 import type { MessageStep, MessageStepInput } from './messageStep';
 import { naiveRefusalDetector } from './naiveRefusalDetector';
 
@@ -267,14 +267,14 @@ async function rewriteArrival({
   arrivalIndex,
   mode,
 }: MessageStepInput & { mode: JudgingMode }) {
-  const arrival = chain.arrivals[arrivalIndex];
+  const arrival = arrivalAt({ chain, position: arrivalIndex });
   if (!arrival) return err('thread_not_found');
   const userMessageId = arrival.userMessage.id;
   if (chain.expansions.has(userMessageId)) return ok(chain);
 
   const decision = await rewriteDecision({
     arrival,
-    prior: chain.arrivals[arrivalIndex - 1] ?? null,
+    prior: arrivalAt({ chain, position: arrivalIndex - 1 }) ?? null,
     mode,
   });
 

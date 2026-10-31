@@ -1,5 +1,5 @@
 import type { RunEvent } from '../../records/index.ts';
-import { cacheEcpuCapOrNull } from '../runData/index.ts';
+import { cacheEcpuCapOrNull, loadMinutesOf } from '../runData/index.ts';
 import type { RunData, RunFacts } from '../types.ts';
 import { chatCountsOf } from './chats.ts';
 import { runFiguresOf } from './figures.ts';
@@ -38,6 +38,7 @@ export function runFactsOf(data: RunData): RunFacts {
     hold: holdFactsOf(data),
     chats: chatCountsOf(data),
     requestLinesWhole: data.slices.every(({ requests }) => requests !== null),
+    loadMinutes: loadMinutesOf(data),
     summary: summarize(data),
     timeline: timelineOf(data),
     markers: markersOf(data),
