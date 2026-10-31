@@ -7,15 +7,23 @@ copied here with their run id. How a run is driven and judged is in
 
 ## Where we stand
 
-Step10 passes on the direct path: `20261030T060616Z-step10-load-direct`.
-It held 10,000 push streams and 2,000 chatters, with no sign-in failures.
-Chat first byte p95 was 480 ms and the busiest generator used 30.8% CPU.
+Step10 passes on the direct path with workers polling for new jobs and
+running 6 at once: `20261031T024203Z-step10-load-direct`. It held 9,999
+push streams and 2,000 chatters, with no failed request. Chat first byte
+p95 was 436 ms, against 480 ms when workers were notified
+(`20261030T060616Z`), and the busiest generator used 28.2% CPU.
+
+Step50 fails only on its first minutes: `20261031T040409Z-step50-load-direct`.
+Its 20-minute hold of 50,000 users and 10,000 chatters had no failed
+request, with chat first byte p95 at 402 ms, as fast as step10. But
+35.2% of sign-ins failed in five minutes of the ramp, while the load
+balancer grew.
 
 ## What strained, and the fix
 
 **Too few jobs ran at once.** The first step50 run queued jobs while
-worker CPU stayed under 54%. Fixed by letting each worker run 16 jobs at
-once.
+worker CPU stayed under 54%. Fixed by letting each worker run several
+jobs at once: 16 at first, and 6 since polling made jobs start in bursts.
 
 **Worker CPU.** With 4 workers, all 16 slots were busy and CPU reached
 99%. Chats waited for the gate's jobs, and first byte p50 rose to 6.3 s
@@ -35,7 +43,14 @@ growth cut 8,800 streams, and another failed 2.81% of sign-ins
 (`20261022T093931Z`). Reserving capacity would stop it, but the account's
 quota of reserved units is 0. Fixed by an unrecorded warm-up of the same
 users before the measured run. A stream that reopens within 10 s no
-longer counts as a failure.
+longer counts as a failure. On step50 the warm-up was not enough. The
+load balancer began the run at about 30 capacity units and grew to
+about 560 during 04:17 to 04:21. In those minutes 27,076 sign-ins
+failed without an answer and 37,053 streams were cut, and nothing failed
+after (`20261031T040409Z`). The warm-up reached about 28,000 of its
+50,000 users, going by the operator's monitor, so it may never have
+grown the load balancer. Whether it did is a guess, since the warm-up
+is not recorded.
 
 **The API kept dead streams for 15 minutes,** Linux's default for
 unacknowledged data. Fixed by making the API's tasks give up after about
@@ -86,23 +101,51 @@ cause is measured. Fixed on aws-prod by adding jobs without a
 notification, with idle workers polling every 100 ms instead. Home
 deployments keep notifying.
 
+**Polling started jobs in bursts.** Two step10 runs of polling on two
+deployments agree (`20261030T105417Z`, `20261031T003201Z`). A worker
+ran 10 or more of its 16 jobs at once in 79 and 88 of the hold's 152
+worker-minutes, against 0 to 2 when notified, though on average it ran
+fewer than 2. A burst shares the worker's one core, so the judge's run
+p50 went from 47 to 88 ms while worker CPU per job fell, and chat first
+byte p95 rose from 480 to 702 ms. Fixed by running 6 jobs at once per
+worker. At the same load the judge's run p95 halved, from 304 to
+147 ms, its wait did not grow, and chat first byte p95 fell to 436 ms
+(`20261031T024203Z`). What bunches the jobs is a guess: eight workers
+polling every 100 ms look about every 12 ms between them, which piles
+up only one or two jobs per look.
+
 ## Still open
 
-- **What polling costs.** On step10, polling raised the gate verdict's
-  p50 from 64 to 120 ms and chat first byte p95 from 494 to 593 ms
-  (`20261030T105417Z`). Jobs wait for a poll, and the jobs that pile up
-  between two polls start together in one worker and slow each other:
-  judge runs went from 47 to 76 ms p50. A local test reproduced the
-  pile-up, and fetching fewer jobs at a time did not shorten it. How
-  much of the AWS rise it explains is a guess until a second run of the
-  same build.
-- **The API's database pool fills in bursts.** Both copies reached all 40
-  connections, with up to 16 waiting, in the run's slowest minute for
-  first byte: p95 878 ms against 467 ms across the hold
-  (`20261030T060616Z`).
+- **What polling still costs.** The middle is slower than notifying:
+  the gate verdict's p50 is 125 ms against 64, and chat first byte p50
+  146 ms against 85 (`20261031T024203Z`, `20261030T060616Z`). Of the
+  judge's extra 50 ms at p50, about 20 ms is waiting for a poll (11 to
+  31 ms) and about 30 ms is running longer (47 to 77 ms). Every
+  worker still reached all 6 of its slots in every minute.
+- **The API's database pool fills in bursts.** One copy had all 40
+  connections in use, with 50 to 74 waiting, in the three minutes when
+  first byte p95 reached 1,001 to 1,980 ms (`20261031T003201Z`). At 6
+  jobs per worker, at most 2 waited (`20261031T024203Z`), but a
+  notified run reached 53 (`20261029T094411Z`). So the cause is not
+  settled.
 - **API CPU climbs across the hold.** The busiest task went from 58% to
-  81% on a flat 4,350 replies a minute (`20261029T053022Z`). It is the
-  nearest limit for step50.
+  81% on a flat 4,350 replies a minute (`20261029T053022Z`). At 6 jobs
+  per worker it held flat, 62% in the first half of the hold and 61% in
+  the second (`20261031T024203Z`). On step50, with ten times the API
+  tasks, the busiest held at 38% in both halves (`20261031T040409Z`),
+  so the API is no longer the nearest limit.
+- **Auth runs unevenly.** During step50's ramp the busiest auth task ran
+  at 85 to 99% CPU while the average stayed under 47%, and sign-ins took
+  up to 5.4 s at the API (`20261031T040409Z`). The API finds the auth
+  tasks by name and keeps its connections, so each API copy may stick to
+  a few of them. That is a guess until each auth task's sign-ins are
+  recorded.
+- **Spend writers wait on each other at step50.** Row lock waits
+  averaged 3.1 sessions, against none on step10, almost all from
+  `addSideCost` and the `message_usage` insert (`20261031T040409Z`).
+  Both add to the day's spend total, which is split into 16 rows, so
+  those rows are the likely source. Jobs did not slow: the judge ran
+  92 ms against 83 ms on step10.
 
 ## Keeping this file useful
 
