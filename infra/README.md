@@ -96,7 +96,7 @@ load run that does not run its whole plan, because it was interrupted or
 failed, stops counting toward that limit; the ledger still lists it, since it
 may have cost something. `reset-budget` clears the day by hand. And
 the safety net deletes the app stack three hours after a raise and the
-load stack 80 minutes after it starts, whether or not anyone remembers.
+load stack 100 minutes after it starts, whether or not anyone remembers.
 
 ## Runs
 
@@ -151,7 +151,7 @@ address to the origin's security group. The rule belongs to the load stack,
 so it goes when the stack goes. `load` deletes the stack once the run is
 sealed, or at once when it fails before the run begins recording. A run that
 could not be sealed keeps its stack for `archive`, and `down` or the safety
-net, 80 minutes after the stack started, takes it then. Nothing needs closing by
+net, 100 minutes after the stack started, takes it then. Nothing needs closing by
 hand. The gateway runs on both paths and is in the run's worst case.
 
 ## Steps

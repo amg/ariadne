@@ -288,7 +288,10 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 900,
       holdSeconds: 1_200,
-      warmUp: { rampSeconds: 480, holdSeconds: WARM_UP_HOLD_SECONDS },
+      // As slow as the run's own ramp. A faster warm-up signs users in
+      // quicker than auth serves them, and stalls before the load balancer
+      // has grown.
+      warmUp: { rampSeconds: 900, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
       egressGbPerHour: 8,
       logsGbPerHour: 3,
@@ -317,7 +320,8 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 1_200,
       holdSeconds: 1_200,
-      warmUp: { rampSeconds: 840, holdSeconds: WARM_UP_HOLD_SECONDS },
+      // As slow as the run's own ramp, as step50's.
+      warmUp: { rampSeconds: 1_200, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
       egressGbPerHour: 15,
       logsGbPerHour: 5,

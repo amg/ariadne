@@ -73,7 +73,7 @@ export const PROJECT_TAG = `${PROJECT}:project`;
 /** How long a raise may live before the safety net deletes it. */
 export const SAFETY_NET = {
   appMinutes: 180,
-  loadMinutes: 80,
+  loadMinutes: 100,
 } as const;
 
 /** A raise is refused once the day's recorded worst cases would pass this. */
