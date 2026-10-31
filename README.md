@@ -128,6 +128,7 @@ check, the tests and the frontend build.
 - **[aws-prod deployment](docs/architecture/aws-prod-deployment.html)** — Raising, running, recovering and the step gates
 - **[Drift maths](docs/maths/)** — How the Drift gate judges a message, how it keeps running totals, and the alternatives considered
 - **[Ideas](docs/ideas/)** — Open explorations
+- **[Coding with AI](docs/coding-with-ai/learnings.md)** — What made design happen up front, and what only cleaned up after
 
 ## Not Done Yet
 

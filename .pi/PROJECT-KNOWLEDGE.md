@@ -23,6 +23,9 @@ truth; nothing here repeats it.
   what we changed, and what we now believe. Read it before planning a run,
   and add to it after reading one.
 - **`docs/ideas/`** — open explorations, high level only.
+- **`docs/coding-with-ai/`** — which settings make an agent make design
+  decisions while it writes the code, rather than in a clean-up later.
+  Read it before setting up a new project's gate.
 - **`docs/maths/`** — how the Drift gate's maths works, told as a story
   (no implementation detail), plus the alternatives considered.
 - **`load/`** — the load harness, split into records (what a run
