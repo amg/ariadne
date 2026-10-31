@@ -8,7 +8,7 @@ This page is the map, and it stays at the level of concepts that change
 rarely.
 
 For how a chat message travels through all of this, see
-[NEW-MESSAGE.md](NEW-MESSAGE.md).
+[new-message.md](new-message.md).
 
 ## 1. The moving parts
 
@@ -54,7 +54,7 @@ server, which is the shape drawn here. It can also run as a process of
 its own, with any number of API and worker copies side by side; they
 then share news and stops through Valkey. Only the two entry points
 start the worker, so choosing between the shapes is configuration.
-[AWS-PROD-ARCHITECTURE.html](../architecture/AWS-PROD-ARCHITECTURE.html) shows that
+[aws-prod-architecture.html](../architecture/aws-prod-architecture.html) shows that
 split shape as deployed.
 
 ### Where each part runs
@@ -364,7 +364,7 @@ from the code, not the HTTP status.
 | Gate gave up after recoverable failures | (seen on the next Retry) | as above | Retry queues a fresh judgment and waits again |
 | Gate gave up fatally | 503 `gate_failed`, plus `gate-failed` on every reconnect | "couldn't check this message", with Retry | the operator fixes the cause and runs `queue:retry-failed` |
 | Browser closed mid-wait | only the wait ends | on return, the connect snapshot shows the arrival's state | Retry; an arrival nobody is watching never gets a reply, so nothing is spent on it |
-| Gate fired | the stream carries only the verdict, then ends | a choice: continue here, or start a new chat | the user decides (see NEW-MESSAGE.md) |
+| Gate fired | the stream carries only the verdict, then ends | a choice: continue here, or start a new chat | the user decides (see new-message.md) |
 | Handover while the old segment's capture runs | 503 `capture_pending`, nothing moved | "Remembering this chat…", and asks again automatically | the capture lands (the Seed includes it) or gives up (the move goes ahead, Facts stay owed) |
 | New message while the last arrival is unanswered or paused | 409 `arrival_unanswered` / `arrival_paused` | composer locked, pointing at Retry or the choice | answer the waiting arrival first |
 | The arrival was answered by another request, or edited away, during the wait | 409 `arrival_answered` / `arrival_abandoned` | error notice; the message stays as stored, no draft comes back | none: the Thread already shows what became of it |

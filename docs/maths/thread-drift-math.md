@@ -50,4 +50,4 @@ If $z$ departs the pack by enough standard deviations, the verdict fires, the se
 
 To ensure our tracker's map is trustworthy, we leave a complete paper trail. Every reading, the criterion it was judged against, and every rewrite decision is stored with its verdict. Retuning the numbers later never changes what an earlier verdict was judged by.
 
-How the live tracker keeps all of this up to date without re-reading the whole hike at every step is told in [DRIFT-GATE-RUNNING-TOTALS.md](DRIFT-GATE-RUNNING-TOTALS.md).
+How the live tracker keeps all of this up to date without re-reading the whole hike at every step is told in [drift-gate-running-totals.md](drift-gate-running-totals.md).

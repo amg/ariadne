@@ -3,7 +3,7 @@
 What strained in each load run, and what fixed it. Run folders live only
 on the operator's machine in `load/.runs/`, so the figures that matter are
 copied here with their run id. How a run is driven and judged is in
-[the load testing architecture](LOAD-TESTING-ARCHITECTURE.html).
+[the load testing architecture](load-testing-architecture.html).
 
 ## Where we stand
 
