@@ -41,9 +41,9 @@ function workerEnvironmentOf(stepName: string) {
 
 describe('the worker of a raised step', () => {
   for (const name of ['step10', 'step50']) {
-    it(`runs sixteen jobs at once on ${name}`, () => {
-      assert.equal(stepNamed(name).services.worker.jobConcurrency, 16);
-      assert.equal(workerEnvironmentOf(name).WORKER_JOB_CONCURRENCY, '16');
+    it(`runs six jobs at once on ${name}`, () => {
+      assert.equal(stepNamed(name).services.worker.jobConcurrency, 6);
+      assert.equal(workerEnvironmentOf(name).WORKER_JOB_CONCURRENCY, '6');
     });
   }
 

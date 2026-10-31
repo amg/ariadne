@@ -149,11 +149,12 @@ const GENERATOR: ServiceSize = { cpu: 1024, memoryMiB: 4096, count: 1 };
 const SEEDING_GENERATOR: ServiceSize = { cpu: 4096, memoryMiB: 8192, count: 1 };
 const WEB: ServiceSize = { cpu: 256, memoryMiB: 512, count: 2 };
 /**
- * Jobs a worker task runs side by side on step50. A worker mostly waits on
- * I/O, so it can run many at once. Step10 carries the same number, so that a
- * step10 run says something about step50's.
+ * Jobs a worker task runs side by side on step50. Jobs that start together
+ * share the task's one core, so a higher number lets one burst of jobs slow
+ * every job in it. Step10 carries the same number, so that a step10 run says
+ * something about step50's.
  */
-const STEP50_WORKER_JOBS_AT_ONCE = 16;
+const STEP50_WORKER_JOBS_AT_ONCE = 6;
 
 /** The load balancer of a step that leaves it to grow on its own. */
 const GROWS_ON_ITS_OWN: Step['loadBalancer'] = { reservedCapacityUnits: null };
