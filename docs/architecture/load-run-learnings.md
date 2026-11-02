@@ -13,11 +13,12 @@ push streams and 2,000 chatters, with no failed request. Chat first byte
 p95 was 436 ms, against 480 ms when workers were notified
 (`20261030T060616Z`), and the busiest generator used 28.2% CPU.
 
-Step50 fails only on its first minutes: `20261031T040409Z-step50-load-direct`.
-Its 20-minute hold of 50,000 users and 10,000 chatters had no failed
-request, with chat first byte p95 at 402 ms, as fast as step10. But
-35.2% of sign-ins failed in five minutes of the ramp, while the load
-balancer grew.
+Step50 passes on the direct path: `20261102T001256Z-step50-load-direct`.
+It held 49,965 push streams and 10,000 chatters, with no failed request.
+All 50,000 sign-ins succeeded at the first attempt, chat first byte p95
+was 448 ms, and the busiest generator used 43.6% CPU. The database, an
+r7g.4xlarge, held flat at 52.9% CPU through the hold, peaking at 54.9%,
+while workers started about 41,700 jobs a minute.
 
 ## What strained, and the fix
 
@@ -43,14 +44,13 @@ growth cut 8,800 streams, and another failed 2.81% of sign-ins
 (`20261022T093931Z`). Reserving capacity would stop it, but the account's
 quota of reserved units is 0. Fixed by an unrecorded warm-up of the same
 users before the measured run. A stream that reopens within 10 s no
-longer counts as a failure. On step50 the warm-up was not enough. The
-load balancer began the run at about 30 capacity units and grew to
-about 560 during 04:17 to 04:21. In those minutes 27,076 sign-ins
-failed without an answer and 37,053 streams were cut, and nothing failed
-after (`20261031T040409Z`). The warm-up reached about 28,000 of its
-50,000 users, going by the operator's monitor, so it may never have
-grown the load balancer. Whether it did is a guess, since the warm-up
-is not recorded.
+longer counts as a failure. On step50 a warm-up faster than the run
+was not enough. It reached about 28,000 of its 50,000 users, the load
+balancer began the run at about 30 capacity units, and while it grew to
+about 560, 27,076 sign-ins failed without an answer
+(`20261031T040409Z`). Fixed by ramping the warm-up as slowly as the
+run. The load balancer then began the run at about 560 units, and no
+sign-in failed (`20261102T001256Z`).
 
 **The API kept dead streams for 15 minutes,** Linux's default for
 unacknowledged data. Fixed by making the API's tasks give up after about
@@ -135,17 +135,26 @@ up only one or two jobs per look.
   tasks, the busiest held at 38% in both halves (`20261031T040409Z`),
   so the API is no longer the nearest limit.
 - **Auth runs unevenly.** During step50's ramp the busiest auth task ran
-  at 85 to 99% CPU while the average stayed under 47%, and sign-ins took
-  up to 5.4 s at the API (`20261031T040409Z`). The API finds the auth
-  tasks by name and keeps its connections, so each API copy may stick to
-  a few of them. That is a guess until each auth task's sign-ins are
-  recorded.
+  at 66 to 92% CPU while the average stayed at 27 to 30%
+  (`20261102T001256Z`). Sign-ins were fast all the same, p95 350 ms at
+  the API, but CPU scaling would react to the one hot task. The API
+  finds the auth tasks by name and keeps its connections, so each API
+  copy may stick to a few of them. That is a guess until each auth
+  task's sign-ins are recorded.
 - **Spend writers wait on each other at step50.** Row lock waits
-  averaged 3.1 sessions, against none on step10, almost all from
-  `addSideCost` and the `message_usage` insert (`20261031T040409Z`).
+  averaged 3.9 sessions over the hold, against none on step10, and rose
+  from 3.0 in its first half to 4.8 in its second (`20261102T001256Z`).
+  They are almost all `addSideCost` and the `message_usage` insert.
   Both add to the day's spend total, which is split into 16 rows, so
   those rows are the likely source. Jobs did not slow: the judge ran
   92 ms against 83 ms on step10.
+- **Chat's slowest replies arrive late outside the app.** In step50's
+  hold, chat first byte p95 averaged 566 ms with minutes up to 987 ms,
+  against 402 ms and 713 ms in the previous step50 hold
+  (`20261031T040409Z`). The median held at 144 ms, and the app's own
+  first token p95 stayed between 250 and 400 ms in every minute
+  (`20261102T001256Z`). Whether the gap is in a generator, an API copy
+  or the load balancer is not recorded.
 
 ## Keeping this file useful
 
