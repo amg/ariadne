@@ -166,7 +166,7 @@ export const STEPS: Record<StepName, Step> = {
   seed: {
     name: 'seed',
     deploy: REPLACE_DEPLOY,
-    database: { instanceClass: 'm7g.large', storageGiB: 400, source: 'empty' },
+    database: { instanceClass: 'm7g.large', storageGiB: 50, source: 'empty' },
     cache: { maxStorageGb: 1, maxEcpuPerSecond: 5_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {
@@ -197,7 +197,7 @@ export const STEPS: Record<StepName, Step> = {
   smoke: {
     name: 'smoke',
     deploy: REPLACE_DEPLOY,
-    database: { instanceClass: 'm7g.large', storageGiB: 400, source: 'seedSnapshot' },
+    database: { instanceClass: 'm7g.large', storageGiB: 50, source: 'seedSnapshot' },
     cache: { maxStorageGb: 1, maxEcpuPerSecond: 5_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {
@@ -227,7 +227,7 @@ export const STEPS: Record<StepName, Step> = {
   step10: {
     name: 'step10',
     deploy: REPLACE_DEPLOY,
-    database: { instanceClass: 'm7g.xlarge', storageGiB: 400, source: 'seedSnapshot' },
+    database: { instanceClass: 'm7g.xlarge', storageGiB: 50, source: 'seedSnapshot' },
     cache: { maxStorageGb: 1, maxEcpuPerSecond: 25_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {
@@ -263,7 +263,7 @@ export const STEPS: Record<StepName, Step> = {
     deploy: REPLACE_DEPLOY,
     // Larger than step50 is expected to need, so that a run reads the
     // database's demand at the full chat rate instead of its ceiling.
-    database: { instanceClass: 'r7g.4xlarge', storageGiB: 400, source: 'seedSnapshot' },
+    database: { instanceClass: 'r7g.4xlarge', storageGiB: 50, source: 'seedSnapshot' },
     cache: { maxStorageGb: 5, maxEcpuPerSecond: 250_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {
@@ -302,7 +302,7 @@ export const STEPS: Record<StepName, Step> = {
   step100: {
     name: 'step100',
     deploy: REPLACE_DEPLOY,
-    database: { instanceClass: 'r7g.4xlarge', storageGiB: 400, source: 'seedSnapshot' },
+    database: { instanceClass: 'r7g.4xlarge', storageGiB: 50, source: 'seedSnapshot' },
     cache: { maxStorageGb: 10, maxEcpuPerSecond: 500_000 },
     loadBalancer: GROWS_ON_ITS_OWN,
     services: {
@@ -337,7 +337,7 @@ export const STEPS: Record<StepName, Step> = {
   'step-prod': {
     name: 'step-prod',
     deploy: SURGE_DEPLOY,
-    database: { instanceClass: 'r7g.large', storageGiB: 400, source: 'seedSnapshot' },
+    database: { instanceClass: 'r7g.large', storageGiB: 50, source: 'seedSnapshot' },
     cache: { maxStorageGb: 2, maxEcpuPerSecond: 50_000 },
     // Reserve ahead of a known peak; idle, a reservation costs as much as it would at that peak.
     loadBalancer: GROWS_ON_ITS_OWN,
