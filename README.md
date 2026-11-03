@@ -1,135 +1,142 @@
 # Ari
 
-A self-hosted chat application with streaming replies, per-Turn cost
-tracking, topic-drift awareness and opt-in memory. Everything but
-inference runs in Docker on your own hardware, so your data stays yours.
+Ari is a chat app for talking to AI models, built to run on your own
+hardware. It shows what every reply costs, notices when you change the
+subject, and, if you let it, remembers what matters about you for your next
+conversation. Everything except the AI model itself runs on your own
+machines, so your conversations stay yours.
 
-## What You Get
+## What It Does
 
-- **Chat** — Streaming Exchanges over SSE, multiple Threads, edit and Retry
-- **Cost visibility** — What each Turn costs in tokens and USD, with a running total per Thread
-- **User accounts** — Email and password sign-in, Threads isolated per user
-- **Thread health** — Topic drift detection, so a Thread that wanders off its topic is noticed before the reply
-- **Memory (opt-in)** — Facts captured as a conversation moves on, and fresh Threads seeded with what mattered before
-- **A daily spend budget** — A hard cap on what the deployment can spend on inference each day
+- **Chat** — Replies appear as they are written. Keep several conversations
+  (Threads), edit a message, or ask for a reply again.
+- **Notices a change of subject** — Before it replies, Ari checks whether
+  your message still belongs in the conversation. If it doesn't, Ari pauses
+  and asks whether you'd like to start a new Thread. The check is maths
+  rather than an AI's opinion. A topic is tracked as a series of embedding
+  vectors with a centre of gravity, and each new message is measured by its
+  cosine distance from that centre. A message more than two standard
+  deviations beyond what is normal for the topic counts as a change of
+  subject, and a second, slower check catches gradual drift. Every verdict is
+  stored with the numbers it was judged on.
+- **Shows the cost** — What each reply costs in tokens and US dollars, with a
+  running total for every Thread.
+- **Caps the spending** — A hard daily limit on what the whole deployment can
+  spend on the AI model.
+- **Memory (opt-in)** — When a topic ends, Ari notes facts about you from your
+  own words, and new Threads start with them. You can see, edit and remove
+  them.
+- **Accounts** — Email and password sign-in, and each person sees only their
+  own Threads.
 
-## Quick Start
+## How It Fits Together
 
-### Development
+The diagram shows aws-prod, the scaled-out deployment the load tests run
+against. Each service there runs in as many copies as the load needs.
 
-The database and auth run in Docker; the app runs on your machine for fast iteration.
-
-```bash
-cp .env.dev.example .env          # one-time; fill in your API key
-docker compose -f compose.dev.yml --env-file .env up -d
-npm run migrate
-npm run dev
+```mermaid
+flowchart LR
+  browser([Browser]) -->|HTTPS| edge[Cloudflare]
+  subgraph aws [AWS]
+    alb[Load balancer]
+    web["Web × N<br/>nginx serving the React app"]
+    api["API × N<br/>Fastify"]
+    worker["Worker × N<br/>graphile-worker"]
+    auth["Auth × N<br/>SuperTokens"]
+    db[("Postgres<br/>RDS, with pgvector")]
+    bus[("Valkey<br/>ElastiCache")]
+  end
+  edge --> alb
+  alb -->|pages| web
+  alb -->|/api| api
+  api -. live updates .-> browser
+  api -->|messages, queued work| db
+  worker -->|picks up queued work| db
+  api <-->|news between copies| bus
+  worker --> bus
+  api --> auth
+  api --> ai["AI provider<br/>mocked in load tests"]
+  worker --> ai
 ```
 
-Open `http://localhost:5173`.
+The API answers requests and keeps a live connection open to each browser
+tab. Work that can take a while, such as checking a message's topic,
+titling a Thread or capturing Facts, goes on a queue in Postgres, and the
+worker picks it up. When the worker finishes, the API copy holding that
+user's connection hears about it through Valkey and tells the browser.
 
-### Staging
-
-The full container build, to exercise the exact images before prod. It shares
-`.env` and its ports with dev, so run one or the other:
-
-```bash
-docker compose -f compose.dev.yml --env-file .env down
-docker compose -f compose.staging.yml --env-file .env up -d
-npm run migrate
-```
-
-### Production (Cloudflare Tunnel)
-
-No ports are exposed to the internet; a Cloudflare Tunnel routes your domain to
-the `frontend` container, which joins an existing external `cloudflare-network`.
-
-```bash
-cp .env.prod.example .env.prod    # one-time; fill in credentials and the spend budget
-ENV_FILE=.env.prod npm run migrate:prod
-docker compose -f compose.prod.yml --env-file .env.prod up -d
-```
-
-The backend runs its job queue in Postgres and installs the queue's schema on
-boot, so the database user needs `CREATE` on the database. A job that runs out
-of attempts stays failed (a chat whose drift check failed shows "couldn't check
-this message") until you fix the cause and put it back in line:
-
-```bash
-ENV_FILE=.env.prod npm run queue:retry-failed
-```
-
-### aws-prod
-
-A multi-copy production deployment on AWS, raised only for load tests and torn
-down afterwards. See [`infra/README.md`](infra/README.md).
-
-## Configuration
-
-`.env` configures dev and staging; `.env.prod` configures production. Both are
-gitignored; the `.example` files list every variable with its meaning. The ones
-that matter most:
-
-| Variable | What it does |
-|---|---|
-| `DATABASE_URL` or `DB_*` | Postgres connection |
-| `DEEPINFRA_API_KEY` | The inference provider's key |
-| `MOCK_AI_BASE_URL` | Use the mock inference server instead (`backend/mock`) |
-| `DAILY_SPEND_BUDGET_USD` | The daily spend cap; unset means no cap |
-| `DEFAULT_MODEL`, `TITLING_MODEL`, `REWRITE_MODEL`, `JUDGE_MODEL`, `MEMORY_MODEL` | The model for each task |
-| `THREAD_ANALYSIS_MODE` | The drift gate: `off`, `heuristic` (default) or `always` |
-| `FEATURE_MEMORY` | Turns Memory on; off by default |
-
-Feature toggles are read at boot, so a change needs a backend restart.
-
-## Testing
-
-```bash
-cd backend && npm test
-```
-
-Tests run against real Postgres, never mocks, in a dedicated `chatbot_test`
-database that is created next to the one configured in `.env` (or at
-`TEST_DATABASE_URL`). Test files run in parallel, each on its own clone of it,
-so the database user needs `CREATEDB`. `npm run gate` at the root runs every
-check, the tests and the frontend build.
+At home everything is smaller. The API and the worker run as one process, so
+their news stays inside it and there is no Valkey. Cloudflare reaches the
+home server through a tunnel rather than a load balancer, and nginx passes
+`/api` on to the backend.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React, React Router, Vite, TypeScript |
+| Frontend | React, React Router, Vite, Tailwind, TypeScript |
 | Backend | Node.js, Fastify, Kysely, TypeScript |
 | Database | PostgreSQL with pgvector |
 | Background work | graphile-worker (in Postgres) |
+| Live updates | Server-sent events, with Valkey between backend copies |
 | Auth | SuperTokens (self-hosted) |
-| AI | Vercel AI SDK, any OpenAI-compatible provider |
-| Deployment | Docker Compose; CDK and Terraform for aws-prod |
+| AI | Vercel AI SDK, with DeepInfra as the provider |
+| Home deployment | Docker Compose behind a Cloudflare Tunnel |
+| AWS deployment | CDK (ECS Fargate, RDS, ElastiCache, load balancer); Terraform for Cloudflare |
+| Load testing | Own harness: virtual users on Fargate Spot, results judged from CloudWatch and the app's own records |
+| Checks | Vitest, Biome, knip, dependency-cruiser, Lefthook |
+
+## Testing
+
+Tests run against a real Postgres, not mocks. How to run them is in
+[the setup guide](docs/setup.md#running-the-tests).
+
+Load runs drive aws-prod, or a home deployment, with virtual users from
+`load/`. Each run is sealed into a folder of records and judged against
+targets fixed when it starts. The largest so far held 50,000 signed-in users,
+10,000 of them chatting, without a failed request. What each run found is in
+[the load run learnings](docs/architecture/load-run-learnings.md).
+
+## Running It
+
+Development, staging and production at home run on Docker Compose, and
+aws-prod is raised from code for load tests. The steps, configuration and
+test setup are in [the setup guide](docs/setup.md).
 
 ## Project Structure
 
 ```
 ├── frontend/   React app
 ├── backend/    API, background worker, mock inference server
-├── infra/      aws-prod: CDK, Terraform, load generator, operator scripts
+├── lib/        The API contract and metrics shared by every app
+├── load/       Load harness: virtual users, run records, verdicts
+├── infra/      aws-prod: CDK stacks, Terraform for Cloudflare, operator scripts
 ├── scripts/    Repository checks
 ├── adrs/       Architecture decisions
-├── docs/       Flows, architecture, ideas
+├── docs/       Flows, architecture, maths, ideas
+├── .pi/        Agent skills
 └── CONTEXT.md  Domain vocabulary
 ```
 
 ## Documentation
 
+- **[Setup guide](docs/setup.md)** — Running Ari at home, configuring it, and running its tests
 - **[Domain vocabulary](CONTEXT.md)** — The terms (Threads, Turns, Drift, Facts, Seeds, Handovers) the codebase assumes everywhere
 - **[Architecture decisions](adrs/)** — Why the key technical choices were made
 - **[A new message in a Thread](docs/flows/new-message.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
 - **[Background work](docs/flows/background-work.md)** — The queue, the event bus, push to the browser, and how failures surface
+- **[Drift maths](docs/maths/)** — How the Drift gate judges a message, and how it keeps running totals
 - **[aws-prod architecture](docs/architecture/aws-prod-architecture.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
-- **[aws-prod deployment](docs/architecture/aws-prod-deployment.html)** — Raising, running, recovering and the step gates
-- **[Drift maths](docs/maths/)** — How the Drift gate judges a message, how it keeps running totals, and the alternatives considered
-- **[Ideas](docs/ideas/)** — Open explorations
-- **[Coding with AI](docs/coding-with-ai/learnings.md)** — What made design happen up front, and what only cleaned up after
+- **[Load testing architecture](docs/architecture/load-testing-architecture.html)** — How a load run is driven, recorded and judged
+- **[What the load runs taught us](docs/architecture/load-run-learnings.md)** — What strained in each run, and the fix
 
 ## Not Done Yet
 
 - **Memory recall per reply** — Facts are captured and fresh Threads are seeded, but relevant Facts are not yet retrieved into each reply by similarity
+
+## The Name
+
+Ari is short for Ariadne. In the Greek myth, she gave Theseus a ball of
+thread so he could find his way back out of the labyrinth. Ari's
+conversations are Threads too. It notices when one wanders off its topic,
+and its memory helps you find your way back.

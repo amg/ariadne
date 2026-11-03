@@ -72,8 +72,7 @@
 <h1>Load testing architecture: generators, supervision, records and verdicts</h1>
 <p class="sub">How a load run is driven, watched, recorded and judged, on aws-prod and on the home machine (cubi), and why
 the harness is shaped the way it is. What aws-prod itself is made of is in
-<a href="aws-prod-architecture.html">aws-prod-architecture.html</a>, and how it is raised is in
-<a href="aws-prod-deployment.html">aws-prod-deployment.html</a>. The commands are in
+<a href="aws-prod-architecture.html">aws-prod-architecture.html</a>. How it is raised, and the commands, are in
 <a href="../../infra/README.md">infra/README.md</a>.
 <code>&lt;project&gt;</code> stands for the operator's <code>AWS_PROD_PROJECT</code>.</p>
 
@@ -156,7 +155,7 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <text x="644" y="164" class="ts">CloudWatch dashboard</text>
   <rect x="788" y="130" width="148" height="50" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="798" y="148" class="t" font-weight="600">Safety net</text>
-  <text x="798" y="164" class="ts">EventBridge 5 min → Lambda</text>
+  <text x="798" y="164" class="ts">EventBridge schedule → Lambda</text>
   <rect x="634" y="188" width="302" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="644" y="206" class="t" font-weight="600">ECR · load image</text>
   <text x="644" y="222" class="ts">same tag as the app images of the raise</text>
@@ -168,16 +167,16 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <text x="24" y="310" class="ts">ECS cluster with FARGATE and FARGATE_SPOT providers</text>
   <text x="24" y="324" class="ts">Container Insights on</text>
   <rect x="24" y="334" width="84" height="54" rx="6" fill="#fff" stroke="#6e56cf"/>
-  <text x="32" y="352" class="t">generator 0</text><text x="32" y="367" class="ts">1 vCPU · 4 GiB</text><text x="32" y="380" class="ts">Spot</text>
+  <text x="32" y="352" class="t">generator 0</text><text x="32" y="367" class="ts">one small task</text><text x="32" y="380" class="ts">Spot</text>
   <rect x="116" y="334" width="84" height="54" rx="6" fill="#fff" stroke="#6e56cf"/>
-  <text x="124" y="352" class="t">generator 1</text><text x="124" y="367" class="ts">~5,000 users</text><text x="124" y="380" class="ts">Spot</text>
+  <text x="124" y="352" class="t">generator 1</text><text x="124" y="367" class="ts">a slice of users</text><text x="124" y="380" class="ts">Spot</text>
   <rect x="208" y="334" width="88" height="54" rx="6" fill="#fff" stroke="#6e56cf" stroke-dasharray="4 3"/>
   <text x="216" y="352" class="t">gen. 1 try 2</text><text x="216" y="367" class="ts">same slice</text><text x="216" y="380" class="ts">On-Demand?</text>
   <rect x="24" y="404" width="272" height="44" rx="7" fill="#fff" stroke="#6e56cf"/>
   <text x="34" y="422" class="t" font-weight="600">NAT gateway · one Elastic IP</text>
   <text x="34" y="437" class="ts">the one address the origin lets in on the direct path</text>
   <text x="24" y="466" class="ts">secrets: load key, client cert and key (SSM), password</text>
-  <text x="24" y="480" class="ts">stop timeout 120 s = Spot's warning</text>
+  <text x="24" y="480" class="ts">stop timeout = Spot's warning</text>
 
   <!-- app stack -->
   <rect x="340" y="296" width="270" height="290" rx="10" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
@@ -268,7 +267,7 @@ stack, the vault, or CloudWatch surviving.</figcaption>
   <tr><td>ElastiCache Serverless (Valkey)</td><td>The push bus and gate cache under load; ECPU, throttling and latency are watched.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/cache.jsonl</code></td></tr>
   <tr><td>Application Auto Scaling</td><td>Scales API, worker and auth on scaling steps; its activity is part of the run's record.</td><td><span class="tag t-app">app</span></td><td><code>events/aws-events.jsonl</code></td></tr>
   <tr><td>S3 (the vault)</td><td>Outlives every stack: the spend ledger, the trust store, Terraform state, and the load balancer's access logs. It holds no runs.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
-  <tr><td>EventBridge and Lambda</td><td>The safety net: every five minutes it deletes the load stack an hour after it started and the app stack three hours after its raise.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
+  <tr><td>EventBridge and Lambda</td><td>The safety net: on a schedule it deletes the load stack and the app stack once each outlives its limit.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
 </table>
 <p class="note">Cloudflare is not AWS, but it is the second load path: <code>load --edge</code> sends the generators through it
 with the load key header, as users arrive. Cloudflare's own logs are not part of a run's record.</p>
@@ -353,7 +352,7 @@ The load stack itself is in <code>infra/lib/load/</code>, and the shell commands
   <!-- generators -->
   <rect x="378" y="144" width="80" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="386" y="161" class="ls">ramp</text>
   <rect x="458" y="144" width="224" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="466" y="161" class="ls">hold · request + state lines stream to Logs</text>
-  <rect x="528" y="174" width="18" height="14" fill="#fbe9e1" stroke="#c2542e"/><text x="550" y="185" class="ls" fill="#c2542e">slice lost → replacement ramps back over ~1 min, holds what is left</text>
+  <rect x="528" y="174" width="18" height="14" fill="#fbe9e1" stroke="#c2542e"/><text x="550" y="185" class="ls" fill="#c2542e">slice lost → replacement ramps back, holds what is left</text>
   <!-- archive -->
   <rect x="688" y="204" width="256" height="26" rx="5" fill="#e3edf8" stroke="#2563a8"/><text x="696" y="221" class="ls">wait for the last minute's metrics · collect · self-check</text>
   <!-- run folder -->
@@ -406,34 +405,28 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
   <div class="card">
     <h3 style="margin-top:0">A generator</h3>
     <ul>
-      <li>One Node process, so one core. It runs on 1 vCPU / 4 GiB and carries about 5,000 users, so many small generators
+      <li>One Node process, so one core. It runs on a small task and carries one slice of the users, so many small generators
       beat a few big ones.</li>
       <li>Brings its users up evenly over the ramp from the moment it starts, holds them, then stops them.</li>
       <li>Writes a request line per request, a state line every few seconds from three levels it keeps (users signed in,
       push streams open, chatters active), and one end report: its request counts by kind and its phases.</li>
       <li>When it is told to stop (SIGTERM from Spot or the supervisor), it stops its users and prints its report marked
-      <i>interrupted</i>. The container gets the full 120 s Spot allows.</li>
+      <i>interrupted</i>. The container gets the full warning Spot allows.</li>
       <li>On the direct path it presents its client certificate. Requests still name the public hostname, so the
       origin's mutual TLS and host rules hold.</li>
     </ul>
   </div>
 </div>
-<table>
-  <tr><th>Step</th><th>Users</th><th>Chatting share</th><th>Generators</th><th>Ramp / hold</th><th>Placement</th></tr>
-  <tr><td>smoke</td><td>1,000</td><td>20%</td><td>4 (so a lost one can be replaced while the others carry on)</td><td>2 min / 10 min</td><td>Spot</td></tr>
-  <tr><td>step10</td><td>10,000</td><td>20%</td><td>2</td><td>10 min / 20 min</td><td>Spot</td></tr>
-  <tr><td>step50</td><td>50,000</td><td>20%</td><td>10</td><td>15 min / 20 min</td><td>Spot</td></tr>
-  <tr><td>step100</td><td>100,000</td><td>20%</td><td>20</td><td>20 min / 20 min</td><td>Spot</td></tr>
-  <tr><td>seed</td><td colspan="5">Creates the 100,000 accounts once, On-Demand on larger tasks, not supervised. It is not a load run and is not archived.</td></tr>
-</table>
-<p class="note">The step file is the source of truth for every figure; this table is a reading aid.</p>
+<p class="note">Each step's users, chatting share, generators, ramp and hold live in <code>infra/config/steps.ts</code>.
+<code>smoke</code> runs several generators, so a lost one can be replaced while the others carry on. <code>seed</code> creates the
+population once, On-Demand on larger tasks, unsupervised; it is not a load run and is not archived.</p>
 
 <h2>6. Supervision: who watches the load, and what happens when something breaks</h2>
 <p>Supervision has four layers. Each catches what the one above it cannot.</p>
 <div class="pipe">
   <div class="s load"><b>1 · Supervisor</b>per slice, in the harness: launch, watch, replace, give up</div><div class="a">›</div>
   <div class="s op"><b>2 · Load command</b>stop every generator, seal, rebuild; then the shell deletes the stack</div><div class="a">›</div>
-  <div class="s core"><b>3 · Safety net</b>Lambda every 5 min: delete load stack at 1 h, app stack at 3 h</div><div class="a">›</div>
+  <div class="s core"><b>3 · Safety net</b>a scheduled Lambda deletes the load and app stacks once they outlive their limits</div><div class="a">›</div>
   <div class="s cw"><b>4 · People</b>dashboard and monitor against the pass lines</div>
 </div>
 
@@ -446,14 +439,14 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
   <rect x="190" y="20" width="160" height="40" rx="8" fill="#fff" stroke="#5b6b7c"/><text x="200" y="45" class="d">finished its plan?</text>
   <rect x="190" y="90" width="160" height="40" rx="8" fill="#fff" stroke="#5b6b7c"/><text x="200" y="115" class="d">outlasted its time?</text>
   <rect x="190" y="160" width="160" height="40" rx="8" fill="#fff" stroke="#5b6b7c"/><text x="200" y="185" class="d">stopped 4 times already?</text>
-  <rect x="190" y="230" width="160" height="40" rx="8" fill="#fff" stroke="#5b6b7c"/><text x="200" y="255" class="d">under 5 s of stage left?</text>
+  <rect x="190" y="230" width="160" height="40" rx="8" fill="#fff" stroke="#5b6b7c"/><text x="200" y="255" class="d">almost no stage left?</text>
   <rect x="420" y="20" width="200" height="40" rx="8" fill="#e2f2ea" stroke="#2e7d5b"/><text x="430" y="45" class="dh">done: keep its report</text>
   <rect x="420" y="90" width="200" height="40" rx="8" fill="#fbe9e1" stroke="#c2542e"/><text x="430" y="115" class="dh">give up: stop all, end the run</text>
   <rect x="420" y="160" width="200" height="40" rx="8" fill="#fbe9e1" stroke="#c2542e"/><text x="430" y="185" class="dh">give up: stop all, end the run</text>
   <rect x="420" y="230" width="200" height="40" rx="8" fill="#fbf3d6" stroke="#a07800"/><text x="430" y="255" class="dh">leave the slice down (a gap)</text>
   <rect x="680" y="200" width="270" height="90" rx="8" fill="#ece7fb" stroke="#6e56cf"/><text x="692" y="222" class="dh">replace on the same slice</text>
   <text x="692" y="240" class="d">next attempt number, Spot then On-Demand</text>
-  <text x="692" y="256" class="d">ramp back over ~1 min, hold what is left</text>
+  <text x="692" y="256" class="d">ramp back, hold what is left</text>
   <text x="692" y="272" class="d">record why the last one stopped</text>
   <path class="da" d="M150,135 L188,40"/><path class="da" d="M150,145 L188,110"/>
   <path class="da" d="M350,40 L418,40"/><text x="370" y="34" class="d">yes</text>
@@ -470,7 +463,7 @@ does, so a replacement only fills the time left. A run whose slice cannot be kep
 because a partial fleet would measure the wrong load.</figcaption>
 </figure>
 <ul>
-  <li><b>Watching.</b> One poll of ECS every 10 s covers every task. A generator counts as launched once its task is RUNNING,
+  <li><b>Watching.</b> One regular poll of ECS covers every task. A generator counts as launched once its task is RUNNING,
   so its plan counts from when it can start.</li>
   <li><b>Timeouts.</b> A generator that runs past its ramp and hold plus a two-minute grace is stopped as <i>timed out</i>.</li>
   <li><b>Why a task stopped.</b> ECS forgets a stopped task about an hour later. The supervisor therefore writes each task's
@@ -514,8 +507,8 @@ whatever is missing as incomplete instead.</p>
 forced. <code>sweep</code> lists anything that outlived its teardown.</p>
 
 <h3>6.3 The safety net and the cost guard</h3>
-<p>The safety net runs every five minutes and deletes the load stack an hour after it starts and the app stack three hours
-after its raise, whoever forgot them. Because the direct path's ingress rule belongs to the load stack, the safety net
+<p>The safety net runs on a schedule and deletes the load stack and the app stack once each outlives its limit, counted
+from the load stack's start and the app's raise, whoever forgot them. Because the direct path's ingress rule belongs to the load stack, the safety net
 closes the way in too, even if the operator's machine dies mid-run. Separately, each raise and each load run claims its
 worst-case cost in a daily ledger in the vault, and a claim that would pass the day's limit is refused. A load run that
 does not complete its plan releases its claim: the claim stays in the ledger, marked, and no longer counts toward the
@@ -530,10 +523,10 @@ tasks. Its logs and metrics survive for a while, because their groups are retain
 <p>The <code>&lt;project&gt;-load</code> dashboard lives in core, so it exists before any raise. Its rows, top to bottom:</p>
 <table>
   <tr><th>Row</th><th>What it shows</th><th>From</th><th>Pass line drawn</th></tr>
-  <tr><td>What users see</td><td>Users signed in, push streams open, chatters active; chat first byte p50/p95/p99; failures per minute by kind</td><td><code>Ari/Load</code> (generator lines)</td><td>p95 2.5 s; the step's push streams and chatters to hold</td></tr>
-  <tr><td>What the generators see against their limits</td><td>Sign-in failure share, generator CPU and memory</td><td><code>Ari/Load</code>, Container Insights</td><td>0.5% sign-in failures, 70% CPU</td></tr>
+  <tr><td>What users see</td><td>Users signed in, push streams open, chatters active; chat first byte p50/p95/p99; failures per minute by kind</td><td><code>Ari/Load</code> (generator lines)</td><td>the step's first-byte limit; its push streams and chatters to hold</td></tr>
+  <tr><td>What the generators see against their limits</td><td>Sign-in failure share, generator CPU and memory</td><td><code>Ari/Load</code>, Container Insights</td><td>the step's sign-in failure and CPU limits</td></tr>
   <tr><td>What the app sees</td><td>Push streams per API task, time jobs wait in the queue, jobs per minute by queue task</td><td><code>Ari/App</code> (backend lines)</td><td>—</td></tr>
-  <tr><td>The Drift gate</td><td>Verdicts by outcome, waits that hit the limit as a share</td><td><code>Ari/App</code></td><td>0.5%</td></tr>
+  <tr><td>The Drift gate</td><td>Verdicts by outcome, waits that hit the limit as a share</td><td><code>Ari/App</code></td><td>the step's limit</td></tr>
   <tr><td>How many tasks run</td><td>Running, desired, pending per service</td><td>Container Insights</td><td>—</td></tr>
   <tr><td>Fargate vCPU against its quota</td><td>On-Demand and Spot vCPU in use, with the live quota</td><td><code>AWS/Usage</code>, <code>SERVICE_QUOTA()</code></td><td>the quota itself</td></tr>
   <tr><td>Load balancer, services, database, cache</td><td>Requests, errors, latency, connections; service CPU/memory; database CPU, sessions, connections, IOPS, storage; cache ECPU, throttling, latency</td><td>AWS namespaces</td><td>the step's cache ECPU cap</td></tr>
@@ -564,7 +557,7 @@ archive keeps those as CloudWatch delivers them, a point a minute.</p>
   <tr><td>API</td><td>request, one per request to the API</td><td>when the response ended, method, the route's pattern (never the address with its ids; none for a request no route took), status, server time</td><td>none; the route against the generator's own timings separates the app's time from the network's and the balancer's</td></tr>
   <tr><td>API</td><td>exchange, one per chat request</td><td>arrival, gate verdict and when, whether a retry replayed it, first token, how it ended. No message text.</td><td><code>GateVerdicts</code> by <code>Verdict</code>; <code>GateWaitsAtLimit</code>. A replayed verdict publishes neither.</td></tr>
   <tr><td>Worker</td><td>job, one per attempt</td><td>queue task, queued, started, finished, outcome, error class and code</td><td><code>JobsRun</code> by <code>Task</code>; <code>JobWaitMs</code></td></tr>
-  <tr><td>API and worker</td><td>state, every 5 s on aws-prod, 20 s elsewhere</td><td>push streams open on this copy, oldest due job's wait, and what says which part of a copy is full: the event loop's delay since the last line, heap and resident memory, database connections in use and requests waiting for one, worker slots busy of those it has, and sends and subscriptions between copies that failed. A figure a copy does not measure is null.</td><td><code>PushStreamsOpen</code>, <code>QueueWaitMs</code>, <code>EventLoopDelayP99Ms</code>, <code>HeapUsedBytes</code>, <code>ResidentBytes</code>, <code>DbConnectionsInUse</code>, <code>DbConnectionsWaiting</code>, <code>WorkerSlotsBusy</code>, <code>PushBusFailures</code></td></tr>
+  <tr><td>API and worker</td><td>state, every few seconds</td><td>push streams open on this copy, oldest due job's wait, and what says which part of a copy is full: the event loop's delay since the last line, heap and resident memory, database connections in use and requests waiting for one, worker slots busy of those it has, and sends and subscriptions between copies that failed. A figure a copy does not measure is null.</td><td><code>PushStreamsOpen</code>, <code>QueueWaitMs</code>, <code>EventLoopDelayP99Ms</code>, <code>HeapUsedBytes</code>, <code>ResidentBytes</code>, <code>DbConnectionsInUse</code>, <code>DbConnectionsWaiting</code>, <code>WorkerSlotsBusy</code>, <code>PushBusFailures</code></td></tr>
 </table>
 <p class="note">Times are UTC with milliseconds, from the clock of whatever recorded them. Durations come from a monotonic
 clock. Every API and worker line names the copy of the backend that wrote it: its ECS task on aws-prod.</p>
@@ -614,9 +607,8 @@ on aws-prod and on cubi.</p>
   <li><b>Limits come from the manifest.</b> A run records its limits when it begins, worked out from its step and its
   configuration, and is judged by them. <i>Home</i> steps limit host CPU, memory, first byte and errors. <i>Smoke</i> has
   none: smoke proves the tools, so it passes on its records being whole, agreeing and covering its plan. The sized steps,
-  step10 and step50, scale their limits with the step: push streams and chatters held at least 98% of the step's through
-  the hold, and at most 2.5 s chat first byte p95, 0.5% gate waits at the limit, 0.5% sign-in failures and 70% generator
-  CPU. A run that recorded no limits, or one no criterion judges, is still rebuilt, and its verdict says it could not be
+  step10 and step50, scale their limits with the step: nearly all of the step's push streams and chatters held through the hold,
+  and ceilings on chat first byte p95, gate waits at the limit, sign-in failures and generator CPU. A run that recorded no limits, or one no criterion judges, is still rebuilt, and its verdict says it could not be
   judged. There is no judging an old run by newer limits: a run is read as it was run.</li>
   <li><b>Gaps are explicit.</b> A slice that was down, or a source that went silent, is named with its window. It is never
   filled or averaged over. The windows come from the manifest, and every reader leaves out the same ones: a slice's own
@@ -647,13 +639,13 @@ does not measure cost per user. Other projects run on it and are relied upon, so
   <tr><td>App under load</td><td>A backend the run starts itself (API and worker in one process, no Valkey) with mock inference, against dev's database and auth core. The run refuses while the operator's own dev backend is running.</td><td>separate API and worker services sharing Valkey</td></tr>
   <tr><td>Generators</td><td>local processes, niced and pinned to a small CPU share</td><td>Fargate tasks, Spot first</td></tr>
   <tr><td>Supervision</td><td>The same supervisor, with a local launcher. A lost generator is replaced the same way.</td><td>supervisor with the ECS launcher</td></tr>
-  <tr><td>Extra guard</td><td>The <b>house guard</b> reads host CPU, memory and swap from Glances every 2 s, and reads the generators' request lines as they grow. It stops the run when host CPU passes 70%, memory in use passes 80%, chat first byte p95 passes 2.5 s, failures pass 1%, or the host cannot be read three times running. The guard's lines are the home criteria, and may be tightened but never loosened.</td><td>the safety net and budget</td></tr>
+  <tr><td>Extra guard</td><td>The <b>house guard</b> reads host CPU, memory and swap from Glances every few seconds, and reads the generators' request lines as they grow. It stops the run when host CPU, memory in use, chat first byte p95 or failures pass their lines, or the host cannot be read several times running. The guard's lines are the home criteria, and may be tightened but never loosened.</td><td>the safety net and budget</td></tr>
   <tr><td>Sources</td><td>the backend's and mock's captured output, the generators' output, Glances samples</td><td>CloudWatch Logs and Metrics, ECS, scaling, Performance Insights</td></tr>
   <tr><td>Run folder</td><td>Same layout and manifest</td><td>Same layout and manifest</td></tr>
   <tr><td>Verdict</td><td>Rebuild runs at the end of every home run</td><td>Rebuild runs at the end of every load run, and again by hand with <code>aws-prod rebuild</code></td></tr>
-  <tr><td>Shapes</td><td><i>home-smoke</i>: by default 20 users over 4 generators, all chatting, a five-second ramp and a thirty-second hold</td><td>smoke, step10, step50, step100</td></tr>
+  <tr><td>Shapes</td><td><i>home-smoke</i>: by default a few users over several generators, all chatting, with a short ramp and hold</td><td>smoke, step10, step50, step100</td></tr>
 </table>
-<p>Dev's access tokens last five minutes, so even short runs exercise session refresh. Load accounts live in dev under the
+<p>Dev's access tokens are short-lived, so even short runs exercise session refresh. Load accounts live in dev under the
 <code>load.invalid</code> domain and are reused. A cleanup command deletes the data they build up and touches no other user.</p>
 
 <h2>10. Why it is shaped this way</h2>

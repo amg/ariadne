@@ -1,6 +1,7 @@
 # Ari
 
-A local single-user assistant chat. One conversation (a Thread) is replayed
+A self-hosted assistant chat, where each user sees only their own Threads
+and Memory. One conversation (a Thread) is replayed
 in full to the model on every Turn, so cost accumulates and stale context
 can accumulate without the user noticing. This vocabulary supports the
 thread-health feature: surfacing cost climb, detecting Topic Drift, and
@@ -151,8 +152,8 @@ _Avoid_: memory item, note, observation
 
 **Memory**:
 The durable store of Facts that outlives any Thread. Captured piecemeal
-as segments settle, keeping a pointer to the last Turn read; namespaced
-per user even though it holds one user today.
+as segments settle, keeping a pointer to the last Turn read; each user
+has their own.
 _Avoid_: knowledge base, profile store, memory bank
 
 **Seed**:
@@ -266,14 +267,14 @@ quirks it cannot anticipate ("Is there a silver bullet for this?").
 _Avoid_: anaphora detector, context classifier, expansion gate
 
 **Immediate criterion**:
-The live gate's per-message decision level (ADR 0006): the thread's own
-noise level — the mean plus spread of the drift_p readings sampled so
-far, judged before the arriving reading folds in — seeded with that
-thread's T_segment while too few readings are sampled to trust the
-statistics. A sharp topic flip clears it at its arrival turn; the
-Page–Hinkley accumulator speaks only while this channel stays silent,
-and resets after any verdict.
-_Avoid_: live threshold (no global constant applies to the live lane), running mean
+The live gate's per-message decision level (ADR 0006): the current Topic
+segment's own noise level, the mean of the readings it has accepted plus a
+multiple of their spread (with a floor under the spread), judged before
+the arriving reading folds in. Until the segment has accepted two
+readings, a fixed bootstrap level stands in. A sharp topic flip clears it
+at its arrival turn; the Page–Hinkley accumulator speaks only while this
+channel stays silent, and resets after any verdict.
+_Avoid_: live threshold (only the bootstrap level is fixed), running mean
 
 **Message transformer**:
 The lane that turns each arriving user Message into a judged Prospective

@@ -26,7 +26,6 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-    # Dedicated DB port for LAN tooling from the 50.x/57.x nets
     ports:
       - "${DB_PORT:-15432}:5432"
     volumes:

@@ -130,6 +130,7 @@ task. It streams to the person who asked and ends when they leave.
 | Task | Works on (its key) | Queued when | Announces |
 |---|---|---|---|
 | **Drift gate: judge arrival** | one arrival | a message is submitted or an edit forks, in the same transaction as the row; a retry finds no judgment under way | the verdict (clear or paused), or that the gate failed |
+| **Drift gate: fold Turn** | one completed Turn | a reply settles, completing its Turn | nothing; the next judgment folds inline whatever this task has not written yet |
 | **Thread: generate title** | one Thread | the first Exchange completes on an untitled Thread; the user asks for a new title | the title |
 | **Memory: capture segment** (only while Memory is on) | one segment | a drift fire closes a segment; a Handover finds no capture under way | the capture landed, or gave up |
 
@@ -138,7 +139,7 @@ by feature in the code and in the queue tables alike.
 
 ### Anatomy of a task
 
-Every task has 2 methods, and the work splits into two halves.
+Every task splits its work into two halves.
 
 ```mermaid
 flowchart LR
@@ -176,7 +177,7 @@ stateDiagram-v2
   Running --> Backoff: recoverable failure, attempts left
   Backoff --> Running: backoff elapsed
   Running --> Dead: fatal failure, or the last attempt failed
-  Running --> Queued: process died mid-run, released at next boot
+  Running --> Queued: worker died mid-run, its lock freed by a live worker
   Dead --> Queued: operator runs queue:retry-failed
   Dead --> Superseded: a fresh job for the same key takes over
   Done --> [*]
@@ -188,7 +189,7 @@ stateDiagram-v2
   end note
 ```
 
-A job gets three attempts with exponential backoff. A dead job stays
+A job gets a few attempts, with exponential backoff. A dead job stays
 visible until someone acts on it. A user's Retry re-queues a judgment
 that failed with recoverable errors. A fatal failure waits for the
 operator, who fixes the cause and runs `npm run queue:retry-failed`.
@@ -311,7 +312,7 @@ sequenceDiagram
     B-->>T: live event for this user
     T-->>PC: event, named by its kind (user id stripped)
     PC-->>S: handed to screens subscribed to that kind
-    T-->>PC: heartbeat comment every 25 s (keeps proxies from idling it out)
+    T-->>PC: heartbeat comment at a steady interval (keeps proxies from idling it out)
   end
   note over PC,T: Connection drops. Nothing is replayed.<br/>The browser redials on its own.
   PC->>T: reconnect

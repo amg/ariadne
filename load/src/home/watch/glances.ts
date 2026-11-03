@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-/** Where the home machine's Glances answers, unless told otherwise. */
-export const DEFAULT_GLANCES_URL = 'http://192.168.50.236:61208/api/4';
+/** Where Glances answers on this machine, at its default port. */
+export const DEFAULT_GLANCES_URL = 'http://localhost:61208/api/4';
 
 const cpuSchema = z.object({ total: z.number() });
 const perCoreSchema = z.array(z.object({ total: z.number() }));

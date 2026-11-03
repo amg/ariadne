@@ -30,8 +30,9 @@ import { runCommand, runFolderOf, runIdOf } from './cli.ts';
  * the run has left. Each generator's process id is printed as it starts.
  * The verdict names a lost slice and how long it was down.
  *
- * While it runs, the host is read from Glances (GLANCES_URL, or the home
- * machine's own) and the run stops itself when a guard line is crossed.
+ * While it runs, the host is read from Glances (GLANCES_URL in the
+ * environment or `.env`, else this machine's own) and the run stops itself
+ * when a guard line is crossed.
  * The guard's lines can be tightened with the last four options, never
  * loosened.
  *
@@ -44,14 +45,14 @@ runCommand(async () => {
   const envFile = readDevEnvFile();
   const password = loadAccountPassword(process.env, envFile);
   const connections = devConnections(envFile, hostAddress());
-  const glancesUrl = process.env.GLANCES_URL || DEFAULT_GLANCES_URL;
+  const glancesUrl = process.env.GLANCES_URL || envFile.GLANCES_URL || DEFAULT_GLANCES_URL;
   const startedAt = new Date();
   const runId = runIdOf(startedAt, `${HOME_STEP}-${options.inference}`);
   const folder = runFolderOf(runId);
 
   await readHostSample(glancesUrl).catch((error: unknown) => {
     throw new Error(
-      `The guard cannot see the host: Glances does not answer at ${glancesUrl} (${error instanceof Error ? error.message : error})`,
+      `The guard cannot see the host: Glances does not answer at ${glancesUrl} (${error instanceof Error ? error.message : error}). Set GLANCES_URL in .env to where it answers.`,
     );
   });
   console.log(
