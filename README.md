@@ -6,6 +6,8 @@ subject, and, if you let it, remembers what matters about you for your next
 conversation. Everything except the AI model itself runs on your own
 machines, so your conversations stay yours.
 
+![A conversation paused on a change of subject, asking whether to start a new chat or continue in this thread, with the reply's cost and the Thread's total cost in the side panel](docs/images/topic-drift.png)
+
 ## What It Does
 
 - **Chat** — Replies appear as they are written. Keep several conversations
@@ -28,6 +30,12 @@ machines, so your conversations stay yours.
   them.
 - **Accounts** — Email and password sign-in, and each person sees only their
   own Threads.
+
+The Analysis tab shows how the topic check judged each message: each
+message's distance from the topic, the line it had to cross, and where it
+caught a change of subject.
+
+![The Analysis tab: each message's drift reading against the topic's moving trigger line, with the messages that changed the subject marked, and the same readings as standard deviations above a dashed line at 2](docs/images/drift-analysis.png)
 
 ## How It Fits Together
 
@@ -129,10 +137,6 @@ test setup are in [the setup guide](docs/setup.md).
 - **[aws-prod architecture](docs/architecture/aws-prod-architecture.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
 - **[Load testing architecture](docs/architecture/load-testing-architecture.html)** — How a load run is driven, recorded and judged
 - **[What the load runs taught us](docs/architecture/load-run-learnings.md)** — What strained in each run, and the fix
-
-## Not Done Yet
-
-- **Memory recall per reply** — Facts are captured and fresh Threads are seeded, but relevant Facts are not yet retrieved into each reply by similarity
 
 ## The Name
 
