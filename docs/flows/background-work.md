@@ -54,7 +54,7 @@ server, which is the shape drawn here. It can also run as a process of
 its own, with any number of API and worker copies side by side; they
 then share news and stops through Valkey. Only the two entry points
 start the worker, so choosing between the shapes is configuration.
-[aws-prod-architecture.html](../architecture/aws-prod-architecture.html) shows that
+[aws-prod-architecture.html](https://amg.github.io/ariadne/architecture/aws-prod-architecture.html) shows that
 split shape as deployed.
 
 ### Where each part runs

@@ -134,8 +134,8 @@ test setup are in [the setup guide](docs/setup.md).
 - **[A new message in a Thread](docs/flows/new-message.md)** — Submit, Drift gate, Retry, pause and Handover, end to end
 - **[Background work](docs/flows/background-work.md)** — The queue, the event bus, push to the browser, and how failures surface
 - **[Drift maths](docs/maths/)** — How the Drift gate judges a message, and how it keeps running totals
-- **[aws-prod architecture](docs/architecture/aws-prod-architecture.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
-- **[Load testing architecture](docs/architecture/load-testing-architecture.html)** — How a load run is driven, recorded and judged
+- **[aws-prod architecture](https://amg.github.io/ariadne/architecture/aws-prod-architecture.html)** — The multi-copy AWS deployment: services, the way in, why Valkey
+- **[Load testing architecture](https://amg.github.io/ariadne/architecture/load-testing-architecture.html)** — How a load run is driven, recorded and judged
 - **[What the load runs taught us](docs/architecture/load-run-learnings.md)** — What strained in each run, and the fix
 
 ## The Name
