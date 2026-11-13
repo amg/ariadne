@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # up <step>: raise aws-prod at a step, ready for a load run.
 #
-# Builds and pushes images, deploys the app stack (about twenty minutes),
-# warms a restored database, puts it behind Cloudflare, and checks that it
-# answers through Cloudflare only. Preflight, the daily worst-case limit or
-# the account's Fargate vCPU quotas refuse the raise before anything is
-# created.
+# Builds and pushes images, deploys the edge rules and the app stack (about
+# twenty minutes), warms a restored database, points the hostname at the
+# distribution, and checks that it answers at the hostname only. Preflight,
+# the daily worst-case limit or the account's Fargate vCPU quotas refuse the
+# raise before anything is created. The distribution takes some minutes to
+# create, and as long again to remove on teardown.
 #
 # A step that restores the seed restores the newest seed snapshot available.
 #
@@ -39,6 +40,7 @@ main() {
     mint_run_key
   fi
 
+  edge_rules_up
   app_up "$step" "$tag" "$seed"
   [[ "$STEP_DB_SOURCE" == "seedSnapshot" ]] && warm_database
   edge_up

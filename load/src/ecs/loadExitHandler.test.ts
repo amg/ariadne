@@ -22,17 +22,16 @@ fail() { echo "$*" >&2; exit 1; }
 stack_output() { echo "$1.$2"; }
 raised_seed_snapshot() { echo snapshot; }
 run_cdk() { note "run_cdk $*"; [[ -z "\${DEPLOY_FAILS:-}" ]]; }
-origin_security_group() { echo sg-origin; }
 load_image_tag() { echo "generators-$1"; }
 delete_stack() { note "delete_stack $*"; [[ -z "\${DELETE_FAILS:-}" ]]; }
 release_budget() { note "release_budget $*"; }
-LOAD_STACK=load APP_STACK=app OUT_ORIGIN_DNS_NAME=origin
+LOAD_STACK=load APP_STACK=app
 OUT_LOAD_CLUSTER=cluster OUT_LOAD_TASK_DEFINITION=definition
 OUT_LOAD_SUBNETS=subnets OUT_LOAD_SECURITY_GROUP=group
 AUTH_CORE_TAG=auth-1 INFRA_DIR="\${REPO_DIR}/infra"
 STEP_GENERATORS=1 STEP_USERS=1
 BUDGET_CLAIM_AT=claim-1
-run_generators "\${RUN_STEP:-smoke}" tag "\${RUN_MODE:-load}" "\${RUN_PATH:-direct}"
+run_generators "\${RUN_STEP:-smoke}" tag "\${RUN_MODE:-load}"
 note "run_generators returned"
 `;
 
@@ -238,15 +237,7 @@ describe('the shell around the load command', () => {
   }, 30_000);
 });
 
-describe('the shell around the load command on the direct path', () => {
-  it('deploys the load stack with the origin’s address and security group, so the stack lets its generators in', async () => {
-    const result = await shellRun('deploy', 'finished');
-
-    const deploy = result.notes.find((line) => line.startsWith('run_cdk deploy load '));
-    expect(deploy).toContain('-c originAddress=app.origin');
-    expect(deploy).toContain('-c originSecurityGroup=sg-origin');
-  }, 30_000);
-
+describe('how the shell deploys the load stack', () => {
   it('deploys the load stack with the generators’ image, which need not be the raise’s own', async () => {
     const result = await shellRun('deploy-load-image', 'finished');
 
@@ -259,13 +250,13 @@ describe('what the shell hands the load command', () => {
   const harnessLine = (result: Ended): string =>
     result.notes.find((line) => line.startsWith('harness --run')) ?? '';
 
-  it('gives a load run its step, path, images and stacks', async () => {
-    const result = await shellRun('args-load', 'finished', { RUN_PATH: 'edge' });
+  it('gives a load run its step, images and stacks', async () => {
+    const result = await shellRun('args-load', 'finished');
 
     const line = harnessLine(result);
     expect(line).toMatch(/--run \S+-smoke-load /);
     expect(line).toContain('--mode load');
-    expect(line).toContain('--step smoke --path cloudflare');
+    expect(line).toContain('--step smoke');
     expect(line).toContain(
       '--images {"backend":"tag","web":"tag","tools":"tag","load":"generators-tag","auth":"auth-1"}',
     );
@@ -273,11 +264,9 @@ describe('what the shell hands the load command', () => {
     expect(line).toContain('--cluster load.cluster --task-definition load.definition');
   }, 30_000);
 
-  it('names a direct run so, and gives a seeding run nothing to record', async () => {
-    const direct = await shellRun('args-direct', 'finished');
+  it('gives a seeding run nothing to record', async () => {
     const seeding = await shellRun('args-seed', 'finished', { RUN_MODE: 'seed', RUN_STEP: 'seed' });
 
-    expect(harnessLine(direct)).toMatch(/--run \S+-smoke-load-direct /);
     expect(harnessLine(seeding)).toContain('--mode seed');
     expect(harnessLine(seeding)).not.toContain('--step');
   }, 30_000);

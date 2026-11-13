@@ -29,7 +29,7 @@ export type Session = {
   refreshAfterRejection: (sentWith: Record<string, string>) => Promise<void>;
 };
 
-/** The header that lets a request through the edge, when the run goes that way. */
+/** The header that lets a request through the edge, and keeps its sign-ins out of the edge's per-address limit. */
 export function edgeHeaders(plan: Plan) {
   return { [plan.loadKeyHeader]: plan.loadKey };
 }

@@ -4,17 +4,20 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/command.sh"
 
 # What to do with a leftover is the operator's call. The tagging index lags
 # deletions by up to an hour and lists deregistered task definitions forever,
-# so each match is checked with its own service.
+# so each match is checked with its own service. The edge's region holds
+# the edge rules, and the distribution is listed there too.
 main() {
   begin 0 0 "$@"
   step "Sweep: anything tagged app or load that is still there"
-  local arn found=0
-  for arn in $(aws resourcegroupstaggingapi get-resources \
-    --tag-filters "Key=$LIFETIME_TAG,Values=app,load" \
-    --query 'ResourceTagMappingList[].ResourceARN' --output text); do
-    still_there "$arn" || continue
-    info "leftover: $arn"
-    found=1
+  local region arn found=0
+  for region in "$REGION" "$EDGE_REGION"; do
+    for arn in $(aws resourcegroupstaggingapi get-resources --region "$region" \
+      --tag-filters "Key=$LIFETIME_TAG,Values=app,load" \
+      --query 'ResourceTagMappingList[].ResourceARN' --output text); do
+      (export AWS_REGION="$region" && still_there "$arn") || continue
+      info "leftover: $arn"
+      found=1
+    done
   done
   [[ "$found" == 1 ]] || info "nothing left behind in AWS"
 
@@ -36,7 +39,7 @@ main() {
 # Whether a resource the tagging index lists really exists. Types not named
 # here are taken at the index's word.
 still_there() { # <arn>
-  local arn="$1" id="${1##*/}" state path
+  local arn="$1" id="${1##*/}" state path kind
   case "$arn" in
     *:ecs:*:task-definition/*) return 1 ;; # deregistered, never deleted, free
     *:logs:*:log-group:*) return 1 ;;      # kept a month after its stack on purpose, then expires
@@ -66,6 +69,14 @@ still_there() { # <arn>
     *:ec2:*:subnet/*) aws ec2 describe-subnets --subnet-ids "$id" >/dev/null 2>&1 ;;
     *:ec2:*:vpc/*) aws ec2 describe-vpcs --vpc-ids "$id" >/dev/null 2>&1 ;;
     *:ec2:*:security-group/*) aws ec2 describe-security-groups --group-ids "$id" >/dev/null 2>&1 ;;
+    *:cloudfront::*:distribution/*) aws cloudfront get-distribution --id "$id" >/dev/null 2>&1 ;;
+    *:cloudfront::*:vpcorigin/*) aws cloudfront get-vpc-origin --id "$id" >/dev/null 2>&1 ;;
+    *:wafv2:*:global/webacl/* | *:wafv2:*:global/ipset/*)
+      path="${arn#*:global/}" # <webacl|ipset>/<name>/<id>
+      kind=get-web-acl
+      [[ "${path%%/*}" == ipset ]] && kind=get-ip-set
+      path="${path#*/}"
+      aws wafv2 "$kind" --scope CLOUDFRONT --name "${path%/*}" --id "$id" >/dev/null 2>&1 ;;
     *) return 0 ;;
   esac
 }

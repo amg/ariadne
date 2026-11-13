@@ -134,6 +134,8 @@ export type Step = {
     /** Rough ceilings for the usage-priced estimate only. */
     egressGbPerHour: number;
     logsGbPerHour: number;
+    /** Millions of requests an hour through the edge. */
+    requestMillionsPerHour: number;
   };
   signupOpen: boolean;
 };
@@ -190,6 +192,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 0,
       egressGbPerHour: 2,
       logsGbPerHour: 2,
+      requestMillionsPerHour: 1,
     },
     signupOpen: true,
   },
@@ -220,6 +223,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 30,
       egressGbPerHour: 1,
       logsGbPerHour: 0.5,
+      requestMillionsPerHour: 0.2,
     },
     signupOpen: false,
   },
@@ -254,6 +258,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 30,
       egressGbPerHour: 2,
       logsGbPerHour: 0.5,
+      requestMillionsPerHour: 0.6,
     },
     signupOpen: false,
   },
@@ -295,6 +300,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 30,
       egressGbPerHour: 8,
       logsGbPerHour: 3,
+      requestMillionsPerHour: 3,
     },
     signupOpen: false,
   },
@@ -325,6 +331,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 30,
       egressGbPerHour: 15,
       logsGbPerHour: 5,
+      requestMillionsPerHour: 6,
     },
     signupOpen: false,
   },
@@ -381,6 +388,7 @@ export const STEPS: Record<StepName, Step> = {
       thinkSeconds: 0,
       egressGbPerHour: 1,
       logsGbPerHour: 0.5,
+      requestMillionsPerHour: 0.6,
     },
     signupOpen: true,
   },

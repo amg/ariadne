@@ -134,6 +134,12 @@ const KINDS: readonly Kind[] = [
     aws: 'service',
   },
   {
+    kind: 'distribution metrics',
+    matches: awsFile(AWS_METRIC_RESOURCES.distribution),
+    fixture: 'aws-smoke-pass',
+    aws: 'distribution',
+  },
+  {
     kind: 'load balancer metrics',
     matches: awsFile(AWS_METRIC_RESOURCES.loadBalancer),
     fixture: 'aws-smoke-pass',

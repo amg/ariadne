@@ -1,7 +1,6 @@
 # The load generator: plain TypeScript run by Node's own type stripping.
 # Built from the repository root, because the root lockfile pins its
-# dependencies: undici carries the direct path's client certificate, and
-# zod validates what the generator reads.
+# dependencies: zod validates what the generator reads.
 FROM node:24-alpine
 
 WORKDIR /app

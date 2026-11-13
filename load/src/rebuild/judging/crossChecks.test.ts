@@ -356,6 +356,99 @@ describe('crossCheckLoadBalancer', () => {
     expect(checks[0]?.detail).toContain('Cloudflare');
   });
 
+  describe('through CloudFront', () => {
+    /** The distribution's CloudWatch metrics, as a run keeps them: its requests in each minute, and the share that were server errors. */
+    const edgeSaw = (
+      minutes: readonly { minute: string; requests: number; serverErrors: number }[],
+    ) => {
+      const series = (
+        name: string,
+        statistic: string,
+        value: (entry: (typeof minutes)[number]) => number,
+      ) => ({
+        namespace: 'AWS/CloudFront',
+        name,
+        dimensions: { DistributionId: 'E2QWRUHAPOMQZL', Region: 'Global' },
+        statistic,
+        periodSeconds: 60,
+        points: minutes.map((entry) => ({ at: entry.minute, value: value(entry) })),
+      });
+      return {
+        resource: AWS_METRIC_RESOURCES.distribution,
+        path: LAYOUT.awsMetrics(AWS_METRIC_RESOURCES.distribution),
+        series: [
+          series('Requests', 'Sum', ({ requests }) => requests),
+          series(
+            '5xxErrorRate',
+            'Average',
+            ({ requests, serverErrors }) => (serverErrors / requests) * 100,
+          ),
+        ],
+      };
+    };
+    const throughCloudFront = (awsMetrics: ResourceMetrics[]) =>
+      runDataWith({
+        manifest: manifestWith({ target: 'aws-prod', loadPath: 'cloudfront' }),
+        slices: [
+          sliceDataWith(slice, { requests: [...sent(MINUTE_1, 95), ...sent(MINUTE_1, 5, 504)] }),
+        ],
+        awsMetrics,
+      });
+
+    it('leaves the server errors the edge gave itself out of the generators’ side, and says how many', () => {
+      const checks = balancerChecks(
+        throughCloudFront([
+          balancerSaw([{ minute: MINUTE_1, count: 95 }]),
+          edgeSaw([{ minute: MINUTE_1, requests: 100, serverErrors: 5 }]),
+        ]),
+      );
+
+      expect(checks.map(({ what, result }) => [what, result])).toEqual(
+        CHECKS.map((what) => [what, 'agree']),
+      );
+      expect(checks[0]).toMatchObject({ generators: 95, other: 95 });
+      expect(checks[1]).toMatchObject({ generators: 0, other: 0 });
+      expect(checks[0]?.detail).toContain(
+        'left out as answered by the edge itself: 5 server errors',
+      );
+    });
+
+    it('keeps the server errors the edge passed on from the load balancer on both sides', () => {
+      const [, serverErrors] = balancerChecks(
+        throughCloudFront([
+          balancerSaw([
+            { minute: MINUTE_1, count: 95 },
+            { minute: MINUTE_1, count: 5, status: 504, byBalancer: true },
+          ]),
+          edgeSaw([{ minute: MINUTE_1, requests: 100, serverErrors: 5 }]),
+        ]),
+      );
+
+      expect(serverErrors).toMatchObject({ result: 'agree', generators: 5, other: 5 });
+      expect(serverErrors?.detail).not.toContain('edge itself');
+    });
+
+    it('never counts fewer than no server errors on the generators’ side', () => {
+      const [, serverErrors] = balancerChecks(
+        throughCloudFront([
+          balancerSaw([{ minute: MINUTE_1, count: 95 }]),
+          edgeSaw([{ minute: MINUTE_1, requests: 100, serverErrors: 9 }]),
+        ]),
+      );
+
+      expect(serverErrors?.generators).toBe(0);
+    });
+
+    it('says why when the distribution’s metrics are missing', () => {
+      const checks = balancerChecks(
+        throughCloudFront([balancerSaw([{ minute: MINUTE_1, count: 95 }])]),
+      );
+
+      expect(checks.map(({ result }) => result)).toEqual(['not-made', 'not-made', 'not-made']);
+      expect(checks[0]?.detail).toContain('the distribution’s metrics are missing');
+    });
+  });
+
   it('says why when a generator’s request lines are missing', () => {
     const data = runDataWith({
       manifest: manifestWith({ target: 'aws-prod' }),

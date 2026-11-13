@@ -44,7 +44,7 @@ against. Each service there runs in as many copies as the load needs.
 
 ```mermaid
 flowchart LR
-  browser([Browser]) -->|HTTPS| edge[Cloudflare]
+  browser([Browser]) -->|HTTPS| edge[CloudFront]
   subgraph aws [AWS]
     alb[Load balancer]
     web["Web × N<br/>nginx serving the React app"]
@@ -90,7 +90,7 @@ home server through a tunnel rather than a load balancer, and nginx passes
 | Auth | SuperTokens (self-hosted) |
 | AI | Vercel AI SDK, with DeepInfra as the provider |
 | Home deployment | Docker Compose behind a Cloudflare Tunnel |
-| AWS deployment | CDK (ECS Fargate, RDS, ElastiCache, load balancer); Terraform for Cloudflare |
+| AWS deployment | CDK (CloudFront, ECS Fargate, RDS, ElastiCache, load balancer); Terraform for Cloudflare DNS |
 | Load testing | Own harness: virtual users on Fargate Spot, results judged from CloudWatch and the app's own records |
 | Checks | Vitest, Biome, knip, dependency-cruiser, Lefthook |
 
@@ -118,7 +118,7 @@ test setup are in [the setup guide](docs/setup.md).
 ├── backend/    API, background worker, mock inference server
 ├── lib/        The API contract and metrics shared by every app
 ├── load/       Load harness: virtual users, run records, verdicts
-├── infra/      aws-prod: CDK stacks, Terraform for Cloudflare, operator scripts
+├── infra/      aws-prod: CDK stacks, Terraform for Cloudflare DNS, operator scripts
 ├── scripts/    Repository checks
 ├── adrs/       Architecture decisions
 ├── docs/       Flows, architecture, maths, ideas

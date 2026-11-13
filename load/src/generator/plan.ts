@@ -7,14 +7,6 @@
 /** `seed` creates accounts with one Thread each; `load` signs them in and holds them. */
 type Mode = 'seed' | 'load';
 
-/** How a generator reaches the origin when it skips Cloudflare. */
-type DirectPath = {
-  /** The load balancer's DNS name, which the public hostname resolves to instead. */
-  originAddress: string;
-  certificate: string;
-  key: string;
-};
-
 export type Plan = {
   mode: Mode;
   runId: string;
@@ -43,8 +35,6 @@ export type Plan = {
   stateSeconds: number;
   /** Whether the request and state lines also publish their figures as metrics. */
   publishMetrics: boolean;
-  /** Set on the direct path; through Cloudflare otherwise. */
-  direct: DirectPath | null;
 };
 
 export function readPlan(env: NodeJS.ProcessEnv): Plan {
@@ -68,13 +58,6 @@ export function readPlan(env: NodeJS.ProcessEnv): Plan {
     seedConcurrency: number({ env, key: 'SEED_CONCURRENCY', fallback: 200 }),
     stateSeconds: number({ env, key: 'STATE_SECONDS', fallback: 5 }),
     publishMetrics: env.PUBLISH_METRICS === 'true',
-    direct: env.ORIGIN_ADDRESS
-      ? {
-          originAddress: env.ORIGIN_ADDRESS,
-          certificate: required(env, 'ORIGIN_CLIENT_CERTIFICATE'),
-          key: required(env, 'ORIGIN_CLIENT_KEY'),
-        }
-      : null,
   };
 }
 

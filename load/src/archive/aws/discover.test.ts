@@ -40,6 +40,7 @@ const app = {
       'AWS::ElasticLoadBalancingV2::TargetGroup',
       'arn:aws:elasticloadbalancing:ap-southeast-2:123456789012:targetgroup/AwsPr-Api/73e2d6bc24d8a067',
     ),
+    resource('FrontDoorDistribution20F29BA2', 'AWS::CloudFront::Distribution', 'E2QWRUHAPOMQZL'),
     resource('DatabaseInstanceAA8A5FDE', 'AWS::RDS::DBInstance', 'awsprodapp-database'),
     resource('CacheValkey8BCB8589', 'AWS::ElastiCache::ServerlessCache', 'aws-prod'),
   ],
@@ -95,6 +96,10 @@ describe('raiseOf', () => {
       dimension: 'app/AwsPr-Origi-ABC/50dc6c495c0c9188',
     });
     expect(raised().targetGroups).toEqual(['targetgroup/AwsPr-Api/73e2d6bc24d8a067']);
+  });
+
+  it('names the distribution in front of the load balancer by its id', () => {
+    expect(raised().distribution).toEqual({ id: 'E2QWRUHAPOMQZL' });
   });
 
   it('keeps the database and the cache', () => {

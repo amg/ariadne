@@ -2,10 +2,8 @@ import { Duration } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import type * as s3 from 'aws-cdk-lib/aws-s3';
-import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
-import { CLOUDFLARE_IPV4_RANGES } from '../../config/cloudflareRanges.ts';
-import { HOSTNAME, ORIGIN_TRUST_KEY, PARAMETERS } from '../../config/names.ts';
+import { HOSTNAME } from '../../config/names.ts';
 import type { AppService } from './appService.ts';
 import { type Network, SUBNETS } from './network.ts';
 
@@ -13,10 +11,11 @@ import { type Network, SUBNETS } from './network.ts';
 const IDLE_TIMEOUT = Duration.seconds(120);
 
 /**
- * The public load balancer Cloudflare proxies to. Three locks, each
- * independent: only Cloudflare's address ranges may connect, only a
- * client presenting aws-prod's own certificate completes the handshake,
- * and only requests for aws-prod's hostname are routed anywhere.
+ * The private load balancer behind CloudFront. It has no public address,
+ * and two locks, each independent: only what its security group is told to
+ * admit may connect, and only requests for aws-prod's hostname are routed
+ * anywhere. CloudFront ends TLS at its edge, so the load balancer speaks
+ * plain HTTP inside the network.
  */
 export class Origin extends Construct {
   readonly loadBalancer: elbv2.ApplicationLoadBalancer;
@@ -37,17 +36,14 @@ export class Origin extends Construct {
 
     const securityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: props.network.vpc,
-      description: 'Origin: HTTPS from Cloudflare only',
+      description: 'Origin: HTTP from CloudFront only',
       allowAllOutbound: false,
     });
-    for (const range of CLOUDFLARE_IPV4_RANGES) {
-      securityGroup.addIngressRule(ec2.Peer.ipv4(range), ec2.Port.HTTPS, 'Cloudflare');
-    }
 
     this.loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'LoadBalancer', {
       vpc: props.network.vpc,
       vpcSubnets: SUBNETS.edge,
-      internetFacing: true,
+      internetFacing: false,
       securityGroup,
       idleTimeout: IDLE_TIMEOUT,
       dropInvalidHeaderFields: true,
@@ -55,18 +51,9 @@ export class Origin extends Construct {
     });
     this.loadBalancer.logAccessLogs(props.vault, 'origin-access-logs');
 
-    const listener = this.loadBalancer.addListener('Https', {
-      port: 443,
-      protocol: elbv2.ApplicationProtocol.HTTPS,
-      sslPolicy: elbv2.SslPolicy.RECOMMENDED_TLS,
-      certificates: [originCertificate(this)],
-      mutualAuthentication: {
-        mutualAuthenticationMode: elbv2.MutualAuthenticationMode.VERIFY,
-        trustStore: new elbv2.TrustStore(this, 'ClientTrust', {
-          bucket: props.vault,
-          key: ORIGIN_TRUST_KEY,
-        }),
-      },
+    const listener = this.loadBalancer.addListener('Http', {
+      port: 80,
+      protocol: elbv2.ApplicationProtocol.HTTP,
       defaultAction: elbv2.ListenerAction.fixedResponse(421, {
         contentType: 'text/plain',
         messageBody: 'Misdirected request',
@@ -97,10 +84,4 @@ export class Origin extends Construct {
       deregistrationDelay: Duration.seconds(10),
     });
   }
-}
-
-/** Cloudflare's origin certificate, imported once into ACM by the core command. */
-function originCertificate(scope: Construct) {
-  const arn = ssm.StringParameter.valueForStringParameter(scope, PARAMETERS.originCertificateArn);
-  return elbv2.ListenerCertificate.fromArn(arn);
 }

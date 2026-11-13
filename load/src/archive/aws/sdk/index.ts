@@ -13,9 +13,17 @@ import { scalingSources } from './scaling.ts';
 
 /** Reads a raise from AWS. */
 export function awsSources(raise: Raise): RaiseSources {
+  const cloudWatch = new Map<string, CloudWatchClient>();
+  const cloudWatchIn = (region: string | undefined) => {
+    const known = cloudWatch.get(region ?? '');
+    if (known !== undefined) return known;
+    const fresh = new CloudWatchClient(region === undefined ? {} : { region });
+    cloudWatch.set(region ?? '', fresh);
+    return fresh;
+  };
   return {
     ...logSources(new CloudWatchLogsClient({})),
-    ...metricSources(new CloudWatchClient({}), metricTargetsOf(raise)),
+    ...metricSources(cloudWatchIn, metricTargetsOf(raise)),
     ...ecsSources(new ECSClient({})),
     ...scalingSources(new ApplicationAutoScalingClient({})),
     ...insightSources(new PIClient({})),

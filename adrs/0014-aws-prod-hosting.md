@@ -7,7 +7,8 @@ description: aws-prod is production while under test, defined in code in three l
 ## Status
 Accepted. Builds on the aws-prod tier in ADR 0009, the cross-process
 bus in ADR 0012, the optimistic Thread passes in ADR 0011, and the
-edge rate limits in ADR 0008.
+edge rate limits in ADR 0008. Its "Edge" section is superseded by
+ADR 0018.
 
 ## Context
 aws-prod exists to prove Ari at scale: 100k signed-in users with a tab

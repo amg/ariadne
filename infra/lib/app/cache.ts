@@ -10,8 +10,7 @@ const REDIS_PORTS = ec2.Port.tcpRange(6379, 6380);
 /**
  * Valkey, serverless, with hard limits on storage and request rate. It
  * carries what every backend copy must share: the event bus and a user's
- * stop. Rate-limit counters are in-memory (home) or at the Cloudflare edge
- * (prod).
+ * stop. Rate-limit counters are in-memory (home) or at the edge (prod).
  */
 export class Cache extends Construct {
   /** `rediss://` because the serverless cache only speaks TLS. */

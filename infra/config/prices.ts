@@ -44,7 +44,20 @@ export const PRICES = {
   },
   publicAddressPerHour: 0.005,
   bastionPerHour: 0.0066,
-  egressPerGb: 0.114,
+  /**
+   * Served from Australian edges, which cost more than US or European ones.
+   * What the load balancer sends the edge is free.
+   */
+  cloudFront: {
+    perGb: 0.114,
+    perMillionRequests: 1.25,
+  },
+  /** The edge's web ACL and its rules are billed by the month, prorated by the hour. */
+  waf: {
+    webAclPerMonth: 5,
+    rulePerMonth: 1,
+    perMillionRequests: 0.6,
+  },
   logsIngestPerGb: 0.7,
 } as const;
 

@@ -96,7 +96,8 @@ export const manifestSchema = z.object({
   /** The step's whole configuration, as the run was given it. */
   config: z.record(z.string(), z.unknown()),
   target: z.string(),
-  loadPath: z.enum(['direct', 'cloudflare']),
+  /** How the generators reached the target: straight to it, or through Cloudflare's or CloudFront's edge. */
+  loadPath: z.enum(['direct', 'cloudflare', 'cloudfront']),
   images: z.record(z.string(), z.string()),
   commits: z.object({ app: commitSchema, harness: commitSchema }),
   startedAt: instant,

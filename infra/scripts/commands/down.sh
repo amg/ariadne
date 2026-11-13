@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# down [--force]: tear everything down (load, edge, app), then sweep; core stays.
+# down [--force]: tear everything down (load, edge, app, edge rules), then sweep; core stays.
 #
 # Refused while the current raise has a run that was never sealed: archive
 # it first. --force tears down anyway, and what the run's
@@ -17,6 +17,7 @@ main() {
   delete_stack "$LOAD_STACK"
   edge_down
   delete_stack "$APP_STACK"
+  edge_rules_down
   "$COMMANDS_DIR/sweep.sh"
   step "aws-prod is down; core stays"
 }

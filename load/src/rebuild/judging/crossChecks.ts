@@ -3,6 +3,7 @@ import { instantOf } from '../moments.ts';
 import {
   ANSWERED_BY_END,
   BALANCER_ANSWERS,
+  EDGE_SERVER_ERRORS,
   PUSH_STREAMS_CUT,
   SLICES_DOWN,
   judgedMinutesOf,
@@ -76,13 +77,18 @@ export function crossCheckLoadBalancer(
     return [notNeeded('every count set against the load balancer', LOAD_BALANCER, exemption)];
   }
   const balancer = countsOf(table, BALANCER_ANSWERS);
-  const reason = reasonCannotCheckOrNull(balancer !== null, facts.requestLinesWhole);
+  const givenByEdge = facts.run.loadPath === 'cloudfront' ? givenByEdgeOrNull(table) : () => 0;
+  const reason = reasonCannotCheckOrNull({
+    hasBalancer: balancer !== null,
+    hasEdge: givenByEdge !== null,
+    requestLinesWhole: facts.requestLinesWhole,
+  });
   const generators = countsOf(table, {
     all: ANSWERED_BY_END.all,
     serverErrors: [ANSWERED_BY_END.serverErrors],
     clientErrors: [ANSWERED_BY_END.clientErrors],
   });
-  if (reason !== null || balancer === null) {
+  if (reason !== null || balancer === null || givenByEdge === null) {
     return Object.values(LOAD_BALANCER_CHECKS).map((name) =>
       notMade(name, LOAD_BALANCER, reason ?? ''),
     );
@@ -99,12 +105,21 @@ export function crossCheckLoadBalancer(
     .filter((part) => part !== '')
     .join('; ');
   const cut = valuesOf(table, PUSH_STREAMS_CUT);
-  const leftFromMinutes = [left, brokeOffText(sum(kept.map((index) => cut[index] ?? 0)))]
+  const answeredByEdge = givenByEdgeText(sum(kept.map(givenByEdge)));
+  const leftFromMinutes = [
+    left,
+    brokeOffText(sum(kept.map((index) => cut[index] ?? 0))),
+    answeredByEdge,
+  ]
     .filter((part) => part !== '')
     .join('; ');
+  const leftFromErrors = [left, answeredByEdge].filter((part) => part !== '').join('; ');
   const compared = kept.map((index) => ({
     minute: instantOf(table.minutes[index] ?? 0),
-    generators: generators?.(index) ?? NOTHING,
+    generators: withoutGivenByEdge({
+      counted: generators?.(index) ?? NOTHING,
+      givenByEdge: givenByEdge(index),
+    }),
     balancer: balancer(index),
   }));
   const total = (side: 'generators' | 'balancer', count: keyof Counted): number =>
@@ -116,7 +131,7 @@ export function crossCheckLoadBalancer(
       LOAD_BALANCER,
       total('generators', 'serverErrors'),
       total('balancer', 'serverErrors'),
-      left,
+      leftFromErrors,
     ),
     compare(
       LOAD_BALANCER_CHECKS.clientErrors,
@@ -129,6 +144,26 @@ export function crossCheckLoadBalancer(
 }
 
 const NOTHING: Counted = { answered: 0, serverErrors: 0, clientErrors: 0 };
+
+/**
+ * The server errors the edge gave itself in each minute, by the minute's
+ * place in the table; a minute it has no figure for counts none. Null when
+ * the run kept none of the edge's figures.
+ */
+function givenByEdgeOrNull(table: MinuteTable) {
+  const given = valuesOf(table, EDGE_SERVER_ERRORS.givenByEdge);
+  if (given.every((value) => value === null)) return null;
+  return (index: number) => cellOrZero(given[index]);
+}
+
+/** What the generators were answered, less the server errors the edge gave itself, which the load balancer never saw. */
+function withoutGivenByEdge({ counted, givenByEdge }: { counted: Counted; givenByEdge: number }) {
+  return {
+    answered: Math.max(0, counted.answered - givenByEdge),
+    serverErrors: Math.max(0, counted.serverErrors - givenByEdge),
+    clientErrors: counted.clientErrors,
+  };
+}
 
 /**
  * What one side counted in each minute of the run, by the minute's place in
@@ -222,8 +257,19 @@ function compareMinutes(
   };
 }
 
-function reasonCannotCheckOrNull(hasBalancer: boolean, requestLinesWhole: boolean): string | null {
+function reasonCannotCheckOrNull({
+  hasBalancer,
+  hasEdge,
+  requestLinesWhole,
+}: {
+  hasBalancer: boolean;
+  hasEdge: boolean;
+  requestLinesWhole: boolean;
+}): string | null {
   if (!hasBalancer) return 'the load balancer’s metrics are missing';
+  if (!hasEdge) {
+    return 'the distribution’s metrics are missing, so the edge’s own answers cannot be told from the load balancer’s';
+  }
   return requestLinesWhole ? null : MISSING_REQUESTS;
 }
 
@@ -263,6 +309,13 @@ function brokeOffText(count: number) {
   return count === 0
     ? ''
     : `left out as never completed at the load balancer: ${count} push stream${count === 1 ? '' : 's'} that broke off`;
+}
+
+/** The server errors the edge gave itself in the minutes compared, left out of the generators' count; empty when it gave none. */
+function givenByEdgeText(count: number) {
+  return count === 0
+    ? ''
+    : `left out as answered by the edge itself: ${count} server error${count === 1 ? '' : 's'}`;
 }
 
 const withLeftOut = (detail: string, leftOut: string) =>

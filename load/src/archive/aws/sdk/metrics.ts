@@ -76,13 +76,26 @@ function describedMetricOrNull(metric: Metric) {
   };
 }
 
+/**
+ * Reads each target's metrics from the region it names, through the client
+ * `clientIn` gives for that region; a target that names none is read in the
+ * raise's own region.
+ */
 export function metricSources(
-  client: CloudWatchClient,
+  clientIn: (region: string | undefined) => CloudWatchClient,
   allTargets: readonly MetricTarget[],
 ): Pick<RaiseSources, 'metricSeries'> {
   const listed = new Map<string, Promise<Described[]>>();
-  const listNamespace = (namespace: string): Promise<Described[]> => {
-    const known = listed.get(namespace);
+  const listNamespace = ({
+    region,
+    namespace,
+  }: {
+    region: string | undefined;
+    namespace: string;
+  }): Promise<Described[]> => {
+    const client = clientIn(region);
+    const key = `${region ?? ''}|${namespace}`;
+    const known = listed.get(key);
     if (known !== undefined) return known;
     const fresh = (async () => {
       const found: Described[] = [];
@@ -94,13 +107,18 @@ export function metricSources(
       }
       return found;
     })();
-    listed.set(namespace, fresh);
+    listed.set(key, fresh);
     return fresh;
   };
 
   return {
     async metricSeries(target, window) {
-      const everything = (await Promise.all(target.namespaces.map(listNamespace))).flat();
+      const client = clientIn(target.region);
+      const everything = (
+        await Promise.all(
+          target.namespaces.map((namespace) => listNamespace({ region: target.region, namespace })),
+        )
+      ).flat();
       const mine = metricsOfTarget(target, allTargets, everything);
       const queries = mine.flatMap((metric, index) =>
         STATISTICS.map((statistic) => ({

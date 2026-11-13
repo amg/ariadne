@@ -122,7 +122,10 @@ describe('CloudWatch metrics', () => {
     if (target === undefined) throw new Error('the raise has no database target');
     const { client, requests } = metricsClient(1, 2);
 
-    const series = await metricSources(client, metricTargetsOf(raise)).metricSeries(target, window);
+    const series = await metricSources(() => client, metricTargetsOf(raise)).metricSeries(
+      target,
+      window,
+    );
 
     expect(requests.map(({ token }) => token)).toEqual([undefined, '1', '2']);
     expect(series[0]?.points.map(({ value }) => value)).toEqual([0, 1, 2, 3, 4, 5]);
@@ -135,7 +138,10 @@ describe('CloudWatch metrics', () => {
     if (target === undefined) throw new Error('the raise has no database target');
     const { client, requests } = metricsClient(101, 1);
 
-    const series = await metricSources(client, metricTargetsOf(raise)).metricSeries(target, window);
+    const series = await metricSources(() => client, metricTargetsOf(raise)).metricSeries(
+      target,
+      window,
+    );
 
     const firstPages = requests.filter(({ token }) => token === undefined);
     expect(firstPages.map(({ queries }) => queries)).toEqual([500, 5]);

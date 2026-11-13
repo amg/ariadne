@@ -22,7 +22,7 @@ const ECS_ATTEMPTS = 8;
 
 const USAGE = `usage: run --run <id> --mode load|seed --config <file>
          --cluster <name> --task-definition <arn> --subnets <a,b> --security-group <id>
-         [load only: --step <step> --path direct|cloudflare --images <json> --app-stack <name> --load-stack <name>]`;
+         [load only: --step <step> --images <json> --app-stack <name> --load-stack <name>]`;
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
@@ -36,7 +36,6 @@ const { values } = parseArgs({
     subnets: { type: 'string' },
     'security-group': { type: 'string' },
     step: { type: 'string' },
-    path: { type: 'string' },
     images: { type: 'string' },
     'app-stack': { type: 'string' },
     'load-stack': { type: 'string' },
@@ -59,7 +58,6 @@ const parsed = z
       ...common,
       mode: z.literal('load'),
       step: text,
-      path: z.enum(['direct', 'cloudflare']),
       images: text,
       'app-stack': text,
       'load-stack': text,
@@ -169,7 +167,6 @@ const outcome = await carryOutRun({
           runsFolder: RUNS_DIR,
           runId: options.run,
           step: options.step,
-          loadPath: options.path,
           config,
           images: imagesSchema.parse(JSON.parse(options.images)),
           appStack: options['app-stack'],

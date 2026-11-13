@@ -141,6 +141,11 @@ const targetGroupSignal = signalsIn({
   namespace: 'AWS/ApplicationELB',
   dimensions: ['LoadBalancer', 'TargetGroup'],
 });
+const distributionSignal = signalsIn({
+  namespace: 'AWS/CloudFront',
+  dimensions: ['DistributionId', 'Region'],
+  where: { Region: 'Global' },
+});
 const databaseSignal = signalsIn({ namespace: 'AWS/RDS', dimensions: ['DBInstanceIdentifier'] });
 const cacheSignal = signalsIn({ namespace: 'AWS/ElastiCache', dimensions: ['clusterId'] });
 const serviceSignal = signalsIn({
@@ -256,6 +261,29 @@ export const SIGNALS = {
     /** The capacity units kept reserved, which it never shrinks below. */
     capacityUnitsReserved: balancerSignal('ReservedLCUs', measuredAs('Maximum', 'Count')),
     targetTlsErrors: balancerSignal('TargetTLSNegotiationErrorCount', COUNT),
+  },
+  /**
+   * CloudFront's distribution: every request at the edge, and the share
+   * answered with each kind of error, whether the edge gave it or passed it
+   * on from the load balancer. The 502, 503 and 504 shares and the origin's
+   * latency are the distribution's additional metrics.
+   */
+  distribution: {
+    requests: distributionSignal('Requests', COUNT),
+    bytesSent: distributionSignal('BytesDownloaded', measuredAs('Sum', 'Bytes')),
+    clientErrorPercent: distributionSignal('4xxErrorRate', measuredAs('Average', 'Percent')),
+    serverErrorPercent: distributionSignal('5xxErrorRate', measuredAs('Average', 'Percent')),
+    badGatewayPercent: distributionSignal('502ErrorRate', measuredAs('Average', 'Percent')),
+    unavailablePercent: distributionSignal('503ErrorRate', measuredAs('Average', 'Percent')),
+    gatewayTimeoutPercent: distributionSignal('504ErrorRate', measuredAs('Average', 'Percent')),
+    originLatencyAverage: distributionSignal(
+      'OriginLatency',
+      measuredAs('Average', 'Milliseconds'),
+    ),
+    originLatencySlowest: distributionSignal(
+      'OriginLatency',
+      measuredAs('Maximum', 'Milliseconds'),
+    ),
   },
   /** The load balancer in each availability zone, one series for each. */
   loadBalancerByZone: {

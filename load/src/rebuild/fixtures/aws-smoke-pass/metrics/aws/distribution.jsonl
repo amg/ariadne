@@ -1,0 +1,6 @@
+{"namespace":"AWS/CloudFront","name":"Requests","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Sum","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":4}]}
+{"namespace":"AWS/CloudFront","name":"BytesDownloaded","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Sum","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":20480}]}
+{"namespace":"AWS/CloudFront","name":"4xxErrorRate","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Average","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":0}]}
+{"namespace":"AWS/CloudFront","name":"5xxErrorRate","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Average","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":0}]}
+{"namespace":"AWS/CloudFront","name":"OriginLatency","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Average","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":12}]}
+{"namespace":"AWS/CloudFront","name":"OriginLatency","dimensions":{"DistributionId":"E2QWRUHAPOMQZL","Region":"Global"},"statistic":"Maximum","periodSeconds":60,"points":[{"at":"2026-10-18T00:00:00.000Z","value":40}]}

@@ -14,12 +14,13 @@ Start with the configuration; everything else follows from it.
 | `config/names.ts` | Every shared name (stacks, ports, tags, parameters), derived from the operator's `.env` |
 | `config/steps.ts` | The five sizes aws-prod runs at, and what each one loads |
 | `lib/worstCase.ts` | How a raise's worst-case cost is bounded by time |
-| `bin/app.ts` | The three stacks and what they share |
+| `bin/app.ts` | The four stacks and what they share |
 | `lib/core/` | What stays while aws-prod is down |
 | `lib/app/appStack.ts` | What stands up for a run, one construct per concern |
+| `lib/edgeRules/` | The edge's web ACL, raised with the app in `us-east-1` |
 | `lib/load/` | The generators' stack |
 | `../load/` | The load harness: the generator program, the archive and the rebuild that gives a run its verdict, a workspace held to the app's standard |
-| `cloudflare/core`, `cloudflare/app` | The origin identity, and the edge rules a raise adds |
+| `cloudflare/core`, `cloudflare/app` | The hostname's certificate, and the DNS record a raise points at the distribution |
 | `scripts/commands/` | The commands, one script each, reading top to bottom; `scripts/aws-prod` lists them |
 | `scripts/steps/`, `scripts/checks/` | What the commands run: steps named for the stack that raises them (`core-`, `app-`, `load-`), and checks before and after a raise |
 
@@ -29,7 +30,7 @@ Start with the configuration; everything else follows from it.
    everything aws-prod stands up, so nothing personal is committed:
 
    ```
-   AWS_PROD_HOSTNAME=aws-prod.example.com   # public hostname, proxied by Cloudflare
+   AWS_PROD_HOSTNAME=aws-prod.example.com   # public hostname, served by CloudFront
    AWS_PROD_ZONE=example.com                # the Cloudflare zone it lives in
    AWS_PROD_PROJECT=aws-prod                # prefixes stacks, tags, buckets, parameters
    ```
@@ -48,14 +49,10 @@ Start with the configuration; everything else follows from it.
    A load step replaces its tasks in a deploy, so a deploy takes no vCPU
    beyond the step's own; step-prod keeps its capacity and counts the extra
    tasks.
-4. **Cloudflare.** Any zone plan, Free included: the sign-in rate limit is
-   off by default (`edge_rate_limit` in `cloudflare/app` says why), and the
-   allow-list keeps everyone but the operator and the generators out.
-   Bot Fight Mode must be off: it challenges traffic from cloud address
-   ranges, the generators included, and no edge rule can exempt them on
-   the Free plan. An API token in `CLOUDFLARE_API_TOKEN` that can edit
-   DNS, SSL and certificates, WAF and configuration rules on that zone,
-   and read its Bot Management setting.
+4. **Cloudflare, for DNS only.** Any zone plan, Free included: Cloudflare
+   only answers for the hostname, and CloudFront does everything else. An
+   API token in `CLOUDFLARE_API_TOKEN` that can read that zone and edit its
+   DNS.
 5. **Tools on the operator's machine:** AWS CLI v2 with the Session Manager
    plugin, Docker, Terraform 1.10+, Node 22+, jq, curl, openssl.
 6. `npm ci` in this folder, and at the repository root, where the harness the archive runs on lives.
@@ -63,15 +60,14 @@ Start with the configuration; everything else follows from it.
 ## Commands
 
 ```bash
-scripts/aws-prod core          # once: bootstrap, core stack, origin identity
+scripts/aws-prod core          # once: bootstrap in both regions, core stack, the hostname's certificate
 scripts/aws-prod seed          # once: create the synthetic population and snapshot it
 scripts/aws-prod snapshot      # replace the seed snapshot with the database that is up
 
 scripts/aws-prod up smoke      # raise (about twenty minutes); run again to resume after a failure
 scripts/aws-prod up step-prod  # raise production configuration with auto-scaling (no load generator).
 scripts/aws-prod load-image    # build the generators' image alone; the next run's generators use it, with no new raise
-scripts/aws-prod load          # one load run at the raised step, skipping Cloudflare to measure aws-prod alone, then archive it into load/.runs/ and rebuild its verdict
-scripts/aws-prod load --edge   # the same, through Cloudflare, as users reach it
+scripts/aws-prod load          # one load run at the raised step, through CloudFront as users reach it, then archive it into load/.runs/ and rebuild its verdict
 scripts/aws-prod down          # tear down everything but core; refused while a run is unsealed
 scripts/aws-prod down --force  # the same, whether or not every run is sealed
 
@@ -95,8 +91,9 @@ A raise is refused when the day's recorded worst cases would pass $100. A
 load run that does not run its whole plan, because it was interrupted or
 failed, stops counting toward that limit; the ledger still lists it, since it
 may have cost something. `reset-budget` clears the day by hand. And
-the safety net deletes the app stack three hours after a raise and the
-load stack 100 minutes after it starts, whether or not anyone remembers.
+the safety net deletes the app stack and its edge rules three hours
+after a raise and the load stack 100 minutes after it starts, whether or not
+anyone remembers.
 
 ## Runs
 
@@ -138,21 +135,30 @@ run's record with the reason it stopped, even after ECS has forgotten it.
 The worst case for a run prices its generators at Spot. A launch that falls
 back to On-Demand costs more per hour than that, for as long as the run lasts.
 
-## The direct path
+## The way in
 
-`load` measures aws-prod alone, without Cloudflare's own limits in the
-result. `load --edge` goes through Cloudflare and measures what users get.
-The direct path keeps all three of the origin's locks: generators present
-their own client certificate from the same authority as Cloudflare's,
-requests still name the hostname, and the load balancer lets in one address
-only. Every generator leaves the load stack's network through one NAT
-gateway with one Elastic IP, and on the direct path the load stack adds that
-address to the origin's security group. The rule belongs to the load stack,
-so it goes when the stack goes. `load` deletes the stack once the run is
-sealed, or at once when it fails before the run begins recording. A run that
-could not be sealed keeps its stack for `archive`, and `down` or the safety
-net, 100 minutes after the stack started, takes it then. Nothing needs closing by
-hand. The gateway runs on both paths and is in the run's worst case.
+Cloudflare holds only the hostname's DNS record, pointing at a CloudFront
+distribution. CloudFront ends TLS, and its web ACL lets in only the
+operator's address and requests carrying the raise's load key, and limits
+sign-ins per address. The load balancer behind it has no public address:
+CloudFront reaches it through a VPC origin, over plain HTTP inside AWS. The
+web ACL lives in its own stack in `us-east-1`, the only region CloudFront
+takes one from, and `up` raises it before the app, `down` removes it after.
+Creating the distribution takes some minutes, and deleting it as long again.
+
+`load` goes through CloudFront, as users do. Every generator leaves the load
+stack's network through one NAT gateway with one Elastic IP, and the web ACL
+lets the generators in by the load key they carry, not by that address, so
+nothing at the origin opens or closes with a run. `load` deletes the stack
+once the run is sealed, or at once when it fails before the run begins
+recording. A run that could not be sealed keeps its stack for `archive`, and
+`down` or the safety net, 100 minutes after the stack started, takes it then.
+The gateway is in the run's worst case, and so are CloudFront's and the web
+ACL's charges for the run's traffic.
+
+The generators all run in one region, so they reach one or a few nearby edge
+locations, where real users would spread across many. Read AWS's guidance on
+load testing CloudFront before a step50-sized run.
 
 ## Steps
 

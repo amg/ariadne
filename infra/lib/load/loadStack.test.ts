@@ -1,20 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { App } from 'aws-cdk-lib';
-import { Match, Template } from 'aws-cdk-lib/assertions';
+import { Template } from 'aws-cdk-lib/assertions';
 import { REGION } from '../../config/names.ts';
 import { stepNamed } from '../../config/steps.ts';
 import { CoreStack } from '../core/coreStack.ts';
 import { LoadStack } from './loadStack.ts';
 
-type DirectPath = NonNullable<ConstructorParameters<typeof LoadStack>[2]['direct']>;
-
-const DIRECT: DirectPath = {
-  originAddress: 'origin.example.test',
-  originSecurityGroup: 'sg-0123456789abcdef0',
-};
-
-function loadTemplate(direct?: DirectPath) {
+function loadTemplate() {
   const app = new App();
   const env = { account: '123456789012', region: REGION };
   const core = new CoreStack(app, 'Core', { env });
@@ -23,7 +16,6 @@ function loadTemplate(direct?: DirectPath) {
     step: stepNamed('smoke'),
     loadImageTag: 'test',
     core: core.resources,
-    direct,
   });
   return Template.fromStack(load);
 }
@@ -57,35 +49,9 @@ describe('the load stack', () => {
     template.hasOutput('LoadSubnets', { Value: { 'Fn::Join': ['', [first, ',', second]] } });
   });
 
-  it('lets nothing into the origin when the run goes through Cloudflare', () => {
+  it('lets nothing into the origin, since the generators go through the edge as users do', () => {
     const template = loadTemplate();
 
     template.resourceCountIs('AWS::EC2::SecurityGroupIngress', 0);
-  });
-
-  it('on the direct path, lets in its public address alone, on 443, to the origin’s security group', () => {
-    const template = loadTemplate(DIRECT);
-
-    template.resourceCountIs('AWS::EC2::SecurityGroupIngress', 1);
-    const [addressId] = Object.keys(template.findResources('AWS::EC2::EIP'));
-    template.hasResourceProperties('AWS::EC2::SecurityGroupIngress', {
-      GroupId: DIRECT.originSecurityGroup,
-      IpProtocol: 'tcp',
-      FromPort: 443,
-      ToPort: 443,
-      CidrIp: { 'Fn::Join': ['', [{ 'Fn::GetAtt': [addressId, 'PublicIp'] }, '/32']] },
-    });
-  });
-
-  it('on the direct path, tells the generators where the origin is', () => {
-    const template = loadTemplate(DIRECT);
-
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: [
-        Match.objectLike({
-          Environment: Match.arrayWith([{ Name: 'ORIGIN_ADDRESS', Value: DIRECT.originAddress }]),
-        }),
-      ],
-    });
   });
 });

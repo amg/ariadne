@@ -29,7 +29,12 @@ function assertClose(actual: number, expected: number) {
 
 describe('the worst case of a load run', () => {
   it('counts the load network’s gateway and public address for the whole of the load stack’s life, even with no traffic', () => {
-    const noGateway = loadUsdOf({ generators: 0, egressGbPerHour: 0, logsGbPerHour: 0 });
+    const noGateway = loadUsdOf({
+      generators: 0,
+      egressGbPerHour: 0,
+      logsGbPerHour: 0,
+      requestMillionsPerHour: 0,
+    });
 
     const lcuFloor = PRICES.loadBalancer.perLcuHour;
     const cacheFloor =
@@ -39,16 +44,26 @@ describe('the worst case of a load run', () => {
     assertClose(noGateway, (lcuFloor + cacheFloor + gateway) * LOAD_HOURS);
   });
 
-  it('counts every GB the generators receive twice: once leaving the app, once through the gateway', () => {
+  it('counts every GB the generators receive twice: once leaving the edge, once through the gateway', () => {
     const added = loadUsdOf({ egressGbPerHour: 11 }) - loadUsdOf({ egressGbPerHour: 1 });
 
-    assertClose(added, 10 * (PRICES.egressPerGb + PRICES.natGateway.perGb) * LOAD_HOURS);
+    assertClose(added, 10 * (PRICES.cloudFront.perGb + PRICES.natGateway.perGb) * LOAD_HOURS);
   });
 
   it('counts every GB of the generators’ lines through the gateway as well as into the logs', () => {
     const added = loadUsdOf({ logsGbPerHour: 11 }) - loadUsdOf({ logsGbPerHour: 1 });
 
     assertClose(added, 10 * (PRICES.logsIngestPerGb + PRICES.natGateway.perGb) * LOAD_HOURS);
+  });
+
+  it('counts every request at the edge twice: once by CloudFront, once by the web ACL', () => {
+    const added =
+      loadUsdOf({ requestMillionsPerHour: 11 }) - loadUsdOf({ requestMillionsPerHour: 1 });
+
+    assertClose(
+      added,
+      10 * (PRICES.cloudFront.perMillionRequests + PRICES.waf.perMillionRequests) * LOAD_HOURS,
+    );
   });
 });
 

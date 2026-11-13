@@ -5,7 +5,7 @@ import { expectedSourcesOf, metricTargetsOf } from './raise.ts';
 import { raise } from './testing.ts';
 
 describe('metricTargetsOf', () => {
-  it('has a target for each service, the clusters, the load balancer and its target groups, the database, the cache and the Fargate usage', () => {
+  it('has a target for each service, the clusters, the distribution, the load balancer and its target groups, the database, the cache and the Fargate usage', () => {
     expect(metricTargetsOf(raise).map((target) => target.label)).toEqual([
       'ecs-cluster-app',
       'ecs-cluster-generator',
@@ -14,6 +14,7 @@ describe('metricTargetsOf', () => {
       'ecs-service-auth',
       'ecs-service-mock',
       'ecs-service-web',
+      'distribution',
       'load-balancer',
       'target-group-api',
       'target-group-web',
@@ -32,6 +33,21 @@ describe('metricTargetsOf', () => {
     );
 
     expect([...read].filter((namespace) => !kept.has(namespace))).toEqual([]);
+  });
+
+  it('reads the distribution’s metrics where CloudFront publishes them, and every other target’s in the raise’s own region', () => {
+    const regions = metricTargetsOf(raise).map(({ label, region }) => [label, region]);
+
+    expect(regions.filter(([, region]) => region !== undefined)).toEqual([
+      ['distribution', 'us-east-1'],
+    ]);
+  });
+
+  it('leaves the distribution out of a raise without one', () => {
+    const before = { ...raise, distribution: null };
+
+    expect(metricTargetsOf(before).map(({ label }) => label)).not.toContain('distribution');
+    expect(expectedSourcesOf(before).map(({ service }) => service)).not.toContain('distribution');
   });
 
   it('gives no two targets the same label, because the label names the file', () => {
@@ -61,6 +77,6 @@ describe('expectedSourcesOf', () => {
     expect(
       expected.filter((source) => source.kind === 'logs').map((source) => source.service),
     ).toEqual(['api', 'worker', 'auth']);
-    expect(expected).toHaveLength(3 + raise.services.length + 3);
+    expect(expected).toHaveLength(3 + raise.services.length + 4);
   });
 });
