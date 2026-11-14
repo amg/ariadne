@@ -24,8 +24,18 @@ Smoke passes through CloudFront: `20261113T104904Z-smoke-load`. All
 1,000 users signed in, 1,000 push streams held through a 10-minute
 hold without one ending early, and chat first byte p95 was 185 ms.
 CloudFront added about 4 ms between the edge and the load balancer, and
-about 8 ms to a sign-in end to end. No run larger than smoke has gone
-through CloudFront yet.
+about 8 ms to a sign-in end to end.
+
+Scale10 passes through CloudFront with its services scaling on CPU:
+`20261114T100754Z-scale10-load`. The API, worker and auth started at 2
+tasks each. 10,000 users rose over 30 minutes with no warm-up, held for
+15 and left over 20. All 10,000 push streams and 2,000 chatters held, no
+push stream ended early, rise and fall included, and all 10,000 sign-ins
+succeeded. Chat first byte p95 was 577 ms in the hold, against 446 ms in
+step10's. Only the worker scaled. It went to 3 and then 4 tasks on the
+rise, and was back at 2 three minutes after the run ended. Two API tasks
+carried the whole hold at 62% CPU at most, under their 65% target, and
+auth never left 2.
 
 ## What strained, and the fix
 
@@ -57,7 +67,9 @@ balancer began the run at about 30 capacity units, and while it grew to
 about 560, 27,076 sign-ins failed without an answer
 (`20261031T040409Z`). Fixed by ramping the warm-up as slowly as the
 run. The load balancer then began the run at about 560 units, and no
-sign-in failed (`20261102T001256Z`).
+sign-in failed (`20261102T001256Z`). A 30-minute rise to 10,000 users
+needed no warm-up. The load balancer grew from 10 to 30 units and cut no
+stream (`20261114T100754Z`).
 
 **The API kept dead streams for 15 minutes,** Linux's default for
 unacknowledged data. Fixed by making the API's tasks give up after about
@@ -93,6 +105,14 @@ next run's sign-ins all failed with wrong credentials, at 6 ms each
 against the 220 ms a password check takes (`20261113T064642Z`). The
 challenge went with Cloudflare's proxy. A reseed through CloudFront
 signed up all 100,000 accounts.
+
+**Auth ran unevenly.** During step50's ramp the busiest auth task ran
+at 66 to 92% CPU while the average stayed at 27 to 30%
+(`20261102T001256Z`). Fixed by reaching auth through ECS Service Connect,
+which spreads requests over every auth task. On scale10 the busiest of
+the two tasks stayed within 8 points of the average, apart from the
+first minute of sign-ins (`20261114T100754Z`). Auth never scaled there,
+so whether a new auth task takes its share is not yet seen.
 
 **The quota check counted a deploy surge** that a first raise never uses.
 Fixed by giving each step its own deploy policy.
@@ -143,20 +163,26 @@ up only one or two jobs per look.
   first byte p95 reached 1,001 to 1,980 ms (`20261031T003201Z`). At 6
   jobs per worker, at most 2 waited (`20261031T024203Z`), but a
   notified run reached 53 (`20261029T094411Z`). So the cause is not
-  settled.
+  settled. On scale10, with 5,000 streams on each of two API copies,
+  one copy filled its 40 connections with up to 22 waiting while API
+  CPU stayed at 57 to 62% (`20261114T100754Z`). CPU scaling does not
+  see this.
 - **API CPU climbs across the hold.** The busiest task went from 58% to
   81% on a flat 4,350 replies a minute (`20261029T053022Z`). At 6 jobs
   per worker it held flat, 62% in the first half of the hold and 61% in
   the second (`20261031T024203Z`). On step50, with ten times the API
   tasks, the busiest held at 38% in both halves (`20261031T040409Z`),
   so the API is no longer the nearest limit.
-- **Auth runs unevenly.** During step50's ramp the busiest auth task ran
-  at 66 to 92% CPU while the average stayed at 27 to 30%
-  (`20261102T001256Z`). Sign-ins were fast all the same, p95 350 ms at
-  the API, but CPU scaling would react to the one hot task. The API
-  finds the auth tasks by name and keeps its connections, so each API
-  copy may stick to a few of them. That is a guess until each auth
-  task's sign-ins are recorded.
+- **The worker scales out 6 minutes behind its CPU.** On scale10,
+  worker CPU crossed its 70% target at 10:29 and peaked at 85%, and the
+  third task was asked for at 10:34:48. Meanwhile job wait p95 rose from
+  about 120 to 308 ms, and fell back once the task ran
+  (`20261114T100754Z`). Users were still far inside the limits, but
+  50,000 users rising over 45 minutes arrive about three times faster.
+- **API and auth scaling have not been seen.** Neither reached its
+  target on scale10, so no task was added or removed. Whether removing
+  an API task cuts push streams, and whether a new auth task takes
+  sign-ins, is still unmeasured (`20261114T100754Z`).
 - **Spend writers wait on each other at step50.** Row lock waits
   averaged 3.9 sessions over the hold, against none on step10, and rose
   from 3.0 in its first half to 4.8 in its second (`20261102T001256Z`).
