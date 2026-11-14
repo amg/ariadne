@@ -10,7 +10,7 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC2034 # read by the commands that run other commands
 COMMANDS_DIR="$SCRIPTS_DIR/commands"
 
-for file in "$SCRIPTS_DIR"/lib/{common,aws,cloudflare}.sh "$SCRIPTS_DIR"/checks/*.sh "$SCRIPTS_DIR"/steps/*.sh "$SCRIPTS_DIR"/steps/*/*.sh; do
+for file in "$SCRIPTS_DIR"/lib/{common,aws,cloudflare}.sh "$SCRIPTS_DIR"/checks/*.sh "$SCRIPTS_DIR"/steps/*/*.sh; do
   # shellcheck source=/dev/null
   source "$file"
 done
