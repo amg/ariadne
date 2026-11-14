@@ -22,7 +22,7 @@ const INTERFACE_ENDPOINTS: Record<string, ec2.InterfaceVpcEndpointAwsService> = 
 
 /** The three subnet tiers, each in both availability zones. */
 export const SUBNETS = {
-  /** The load balancer, and nothing else, faces the internet. */
+  /** The load balancer, which CloudFront reaches through its VPC origin. */
   edge: { subnetGroupName: 'edge' },
   /** Services, the bastion and the endpoints. */
   app: { subnetGroupName: 'app' },
@@ -44,7 +44,7 @@ export class Network extends Construct {
       availabilityZones: AVAILABILITY_ZONES,
       natGateways: 0,
       subnetConfiguration: [
-        { name: 'edge', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+        { name: 'edge', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
         { name: 'app', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 20 },
         { name: 'data', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
       ],
@@ -59,6 +59,18 @@ export class Network extends Construct {
           ),
         },
       },
+    });
+
+    // CloudFront creates a VPC origin only in a network with an internet
+    // gateway attached, as the sign that the network may take traffic from
+    // the internet. That traffic reaches the load balancer through CloudFront's
+    // own network interfaces, never through the gateway. No subnet routes to
+    // the gateway, so nothing inside can reach the internet or be reached
+    // from it. It is not a NAT gateway.
+    const gateway = new ec2.CfnInternetGateway(this, 'InternetGateway');
+    new ec2.CfnVPCGatewayAttachment(this, 'InternetGatewayAttachment', {
+      vpcId: this.vpc.vpcId,
+      internetGatewayId: gateway.ref,
     });
 
     for (const [name, service] of Object.entries(INTERFACE_ENDPOINTS)) {

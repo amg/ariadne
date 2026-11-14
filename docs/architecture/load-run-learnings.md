@@ -20,6 +20,13 @@ was 448 ms, and the busiest generator used 43.6% CPU. The database, an
 r7g.4xlarge, held flat at 52.9% CPU through the hold, peaking at 54.9%,
 while workers started about 41,700 jobs a minute.
 
+Smoke passes through CloudFront: `20261113T104904Z-smoke-load`. All
+1,000 users signed in, 1,000 push streams held through a 10-minute
+hold without one ending early, and chat first byte p95 was 185 ms.
+CloudFront added about 4 ms between the edge and the load balancer, and
+about 8 ms to a sign-in end to end. No run larger than smoke has gone
+through CloudFront yet.
+
 ## What strained, and the fix
 
 **Too few jobs ran at once.** The first step50 run queued jobs while
@@ -77,6 +84,15 @@ carried the load: from the last generator's start to the end of the hold.
 **A printed step configuration lost a field.** A sized step was refused
 because the run command dropped the share of users who chat. Fixed by
 keeping the whole configuration and refusing one without that field.
+
+**The seed came out empty, and replaced the good one.** Cloudflare
+answered every sign-up of a reseed with its 403 challenge page. The
+seeding run counts a failed sign-up as nothing worse than a log line,
+so it snapshotted an empty database and deleted the older seed. The
+next run's sign-ins all failed with wrong credentials, at 6 ms each
+against the 220 ms a password check takes (`20261113T064642Z`). The
+challenge went with Cloudflare's proxy. A reseed through CloudFront
+signed up all 100,000 accounts.
 
 **The quota check counted a deploy surge** that a first raise never uses.
 Fixed by giving each step its own deploy policy.
@@ -155,6 +171,9 @@ up only one or two jobs per look.
   first token p95 stayed between 250 and 400 ms in every minute
   (`20261102T001256Z`). Whether the gap is in a generator, an API copy
   or the load balancer is not recorded.
+- **A seed or a run can fail quietly.** A seed snapshots and replaces
+  the older one whatever its sign-ups did. A step without limits, such
+  as smoke, passes even when no user signed in (`20261113T064642Z`).
 
 ## Keeping this file useful
 

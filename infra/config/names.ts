@@ -22,7 +22,7 @@ function operatorValue(name: string, example: string) {
   return value;
 }
 
-/** The public hostname, proxied by Cloudflare. */
+/** The public hostname. CloudFront serves it, and Cloudflare's DNS points it there. */
 export const HOSTNAME = operatorValue('AWS_PROD_HOSTNAME', 'aws-prod.example.com');
 
 /** The Cloudflare zone the hostname lives in. */
@@ -45,6 +45,9 @@ if (!/^[a-z][a-z0-9-]{0,39}$/.test(PROJECT)) {
 
 export const REGION = 'ap-southeast-2';
 
+/** The only region CloudFront takes a certificate and a web ACL from, and where it publishes its metrics. */
+export const EDGE_REGION = 'us-east-1';
+
 /** Two zones: the fewest the load balancer, RDS and ElastiCache accept. */
 export const AVAILABILITY_ZONES = ['ap-southeast-2a', 'ap-southeast-2b'];
 
@@ -55,6 +58,8 @@ const pascal = PROJECT.split('-')
 export const STACKS = {
   core: `${pascal}Core`,
   app: `${pascal}App`,
+  /** The edge's web ACL, raised and removed with the app, in the edge's own region. */
+  edgeRules: `${pascal}EdgeRules`,
   load: `${pascal}Load`,
 } as const;
 
@@ -121,12 +126,18 @@ export const POPULATION = {
 /** Parameters the scripts write and the stacks read at deploy time. */
 export const PARAMETERS = {
   runKey: `/${PROJECT}/run-key`,
-  originCertificateArn: `/${PROJECT}/origin-certificate-arn`,
-  /** The client certificate and key load generators present on the direct path. */
-  loadClientCertificate: `/${PROJECT}/load-client-certificate`,
-  loadClientKey: `/${PROJECT}/load-client-key`,
+  /** The certificate the distribution presents for the hostname. */
+  edgeCertificateArn: `/${PROJECT}/edge-certificate-arn`,
+  /** The web ACL of the raise standing now, which the distribution enforces. */
+  webAclArn: `/${PROJECT}/web-acl-arn`,
   /** The image tag the load generators run, which a raise starts as its own and `load-image` replaces. */
   loadImageTag: `/${PROJECT}/load-image-tag`,
+} as const;
+
+/** The edge rules stack's parameters, which every deploy of it gives afresh. */
+export const EDGE_RULES_PARAMETERS = {
+  operatorAddresses: 'OperatorAddresses',
+  runKey: 'RunKey',
 } as const;
 
 /** The Service Quotas codes of the Fargate vCPU quotas that bound a raise. */
@@ -135,15 +146,14 @@ export const FARGATE_QUOTAS = {
   spot: 'L-36FBB829',
 } as const;
 
-/** Where the origin's client-certificate authority sits in the vault bucket. */
-export const ORIGIN_TRUST_KEY = 'origin-trust/ca.pem';
-
 export const vaultBucketName = (account: string) => `${PROJECT}-vault-${account}`;
 
 /** CloudFormation output keys the scripts read back after a deploy. */
 export const OUTPUTS = {
   vaultBucket: 'VaultBucket',
   originDnsName: 'OriginDnsName',
+  distributionDomainName: 'DistributionDomainName',
+  webAclArn: 'WebAclArn',
   clusterName: 'ClusterName',
   databaseId: 'DatabaseId',
   databaseEndpoint: 'DatabaseEndpoint',

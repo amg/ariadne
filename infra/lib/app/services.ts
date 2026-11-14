@@ -161,9 +161,9 @@ function backendSettings(props: ServicesProps): {
       SUPERTOKENS_CONNECTION_URI: `http://${INTERNAL_NAMES.auth}.${INTERNAL_DOMAIN}:${PORTS.auth}`,
       CORS_ORIGINS: `https://${HOSTNAME}`,
       AUTH_SIGNUP_ENABLED: String(step.signupOpen),
-      // Keeps the app's per-address sign-in limit off, which would throttle
-      // the load generators. The edge rule itself is off on the Free plan;
-      // the allow-list keeps everyone else out (cloudflare/app edge_rate_limit).
+      // The edge's web ACL limits sign-ins per address and lets the load
+      // generators past, so the app's own limit, which would throttle them,
+      // stays off.
       AUTH_RATE_LIMIT_AT_EDGE: 'true',
       VALKEY_URL: cache.url,
       EXCHANGE_STALENESS_MS: '240000',

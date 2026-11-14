@@ -1,5 +1,4 @@
 import type { Phases, Report, StateLine } from '../records/index.ts';
-import { takeDirectPath } from './directPath.ts';
 import { type Levels, createLevels } from './levels.ts';
 import { stateLineText } from './lines.ts';
 import { runLoad } from './load.ts';
@@ -31,7 +30,6 @@ if (givenPlan.mode === 'load') {
   process.on('SIGTERM', () => toldToStop.abort());
   process.on('SIGINT', () => toldToStop.abort());
 }
-if (givenPlan.direct !== null) takeDirectPath(givenPlan.direct);
 const plan = planAt(givenPlan, Date.now());
 const levels = createLevels();
 const requests = createRequestLog({

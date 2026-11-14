@@ -63,13 +63,13 @@ truth; nothing here repeats it.
   mode there, and the first error closes the session. A run's
   `load/.runs/<run>/logs/generator-<n>-attempt-<m>.log` holds each
   generator's first errors;
-  requests blocked at the edge show in Cloudflare under Security, Events.
-- **Load paths.** `aws-prod load` skips Cloudflare to measure aws-prod
-  alone: generators present their own client certificate, and leave the
-  load stack's network through one NAT address that the stack itself lets
-  into the origin, so the way in lasts exactly as long as the load stack.
-  Steps are proven on the
-  direct path first, then repeated through Cloudflare with `--edge`.
+  requests blocked at the edge show in the sampled requests of the
+  `<Project>EdgeRules` web ACL (WAF, us-east-1).
+- **The way in.** CloudFront, with a web ACL in us-east-1, is aws-prod's
+  front door, and Cloudflare holds only the hostname's DNS record.
+  `aws-prod load` goes through CloudFront as users do, and the web ACL
+  lets the generators in by the run key header. Runs named `…-direct`
+  skipped the edge and went straight to the load balancer.
 - **Query tags.** A query file tags its query with
   `db.withPlugin(tagQuery('<folder>/<file>'))` inside the function, on
   each call, so it follows a request scope's handle. Postgres and

@@ -30,7 +30,7 @@ function limitAuthRoutes(app: FastifyInstance) {
  * The app's request limits: every route, and the auth routes unless the
  * edge limits those by the real client address. Each request counts
  * against its signed-in user, or else its client address. Counts are kept
- * in memory (single replica at home, Cloudflare edge limits in prod).
+ * in memory (single replica at home, edge limits in prod).
  * Register it before the routes it limits.
  */
 export async function registerRateLimits(app: FastifyInstance) {

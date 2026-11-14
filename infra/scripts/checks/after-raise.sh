@@ -1,18 +1,22 @@
-# Checks run after every raise: aws-prod answers through Cloudflare, and
-# only through Cloudflare, and the load balancer holds the capacity its
-# step reserves.
+# Checks run after every raise: aws-prod answers at its hostname, the load
+# balancer has no public address and routes no other name, and the load
+# balancer holds the capacity its step reserves.
 
 verify_raise() {
-  step "Verify: reachable through Cloudflare"
+  step "Verify: reachable at the hostname, through CloudFront"
   wait_for_health "https://$HOSTNAME_FQDN/api/health"
 
-  step "Verify: unreachable around Cloudflare"
-  local origin
-  origin="$(stack_output "$APP_STACK" "$OUT_ORIGIN_DNS_NAME")"
-  if curl -sS --max-time 10 -o /dev/null "https://$origin/api/health" 2>/dev/null; then
-    fail "The origin answered a direct request; it must refuse anyone but Cloudflare"
-  fi
-  info "the origin refused a direct connection"
+  step "Verify: unreachable around the hostname"
+  local scheme distribution answer
+  scheme="$(origin_load_balancer_field Scheme)" || fail "Could not look up the origin's load balancer"
+  [[ "$scheme" == internal ]] ||
+    fail "The origin's load balancer is ${scheme:-missing}; it must have no public address"
+  info "the load balancer has no public address"
+  distribution="$(stack_output "$APP_STACK" "$OUT_DISTRIBUTION_DOMAIN_NAME")"
+  answer="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "https://$distribution/api/health" 2>/dev/null || true)"
+  [[ "$answer" == 421 ]] ||
+    fail "The distribution's own name answered ${answer:-nothing}, not 421; the load balancer must route only the hostname"
+  info "the distribution's own name is refused"
 
   wait_for_reserved_capacity
 }

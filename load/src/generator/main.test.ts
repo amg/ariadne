@@ -1,7 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 
 const MAIN = new URL('./main.ts', import.meta.url).pathname;
@@ -28,11 +26,10 @@ type Ended = { code: number | null; printed: string; endedAfterMs: number };
 function generatorRun(
   holdSeconds: number,
   stop: { signal: NodeJS.Signals; afterMs: number } | null,
-  extraEnvironment: NodeJS.ProcessEnv = {},
 ): Promise<Ended> {
   const started = performance.now();
   const child: ChildProcess = spawn(process.execPath, [MAIN], {
-    env: { ...environment(holdSeconds), ...extraEnvironment },
+    env: environment(holdSeconds),
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   let printed = '';
@@ -75,28 +72,6 @@ describe('a generator process', () => {
     },
     30_000,
   );
-
-  it('on the direct path, begins its plan at once, asking the origin nothing first', async () => {
-    const asked: string[] = [];
-    const origin = createServer((request, response) => {
-      asked.push(request.url ?? '');
-      response.end();
-    });
-    await new Promise<void>((resolve) => origin.listen(0, '127.0.0.1', resolve));
-    const { port } = origin.address() as AddressInfo;
-
-    const ended = await generatorRun(1, null, {
-      TARGET_URL: `http://origin.invalid:${port}`,
-      ORIGIN_ADDRESS: '127.0.0.1',
-      ORIGIN_CLIENT_CERTIFICATE: 'certificate',
-      ORIGIN_CLIENT_KEY: 'key',
-    }).finally(() => origin.close());
-
-    expect(ended.code).toBe(0);
-    expect(ended.endedAfterMs).toBeLessThan(15_000);
-    expect(reportOf(ended.printed)).toMatchObject({ interrupted: false });
-    expect(asked).toEqual([]);
-  }, 30_000);
 });
 
 describe('the generator’s sources', () => {

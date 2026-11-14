@@ -41,6 +41,7 @@ export const raise: Raise = {
     })),
     { label: 'generator', name: '/aws-prod-load/generators', stack: 'load' as const },
   ],
+  distribution: { id: 'E2QWRUHAPOMQZL' },
   loadBalancer: { dimension: 'app/aws-prod-origin/50dc6c495c0c9188' },
   targetGroups: ['targetgroup/api/73e2d6bc24d8a067', 'targetgroup/web/83e2d6bc24d8a068'],
   database: { identifier: 'awsprodapp-database', resourceId: 'db-ABCDEF' },

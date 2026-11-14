@@ -13,17 +13,15 @@
 # The generators run the image the raise was made with, unless `aws-prod
 # load-image` has put another in its place; the run's record names the one they ran.
 #
-# A run goes through Cloudflare, as users do, unless it takes the direct
-# path: then the generators skip Cloudflare and present their own client
-# certificate to the load balancer. Every generator leaves the load stack's
-# network from its one public address, and on the direct path the stack lets
-# that address into the origin, so the way in goes when the stack goes.
+# A run goes through CloudFront, as users do. Every generator leaves the
+# load stack's network from its one public address, and the edge lets it in
+# by the load key it carries.
 #
 # This shell keeps what only a shell can do from outside the command: the
 # generators' stack, and the day's budget claim.
 
-run_generators() { # <step> <image tag> <load|seed> [edge|direct]
-  local step="$1" tag="$2" mode="$3" path="${4:-edge}"
+run_generators() { # <step> <image tag> <load|seed>
+  local step="$1" tag="$2" mode="$3"
   RUN_ID=""
   LOAD_STACK_DEPLOYED=""
   STEP_CONFIG_FILE=""
@@ -40,22 +38,14 @@ run_generators() { # <step> <image tag> <load|seed> [edge|direct]
   seed="$(raised_seed_snapshot)" || return 1
   load_tag="$(load_image_tag "$tag")" || return 1
   context=(-c "seedSnapshot=$seed")
-  if [[ "$path" == direct ]]; then
-    local origin group
-    origin="$(stack_output "$APP_STACK" "$OUT_ORIGIN_DNS_NAME")" || return 1
-    group="$(origin_security_group)" || return 1
-    [[ -n "$group" ]] || fail "Could not find the origin's security group, so the direct path cannot be opened"
-    context+=(-c "originAddress=$origin" -c "originSecurityGroup=$group")
-  fi
   step "Load: generators' network and task definition"
   LOAD_STACK_DEPLOYED=1
   run_cdk deploy "$LOAD_STACK" --exclusively -c "step=$step" -c "imageTag=$tag" -c "loadImageTag=$load_tag" "${context[@]}"
 
   RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$step-$mode"
-  if [[ "$path" == direct ]]; then RUN_ID="$RUN_ID-direct"; fi
   step "Load: $STEP_GENERATORS generators, $STEP_USERS users, run $RUN_ID"
   info "generators run image $load_tag"
-  run_generators_in_ecs "$step" "$tag" "$load_tag" "$mode" "$path" "$seed"
+  run_generators_in_ecs "$step" "$tag" "$load_tag" "$mode" "$seed"
   # The run ran its whole plan, so its worst case stays counted.
   BUDGET_CLAIM_AT=""
   if run_is_unsealed "$RUN_ID"; then
@@ -68,8 +58,8 @@ run_generators() { # <step> <image tag> <load|seed> [edge|direct]
 
 # Runs the generators through the harness. Its exit status says how the run
 # ended: 0 when it ran its plan, 130 when it was interrupted, 1 when it failed.
-run_generators_in_ecs() { # <step> <image tag> <load image tag> <load|seed> <edge|direct> <seed snapshot>
-  local step="$1" tag="$2" load_tag="$3" mode="$4" path="$5" seed="$6"
+run_generators_in_ecs() { # <step> <image tag> <load image tag> <load|seed> <seed snapshot>
+  local step="$1" tag="$2" load_tag="$3" mode="$4" seed="$5"
   local cluster definition subnets group images
   # Each lookup is its own statement, because one inside the command's
   # arguments that failed would hand the command an empty value.
@@ -87,9 +77,8 @@ run_generators_in_ecs() { # <step> <image tag> <load image tag> <load|seed> <edg
   if [[ "$mode" == load ]]; then
     images="$(jq -cn --arg tag "$tag" --arg load "$load_tag" --arg auth "$AUTH_CORE_TAG" \
       '{backend: $tag, web: $tag, tools: $tag, load: $load, auth: $auth}')" || return 1
-    if [[ "$path" == edge ]]; then path=cloudflare; fi
     options+=(
-      --step "$step" --path "$path" --images "$images"
+      --step "$step" --images "$images"
       --app-stack "$APP_STACK" --load-stack "$LOAD_STACK"
     )
   fi
@@ -103,9 +92,8 @@ run_generators_in_ecs() { # <step> <image tag> <load image tag> <load|seed> <edg
 # day's budget and the generators' stack, unless the run's own path already
 # deleted the stack. A run that did not run its whole
 # plan releases its claim on the day's budget. The generators' stack goes,
-# and with it the direct path's way into the origin, except when the run could
-# not be sealed: the archive reads its tasks, so the stack stays for
-# `aws-prod archive`. A command that ends before its run began recording has
+# except when the run could not be sealed: the archive reads its tasks, so
+# the stack stays for `aws-prod archive`. A command that ends before its run began recording has
 # no run folder, and its stack goes at once. Each step runs in a subshell,
 # because a helper that fails ends the shell it runs in, and the handler must
 # get to the stack.
@@ -130,10 +118,4 @@ finish_load_command() {
     fi
   fi
   exit "$status"
-}
-
-# Prints the origin's security group, or nothing when no load balancer has the
-# origin's address. Fails when AWS could not be asked.
-origin_security_group() {
-  origin_load_balancer_field 'SecurityGroups[0]'
 }

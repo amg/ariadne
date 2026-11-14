@@ -9,6 +9,8 @@ export const AWS_METRIC_RESOURCES = {
   generatorCluster: 'ecs-cluster-generator',
   /** One of the app's services, by its label, such as `api`. */
   service: (label: string) => `ecs-service-${label}`,
+  /** CloudFront's distribution, at the edge in front of the load balancer. */
+  distribution: 'distribution',
   loadBalancer: 'load-balancer',
   /** One of the load balancer's target groups, by the name in its ARN. */
   targetGroup: (name: string) => `target-group-${name}`,

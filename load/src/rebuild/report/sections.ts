@@ -3,6 +3,7 @@ import { MINUTE_MS } from '../moments.ts';
 import type { MinuteTable, RunFacts } from '../types.ts';
 import { type Section, builderOf, withoutEmpty } from './builder.ts';
 import {
+  edgeSection,
   hostSection,
   insightsSection,
   markersSection,
@@ -38,7 +39,8 @@ type Inputs = {
  * dashboard, in the dashboard's order. What the run holds beyond the
  * dashboard follows: the push streams that ended early, how loaded each
  * copy of the backend is, the home machine, Performance Insights, the
- * target groups and what the run wrote to the database. The list of
+ * edge in front of the load balancer, the target groups and what the run
+ * wrote to the database. The list of
  * moments the charts mark comes last. A line with no value, a chart left with no line
  * and a section left with nothing are left out.
  */
@@ -74,6 +76,7 @@ export function reportSections({ facts, table, judgements }: Inputs): Section[] 
     copiesSection(builder),
     hostSection(builder),
     ...(insights === null ? [] : [insightsSection(builder, insights)]),
+    edgeSection(builder),
     targetGroupsSection(builder),
     ...(markers.length === 0 ? [] : [markersSection(markers)]),
   ]);

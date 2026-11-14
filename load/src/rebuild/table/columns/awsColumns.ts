@@ -122,6 +122,8 @@ const [APP_5XX, BALANCER_5XX] = BALANCER_ANSWERS.serverErrors;
 const [APP_4XX, BALANCER_4XX] = BALANCER_ANSWERS.clientErrors;
 
 const LB = SIGNALS.loadBalancer;
+const EDGE = SIGNALS.distribution;
+const BYTES_PER_MIB = 1024 ** 2;
 const DB = SIGNALS.database;
 const CACHE = SIGNALS.cache;
 
@@ -148,6 +150,17 @@ const FIGURES: Readonly<Record<string, readonly AwsFigure[]>> = {
     figure('balancer_capacity_used_percent', LB.capacityUsed),
     figure('balancer_capacity_units_peak', LB.capacityUnitsPeak),
     figure('balancer_capacity_units_reserved', LB.capacityUnitsReserved),
+  ],
+  [RESOURCES.distribution]: [
+    figure('edge_requests', EDGE.requests),
+    figure('edge_sent_mib', EDGE.bytesSent, { scale: 1 / BYTES_PER_MIB, places: 1 }),
+    figure('edge_4xx_percent', EDGE.clientErrorPercent, { places: 2 }),
+    figure('edge_5xx_percent', EDGE.serverErrorPercent, { places: 2 }),
+    figure('edge_502_percent', EDGE.badGatewayPercent, { places: 2 }),
+    figure('edge_503_percent', EDGE.unavailablePercent, { places: 2 }),
+    figure('edge_504_percent', EDGE.gatewayTimeoutPercent, { places: 2 }),
+    figure('edge_origin_latency_average_ms', EDGE.originLatencyAverage, { places: 1 }),
+    figure('edge_origin_latency_slowest_ms', EDGE.originLatencySlowest, { places: 1 }),
   ],
   [RESOURCES.fargateUsage]: [
     figure('fargate_on_demand_vcpu', SIGNALS.fargateUsage.onDemandVcpu),
@@ -260,6 +273,56 @@ function zoneColumns(balancer: ResourceMetrics): Column[] {
   );
 }
 
+/**
+ * The columns of the edge's server errors: every one it answered with, and
+ * those it gave itself rather than passed on from the load balancer.
+ */
+export const EDGE_SERVER_ERRORS = {
+  all: 'edge_5xx',
+  givenByEdge: 'edge_own_5xx',
+} as const;
+
+/**
+ * The edge's server errors in each minute, worked out from its requests and
+ * the share of them that were server errors. The edge's own are those the
+ * load balancer did not give, which the edge gives when it cannot reach the
+ * load balancer or waits on it too long. Null for a minute the edge has no
+ * figures for.
+ */
+function edgeServerErrors({
+  distribution,
+  balancer,
+}: {
+  distribution: ResourceMetrics;
+  balancer: ResourceMetrics | undefined;
+}) {
+  const requests = perMinute(seriesMatching(distribution, EDGE.requests), EDGE.requests.minute);
+  const share = perMinute(
+    seriesMatching(distribution, EDGE.serverErrorPercent),
+    EDGE.serverErrorPercent.minute,
+  );
+  const passedOn = [LB.answeredByServiceWith5xx, LB.answeredItselfWith5xx].map((signal) =>
+    balancer === undefined
+      ? () => null
+      : perMinute(seriesMatching(balancer, signal), signal.minute),
+  );
+  const all = (minute: number): Cell => {
+    const count = requests(minute);
+    const percent = share(minute);
+    return count === null || percent === null ? null : Math.round((count * percent) / 100);
+  };
+  const givenByEdge = (minute: number): Cell => {
+    const total = all(minute);
+    if (total === null) return null;
+    const fromBalancer = passedOn.reduce((sum, at) => sum + (at(minute) ?? 0), 0);
+    return Math.max(0, total - fromBalancer);
+  };
+  return [
+    { name: EDGE_SERVER_ERRORS.all, at: all },
+    { name: EDGE_SERVER_ERRORS.givenByEdge, at: givenByEdge },
+  ];
+}
+
 /** Every figure of the CloudWatch metrics the run kept, in the unit the report shows it in. */
 export function awsColumns(data: RunData): Column[] {
   const files = [...data.awsMetrics].sort((a, b) => compareText(a.resource, b.resource));
@@ -275,11 +338,13 @@ export function awsColumns(data: RunData): Column[] {
       }),
     );
   const balancer = files.find(({ resource }) => resource === RESOURCES.loadBalancer);
+  const distribution = files.find(({ resource }) => resource === RESOURCES.distribution);
   return [
     ...files.flatMap((metrics) =>
       (FIGURES[metrics.resource] ?? []).map((figure) => columnOf(metrics, figure)),
     ),
     ...(balancer === undefined ? [] : [balancerAnswered(balancer), ...zoneColumns(balancer)]),
+    ...(distribution === undefined ? [] : edgeServerErrors({ distribution, balancer })),
     ...generatorShare('generators_cpu_percent', SHARES.generatorCpuTotal, data),
     ...busiestGeneratorCpu(data),
     ...generatorShare('generators_memory_percent', SHARES.generatorMemoryTotal, data),

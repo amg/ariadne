@@ -90,6 +90,9 @@ export function raiseOf(input: {
         stack: 'load' as const,
       })),
     ],
+    distribution: {
+      id: onlyOne(app.resources, 'AWS::CloudFront::Distribution', app.name).physicalId,
+    },
     loadBalancer: { dimension: loadBalancer },
     targetGroups: ofType(app.resources, 'AWS::ElasticLoadBalancingV2::TargetGroup').map(
       (group) => `targetgroup/${afterResourceType(group.physicalId, 'targetgroup')}`,

@@ -1,7 +1,7 @@
 // AWS production entry point — ECS/Fargate deployment.
 // Always runs as API-only; the worker is a separate service.
 // Requires Redis (Valkey) for multi-copy coordination (event bus).
-// Rate limiting is handled at the edge (Cloudflare), not in-memory.
+// Rate limiting is handled at the edge, not in-memory.
 // Must be the first import: loads the repo-root .env before any module
 // reads process.env (db.ts resolves the connection at import time).
 import '@config/dotenv';
@@ -32,7 +32,7 @@ const start = async () => {
     const features = featureFlags();
     const app = await createApp(features, {
       corsOrigins,
-      enableRateLimiting: false, // Cloudflare edge handles rate limiting
+      enableRateLimiting: false, // the edge handles rate limiting
     });
 
     // AWS always runs multiple copies — Redis is required for the event bus.

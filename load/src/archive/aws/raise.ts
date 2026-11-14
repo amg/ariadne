@@ -5,10 +5,14 @@ import type { ExpectedSource } from '../selfChecks.ts';
 
 const stackSchema = z.object({ name: z.string(), id: z.string() });
 
+/** The region CloudFront publishes every distribution's metrics in. */
+const CLOUDFRONT_METRICS_REGION = 'us-east-1';
+
 /**
  * What a raise was made of, written down while it stood so that a run can
  * be archived after its stacks are gone: the names of its clusters, services
- * and log groups, its load balancer, its database and its cache.
+ * and log groups, its distribution, its load balancer, its database and its
+ * cache.
  */
 export const raiseSchema = z.object({
   account: z.string(),
@@ -21,6 +25,8 @@ export const raiseSchema = z.object({
   logGroups: z.array(
     z.object({ label: z.string(), name: z.string(), stack: z.enum(['app', 'load']) }),
   ),
+  /** Null for a raise without a distribution. */
+  distribution: z.object({ id: z.string() }).nullable().default(null),
   loadBalancer: z.object({
     /** As CloudWatch names it in a dimension: `app/<name>/<id>`. */
     dimension: z.string(),
@@ -60,6 +66,8 @@ export type MetricTarget = {
    * most dimensions.
    */
   dimensions: Readonly<Record<string, string>>;
+  /** The region CloudWatch holds the metrics in, when it is not the raise's own. */
+  region?: string;
 };
 
 /** The metrics of every resource of the raise that CloudWatch holds some for. */
@@ -79,6 +87,16 @@ export function metricTargetsOf(raise: Raise) {
         dimensions: { ClusterName: service.cluster, ServiceName: service.name },
       }),
     ),
+    ...(raise.distribution === null
+      ? []
+      : [
+          {
+            label: AWS_METRIC_RESOURCES.distribution,
+            namespaces: namespacesOf(SIGNALS.distribution),
+            dimensions: { DistributionId: raise.distribution.id, Region: 'Global' },
+            region: CLOUDFRONT_METRICS_REGION,
+          },
+        ]),
     {
       label: AWS_METRIC_RESOURCES.loadBalancer,
       namespaces: namespacesOf(SIGNALS.loadBalancer),
@@ -112,7 +130,7 @@ export function metricTargetsOf(raise: Raise) {
 /**
  * The logs and metrics a raise's run must leave: the log group of each
  * service whose logs are kept, every service's CPU and memory, the
- * database, the cache and the load balancer.
+ * database, the cache, the load balancer and the distribution in front of it.
  */
 export function expectedSourcesOf(raise: Raise) {
   const metrics = (service: string, label: string): ExpectedSource => ({
@@ -134,6 +152,9 @@ export function expectedSourcesOf(raise: Raise) {
     metrics('postgres', AWS_METRIC_RESOURCES.database),
     metrics('cache', AWS_METRIC_RESOURCES.cache),
     metrics('load balancer', AWS_METRIC_RESOURCES.loadBalancer),
+    ...(raise.distribution === null
+      ? []
+      : [metrics('distribution', AWS_METRIC_RESOURCES.distribution)]),
   ];
 }
 

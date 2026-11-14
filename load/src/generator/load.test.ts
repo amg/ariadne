@@ -28,7 +28,6 @@ const plan: Plan = {
   seedConcurrency: 1,
   stateSeconds: 5,
   publishMetrics: false,
-  direct: null,
 };
 
 const requests = () =>

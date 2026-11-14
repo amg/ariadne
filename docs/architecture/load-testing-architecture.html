@@ -8,7 +8,7 @@
   :root {
     --ink: #1d2733; --soft: #5b6b7c; --line: #d8dee6; --bg: #f4f6f9; --card: #ffffff;
     --op: #6b7280;  --op-soft: #eef0f3;
-    --cf: #d9772b;  --cf-soft: #fdf0e4;
+    --cfr: #0f7c8c; --cfr-soft: #e0f3f5;
     --core: #2563a8; --core-soft: #e3edf8;
     --app: #2e7d5b; --app-soft: #e2f2ea;
     --load: #6e56cf; --load-soft: #ece7fb;
@@ -31,7 +31,6 @@
   th { color: var(--soft); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .04em; }
   code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: .84em; }
   .tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
-  .t-cf { background: var(--cf-soft); color: var(--cf); }
   .t-core { background: var(--core-soft); color: var(--core); }
   .t-app { background: var(--app-soft); color: var(--app); }
   .t-load { background: var(--load-soft); color: var(--load); }
@@ -43,7 +42,7 @@
   .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .8rem; color: var(--soft); margin: 4px 0 10px; }
   .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .l-op::before { background: var(--op-soft); border: 1.5px solid var(--op); }
-  .l-cf::before { background: var(--cf-soft); border: 1.5px solid var(--cf); }
+  .l-cfr::before { background: var(--cfr-soft); border: 1.5px solid var(--cfr); }
   .l-core::before { background: var(--core-soft); border: 1.5px solid var(--core); }
   .l-app::before { background: var(--app-soft); border: 1.5px solid var(--app); }
   .l-load::before { background: var(--load-soft); border: 1.5px solid var(--load); }
@@ -81,9 +80,8 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <p>A load run is a fleet of <b>generators</b>. Each one is a single Node process that plays a few thousand
   <b>virtual users</b>: they sign in, keep a tab's push stream open, and some of them chat. On aws-prod the generators are
   small Fargate tasks, on Spot, in a stack and network of their own. They all leave that network through one NAT gateway
-  with one fixed address. They reach the app either <b>directly</b> at its load balancer, presenting a client certificate,
-  or through Cloudflare as real users do. On the direct path the load stack itself lets its one address into the origin,
-  so the way in lasts exactly as long as the stack.</p>
+  with one fixed address. They reach the app through CloudFront, as real users do, and the edge's web ACL lets them in
+  by the raise's load key, not by that address.</p>
   <p>A <b>supervisor</b> in the load harness runs on the operator's machine. It starts the generators, watches them
   through ECS, and starts a lost one again on the same slice of users. It is part of one <b>load command</b>, which opens
   the run, runs the generators, and however they end, stops every generator, seals the run and rebuilds it. A safety net in AWS deletes whatever outlives its time.</p>
@@ -100,7 +98,7 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
 
 <h2>2. The pieces and the AWS services they use</h2>
 <div class="legend">
-  <span class="l-op">operator's machine</span><span class="l-cf">Cloudflare</span><span class="l-core">core (always)</span>
+  <span class="l-op">operator's machine</span><span class="l-cfr">CloudFront</span><span class="l-core">core (always)</span>
   <span class="l-app">app (while up)</span><span class="l-load">load (during a run)</span><span class="l-cw">CloudWatch</span>
 </div>
 <figure>
@@ -136,18 +134,18 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <text x="34" y="198" class="t" font-weight="600">Run folders · load/.runs/&lt;run id&gt;/</text>
   <text x="34" y="214" class="ts">sealed by the manifest, written last</text>
 
-  <!-- Cloudflare -->
-  <rect x="340" y="10" width="250" height="70" rx="10" fill="#fdf0e4" stroke="#d9772b" stroke-width="1.5"/>
-  <text x="354" y="32" class="th">Cloudflare (edge path)</text>
-  <text x="354" y="50" class="ts">allow-list, load key header</text>
-  <text x="354" y="64" class="ts">only with <tspan font-family="monospace">load --edge</tspan></text>
+  <!-- CloudFront -->
+  <rect x="340" y="10" width="250" height="70" rx="10" fill="#e0f3f5" stroke="#0f7c8c" stroke-width="1.5"/>
+  <text x="354" y="32" class="th">CloudFront (the way in)</text>
+  <text x="354" y="50" class="ts">web ACL: load key header</text>
+  <text x="354" y="64" class="ts">metrics in us-east-1</text>
 
   <!-- core -->
   <rect x="620" y="10" width="330" height="236" rx="10" fill="#e3edf8" stroke="#2563a8" stroke-width="1.5"/>
   <text x="634" y="32" class="th">Core stack (always up)</text>
   <rect x="634" y="44" width="302" height="78" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="644" y="62" class="t" font-weight="600">Vault · S3 bucket</text>
-  <text x="644" y="78" class="ts">spend ledger · trust CA · Terraform state</text>
+  <text x="644" y="78" class="ts">spend ledger · Terraform state</text>
   <text x="644" y="92" class="ts">origin-access-logs/ … the load balancer delivers here</text>
   <text x="644" y="106" class="ts">holds no runs</text>
   <rect x="634" y="130" width="148" height="50" rx="7" fill="#fff" stroke="#2563a8"/>
@@ -174,16 +172,16 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <text x="216" y="352" class="t">gen. 1 try 2</text><text x="216" y="367" class="ts">same slice</text><text x="216" y="380" class="ts">On-Demand?</text>
   <rect x="24" y="404" width="272" height="44" rx="7" fill="#fff" stroke="#6e56cf"/>
   <text x="34" y="422" class="t" font-weight="600">NAT gateway · one Elastic IP</text>
-  <text x="34" y="437" class="ts">the one address the origin lets in on the direct path</text>
-  <text x="24" y="466" class="ts">secrets: load key, client cert and key (SSM), password</text>
+  <text x="34" y="437" class="ts">every generator's one way out</text>
+  <text x="24" y="466" class="ts">secrets: load key (SSM), password</text>
   <text x="24" y="480" class="ts">stop timeout = Spot's warning</text>
 
   <!-- app stack -->
   <rect x="340" y="296" width="270" height="290" rx="10" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
   <text x="354" y="318" class="th">App stack (while up)</text>
   <rect x="354" y="330" width="242" height="48" rx="7" fill="#fff" stroke="#2e7d5b"/>
-  <text x="364" y="348" class="t" font-weight="600">Load balancer · 443, mutual TLS</text>
-  <text x="364" y="364" class="ts">lets in Cloudflare, and the load stack's address</text>
+  <text x="364" y="348" class="t" font-weight="600">Load balancer · private, HTTP 80</text>
+  <text x="364" y="364" class="ts">lets in CloudFront's VPC origin only</text>
   <rect x="354" y="386" width="117" height="58" rx="7" fill="#fff" stroke="#2e7d5b"/>
   <text x="364" y="404" class="t" font-weight="600">API</text><text x="364" y="419" class="ts">exchange + state</text><text x="364" y="432" class="ts">lines</text>
   <rect x="479" y="386" width="117" height="58" rx="7" fill="#fff" stroke="#2e7d5b"/>
@@ -209,7 +207,7 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <text x="644" y="430" class="t" font-weight="600">Metrics</text>
   <text x="644" y="446" class="ts">Ari/Load · Ari/App (published from log lines)</text>
   <text x="644" y="460" class="ts">AWS/ECS · ECS/ContainerInsights (both clusters)</text>
-  <text x="644" y="474" class="ts">AWS/ApplicationELB · AWS/RDS · AWS/ElastiCache</text>
+  <text x="644" y="474" class="ts">AWS/CloudFront · AWS/ApplicationELB · AWS/RDS · AWS/ElastiCache</text>
   <text x="644" y="488" class="ts">AWS/Usage (Fargate vCPU) vs SERVICE_QUOTA()</text>
   <text x="644" y="502" class="ts">1-minute points kept 15 days</text>
   <rect x="634" y="524" width="302" height="48" rx="7" fill="#fff" stroke="#0e7490"/>
@@ -219,10 +217,7 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <!-- traffic: generators leave through the NAT gateway -->
   <path class="tl" d="M160,388 L160,402"/>
   <path class="tl" d="M296,414 C 322,380 322,130 352,76"/>
-  <text x="326" y="200" class="ts" fill="#6e56cf">edge</text>
   <path class="tl" d="M465,80 L465,328"/>
-  <path class="tl" d="M296,430 C 326,428 330,360 352,356"/>
-  <text x="314" y="452" class="ts" fill="#6e56cf">direct</text>
 
   <!-- telemetry -->
   <path class="cl" d="M200,488 L200,606 L614,606 L614,368 L632,368"/>
@@ -244,7 +239,7 @@ the harness is shaped the way it is. What aws-prod itself is made of is in
   <path class="vl" d="M230,172 L230,178"/>
 </svg>
 <figcaption>Purple is traffic, teal is telemetry, and the dashed line is what the archive reads. Every generator leaves
-through the one NAT address, whichever path it takes. The supervisor, the archive and rebuild run on the operator's
+through the one NAT address and comes in through CloudFront. The supervisor, the archive and rebuild run on the operator's
 machine with the operator's AWS credentials, and the run folder lives there too. Nothing of a sealed run depends on any
 stack, the vault, or CloudWatch surviving.</figcaption>
 </figure>
@@ -255,22 +250,20 @@ stack, the vault, or CloudWatch surviving.</figcaption>
   <tr><td>ECS on Fargate and Fargate Spot</td><td>Runs the generators, one task per slice of users. Spot first; when Spot has no room at launch, the same launch is made On-Demand.</td><td><span class="tag t-load">load</span></td><td>Each task's start, stop, stop code and reason, and capacity (<code>events/</code>, manifest)</td></tr>
   <tr><td>ECS Container Insights</td><td>Task counts per service (running, desired, pending) and each generator's CPU and memory, on both clusters.</td><td><span class="tag t-app">app</span> <span class="tag t-load">load</span></td><td><code>metrics/aws/</code></td></tr>
   <tr><td>ECR</td><td>Holds the load image, built and tagged with the app's images.</td><td><span class="tag t-core">core</span></td><td>Image tags (manifest)</td></tr>
-  <tr><td>VPC, NAT gateway, Elastic IP</td><td>The generators' own network. They run in private subnets and leave through one NAT gateway with one Elastic IP, so the origin sees a single address.</td><td><span class="tag t-load">load</span></td><td>Load path (manifest)</td></tr>
-  <tr><td>EC2 security groups</td><td>On the direct path, the load stack adds one rule to the origin's security group: 443 from its Elastic IP. The rule is part of the stack, so it goes when the stack goes.</td><td><span class="tag t-load">load</span></td><td>nothing</td></tr>
-  <tr><td>Elastic Load Balancing (ALB)</td><td>The front door under test. Its per-minute metrics are what the generators' requests are checked against. It also writes access logs into the vault, which stay there and are not part of a run.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/</code></td></tr>
+  <tr><td>VPC, NAT gateway, Elastic IP</td><td>The generators' own network. They run in private subnets and leave through one NAT gateway with one Elastic IP, so the edge sees a single address.</td><td><span class="tag t-load">load</span></td><td>Load path (manifest)</td></tr>
+  <tr><td>CloudFront and WAF</td><td>The way in, for users and generators alike. The web ACL lets the generators in by the load key and leaves their sign-ins out of its per-address limit. The distribution's requests and the share of its server errors, including the 502s and 504s it gave itself, sit beside the load balancer's in the run's record. CloudFront publishes its metrics in <code>us-east-1</code> only.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/distribution.jsonl</code></td></tr>
+  <tr><td>Elastic Load Balancing (ALB)</td><td>The load balancer behind the edge. Its per-minute metrics are what the generators' requests are checked against. It also writes access logs into the vault, which stay there and are not part of a run.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/</code></td></tr>
   <tr><td>CloudWatch Logs</td><td>Keeps every line the generators and services write. The groups are retained after their stack goes and expire after a month, so the archive never races a teardown.</td><td><span class="tag t-cw">retained</span></td><td><code>requests/</code>, <code>app/</code>, <code>logs/</code> (API, worker, auth, generators)</td></tr>
   <tr><td>CloudWatch Embedded Metric Format</td><td>The same lines publish their figures as custom metrics in <code>Ari/Load</code> and <code>Ari/App</code>, with no extra API call and no agent. They feed the live view only.</td><td><span class="tag t-cw">15 days</span></td><td>nothing: the lines they come from are kept</td></tr>
   <tr><td>CloudWatch Metrics and Dashboards</td><td>The <code>&lt;project&gt;-load</code> dashboard and <code>monitor</code> read live figures. The archive copies the platform's metrics of the raise at one-minute resolution.</td><td><span class="tag t-core">core</span></td><td><code>metrics/aws/</code></td></tr>
   <tr><td>Service Quotas (via <code>AWS/Usage</code>)</td><td>Fargate vCPU in use, On-Demand and Spot, graphed against the account's live quota.</td><td>account</td><td><code>metrics/aws/fargate-usage.jsonl</code></td></tr>
   <tr><td>RDS and Performance Insights</td><td>The database under load. Its CloudWatch metrics and Performance Insights' top waits and queries, minute by minute, tell its story.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/database.jsonl</code>, <code>database/</code></td></tr>
-  <tr><td>SSM Parameter Store, Secrets Manager</td><td>The run key, the generators' client certificate and key, and the population's password, handed to tasks as secrets.</td><td><span class="tag t-core">core</span></td><td>nothing (never recorded)</td></tr>
+  <tr><td>SSM Parameter Store, Secrets Manager</td><td>The run key and the population's password, handed to tasks as secrets.</td><td><span class="tag t-core">core</span></td><td>nothing (never recorded)</td></tr>
   <tr><td>ElastiCache Serverless (Valkey)</td><td>The push bus and gate cache under load; ECPU, throttling and latency are watched.</td><td><span class="tag t-app">app</span></td><td><code>metrics/aws/cache.jsonl</code></td></tr>
   <tr><td>Application Auto Scaling</td><td>Scales API, worker and auth on scaling steps; its activity is part of the run's record.</td><td><span class="tag t-app">app</span></td><td><code>events/aws-events.jsonl</code></td></tr>
-  <tr><td>S3 (the vault)</td><td>Outlives every stack: the spend ledger, the trust store, Terraform state, and the load balancer's access logs. It holds no runs.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
-  <tr><td>EventBridge and Lambda</td><td>The safety net: on a schedule it deletes the load stack and the app stack once each outlives its limit.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
+  <tr><td>S3 (the vault)</td><td>Outlives every stack: the spend ledger, Terraform state, and the load balancer's access logs. It holds no runs.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
+  <tr><td>EventBridge and Lambda</td><td>The safety net: on a schedule it deletes the load stack, and the app stack with its edge rules, once each outlives its limit.</td><td><span class="tag t-core">core</span></td><td>nothing</td></tr>
 </table>
-<p class="note">Cloudflare is not AWS, but it is the second load path: <code>load --edge</code> sends the generators through it
-with the load key header, as users arrive. Cloudflare's own logs are not part of a run's record.</p>
 
 <h2>3. The harness and its boundaries</h2>
 <p>The load harness is a workspace of its own, <code>load/</code>, held to the same gate as the app: typecheck, lint,
@@ -360,15 +353,15 @@ The load stack itself is in <code>infra/lib/load/</code>, and the shell commands
   <rect x="372" y="264" width="310" height="26" rx="5" fill="#e3edf8" stroke="#2563a8" stroke-dasharray="4 3"/><text x="380" y="281" class="ls">stopped tasks kept in .sources/ as each generator stops</text>
   <rect x="688" y="264" width="256" height="26" rx="5" fill="#e3edf8" stroke="#2563a8"/><text x="696" y="281" class="ls">raw files, then manifest last = sealed</text>
 </svg>
-<figcaption>Generators begin their ramp as soon as their task runs: on the direct path the way in already exists, because
-the load stack brought it. The load command does not return before the run is sealed and rebuilt. If its generators fail
+<figcaption>Generators begin their ramp as soon as their task runs: the way in already exists, because the edge rules
+were raised with the app. The load command does not return before the run is sealed and rebuilt. If its generators fail
 or it is interrupted, it still stops every generator, seals the run as <code>failed</code> or <code>interrupted</code> and
 rebuilds it. Only then does the shell delete the load stack.</figcaption>
 </figure>
 <ol>
   <li><b>Budget and stack.</b> <code>aws-prod load</code> claims the day's worst-case cost in the spend ledger, which counts
   the NAT gateway, its address and every gigabyte through it. It refuses when the day would pass its limit. Then it deploys
-  the load stack for the raised step and image tag, with the origin's ingress rule when the run takes the direct path.</li>
+  the load stack for the raised step and image tag.</li>
   <li><b>Open the run.</b> The load command works out the run's limits from its step and writes
   <code>.sources/raise.json</code> into the new run folder: what the raise was made of, so the run can be archived after its
   stacks are gone. A run folder with no manifest is visibly unsealed, and <code>down</code> refuses while the raise has one.</li>
@@ -380,8 +373,7 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
   the few minutes after it, checks itself, writes the raw files, and writes the manifest last.</li>
   <li><b>Rebuild.</b> The load command hands the sealed run to rebuild, which writes <code>derived/</code> beside it: the
   verdict, the report and the tables.</li>
-  <li><b>Tear down the generators.</b> The shell deletes the load stack once the command has returned, because the archive reads its tasks until then.
-  The direct path's way in goes with it.</li>
+  <li><b>Tear down the generators.</b> The shell deletes the load stack once the command has returned, because the archive reads its tasks until then.</li>
   <li><b>Again, by hand.</b> <code>aws-prod rebuild &lt;run id&gt;</code> rebuilds a sealed folder at any time, with no
   raise. <code>aws-prod archive &lt;run id&gt;</code> seals a run that <code>load</code> could not, while the raise is still up.</li>
 </ol>
@@ -412,8 +404,7 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
       push streams open, chatters active), and one end report: its request counts by kind and its phases.</li>
       <li>When it is told to stop (SIGTERM from Spot or the supervisor), it stops its users and prints its report marked
       <i>interrupted</i>. The container gets the full warning Spot allows.</li>
-      <li>On the direct path it presents its client certificate. Requests still name the public hostname, so the
-      origin's mutual TLS and host rules hold.</li>
+      <li>Every request carries the raise's load key in the load-key header, which the edge's web ACL lets in.</li>
     </ul>
   </div>
 </div>
@@ -493,7 +484,7 @@ because a partial fleet would measure the wrong load.</figcaption>
 <p>The shell around the command keeps what only it can do, from outside:</p>
 <ul>
   <li>releases the run's claim on the day's budget when the run did not complete its plan;</li>
-  <li>deletes the load stack, and with it the direct path's way in, unless the run could not be sealed: the archive reads
+  <li>deletes the load stack, unless the run could not be sealed: the archive reads
   the stack's tasks, so that stack stays for <code>aws-prod archive</code>;</li>
   <li>deletes the load stack at once when the command ends before its run began recording.</li>
 </ul>
@@ -508,8 +499,8 @@ forced. <code>sweep</code> lists anything that outlived its teardown.</p>
 
 <h3>6.3 The safety net and the cost guard</h3>
 <p>The safety net runs on a schedule and deletes the load stack and the app stack once each outlives its limit, counted
-from the load stack's start and the app's raise, whoever forgot them. Because the direct path's ingress rule belongs to the load stack, the safety net
-closes the way in too, even if the operator's machine dies mid-run. Separately, each raise and each load run claims its
+from the load stack's start and the app's raise, whoever forgot them. It takes the edge rules with the app, so nothing
+bills by the hour once aws-prod is gone, even if the operator's machine dies mid-run. Separately, each raise and each load run claims its
 worst-case cost in a daily ledger in the vault, and a claim that would pass the day's limit is refused. A load run that
 does not complete its plan releases its claim: the claim stays in the ledger, marked, and no longer counts toward the
 limit, because a cancelled run rarely costs its worst case. Every later claim and <code>status</code> still show it,
@@ -569,7 +560,7 @@ on aws-prod and on cubi.</p>
   <tr><th>Path</th><th>Holds</th><th>Source</th></tr>
   <tr><td><code>manifest.json</code></td><td>What the run was: id, step and full configuration, load path, image tags and commits, the one schema version of the run folder, the limits the run recorded when it began, every slice of users with when it held them, the windows it was down and why, the attempts at running it (Spot or not, and why each stopped), and every file with size and checksum. Written last.</td><td>archive</td></tr>
   <tr><td><code>requests/</code></td><td>The request lines, one file per slice, whichever generators ran it</td><td>generator log group</td></tr>
-  <tr><td><code>metrics/</code></td><td>Each slice's state lines, one file, and each generator attempt's end report. The platform's CloudWatch metrics of the raise, a file per resource (clusters, services, load balancer, target groups, database, cache, Fargate usage), at one minute. Glances samples on cubi.</td><td>generator lines, CloudWatch Metrics, Glances</td></tr>
+  <tr><td><code>metrics/</code></td><td>Each slice's state lines, one file, and each generator attempt's end report. The platform's CloudWatch metrics of the raise, a file per resource (clusters, services, distribution, load balancer, target groups, database, cache, Fargate usage), at one minute. Glances samples on cubi.</td><td>generator lines, CloudWatch Metrics, Glances</td></tr>
   <tr><td><code>app/</code></td><td>Exchange, job, request and state lines of this run's window. A run folder from before the API wrote request lines, or before state lines carried the load figures, still reads; what it lacks is left out.</td><td>API and worker log groups</td></tr>
   <tr><td><code>logs/</code></td><td>The API's, worker's and auth core's logs, and each generator's first errors; on cubi, each process the run started</td><td>CloudWatch Logs, process output</td></tr>
   <tr><td><code>database/</code></td><td>Performance Insights' top waits and queries, minute by minute</td><td>PI API</td></tr>
@@ -595,7 +586,7 @@ on aws-prod and on cubi.</p>
   <div class="s load"><b>Load and validate</b>every file against its schema</div><div class="a">›</div>
   <div class="s load"><b>Minute table and run facts</b>one row a minute; the slices, their down windows, gaps and counts</div><div class="a">›</div>
   <div class="s load"><b>Judge</b>by the limits the run recorded</div><div class="a">›</div>
-  <div class="s load"><b>Cross-check</b>generators vs load balancer vs API</div><div class="a">›</div>
+  <div class="s load"><b>Cross-check</b>generators vs edge and load balancer vs API</div><div class="a">›</div>
   <div class="s app"><b>derived/</b>summary, verdict, report, tables</div>
 </div>
 <ul>
@@ -618,8 +609,11 @@ on aws-prod and on cubi.</p>
   and their errors against its error counts. The balancer counts a request in the minute it ends, so the generators'
   requests are counted by the minute they ended in. The API's exchange lines are set against the generators' chats: replies
   that streamed against exchanges that sent a first token, and paused chats against paused exchanges. A mismatch beyond
-  tolerance makes the verdict <i>incomplete</i>, because one of the two records cannot be trusted. The load-balancer checks
-  are skipped on the Cloudflare path, where the edge sits between the two records, and on cubi, which has no balancer.</li>
+  tolerance makes the verdict <i>incomplete</i>, because one of the two records cannot be trusted. Through CloudFront, the
+  server errors the edge gave itself, because it could not reach the load balancer or waited on it too long, are taken out
+  of the generators' side, and the check says how many: the edge's 5xx count less the load balancer's. A run through
+  CloudFront that kept none of the edge's figures cannot be checked. The load-balancer checks are skipped on old runs through
+  Cloudflare, whose edge kept no record, and on cubi, which has no balancer.</li>
   <li><b>Three outcomes.</b> <i>pass</i>, <i>fail</i> (a criterion missed, or the guard stopped the run on one), or
   <i>incomplete</i> (something needed is missing, unreadable or contradicted).</li>
   <li><b>Outputs.</b> <code>summary.json</code> (every count and percentile), <code>verdict.md</code> (each criterion,
@@ -676,9 +670,10 @@ fifth, whether the reading can be believed, belongs to tests alone. That observa
   <tr><td>What a run records of its limits</td><td>The limits themselves, written when the run begins, under one schema version for the folder.</td>
       <td>A run is judged by what it was held to, with no registry of versions to keep in step and no second verdict by newer
       limits. A change to the shape of a run folder is a new folder version.</td></tr>
-  <tr><td>The direct path</td><td>One NAT gateway with one Elastic IP; the load stack owns the one ingress rule that lets it in.</td>
-      <td>The rule lives exactly as long as the stack, so there is no address loop, no wait for the origin, and nothing to
-      close. The client certificate and the host rule still guard the door. The gateway costs a little per hour and per
+  <tr><td>The way in</td><td>Through CloudFront, as users come in, let in by the run key; one NAT gateway with one Elastic IP on the way out.</td>
+      <td>A run measures what users get, edge included, and the edge is the one aws-prod keeps in production. The web ACL keys on
+      the run key rather than the address, so nothing at the origin opens or closes with a run. Generators in one region reach
+      one or a few nearby edge locations, which real users spread across do not. The gateway costs a little per hour and per
       gigabyte, and the worst case counts it.</td></tr>
   <tr><td>The database</td><td>No rows are read; its CloudWatch metrics and Performance Insights tell its story.</td>
       <td>The rows mostly repeated the exchange records, and reading them needed a tunnel through the bastion while the
@@ -690,7 +685,7 @@ fifth, whether the reading can be believed, belongs to tests alone. That observa
       <td>Cubi proves the harness and that a run can be driven. Cost per user and stress are not its job.</td></tr>
   <tr><td>The live view</td><td>The dashboard, and the terminal monitor showing users online now.</td>
       <td>The operator and the agent both need to see a run as it happens, against the same pass lines the verdict uses.</td></tr>
-  <tr><td>Where runs live</td><td>On the operator's machine only. The vault keeps the ledger, the trust store and the balancer's access logs.</td>
+  <tr><td>Where runs live</td><td>On the operator's machine only. The vault keeps the ledger and the balancer's access logs.</td>
       <td>One copy of a run is simpler than two, and a run folder is small enough to keep locally.</td></tr>
 </table>
 <h3>Left out on purpose</h3>

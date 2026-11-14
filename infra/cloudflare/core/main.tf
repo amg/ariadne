@@ -1,22 +1,16 @@
-# aws-prod's origin identity at Cloudflare. Lives with core: certificates
-# cost nothing, and keeping them means a raise never waits on issuance.
+# aws-prod's certificate. Lives with core: it costs nothing, and keeping it
+# means a raise never waits on issuance.
 #
-#   1. The origin certificate the load balancer presents. Cloudflare's
-#      Origin CA signs it, and Cloudflare trusts it in strict TLS mode.
-#   2. A private certificate authority, and a client certificate it signs,
-#      which Cloudflare presents when it connects to this hostname only.
-#      The load balancer trusts nothing else, so no other Cloudflare
-#      customer's zone can reach the origin.
-#   3. A second client certificate from the same authority, for load
-#      generators on the direct path, which skips Cloudflare to measure
-#      aws-prod alone. It opens nothing by itself: the origin lets a
-#      generator's address through only for the length of its run.
+#   1. The certificate CloudFront presents for the hostname. ACM issues and
+#      renews it in the edge's region, the only one CloudFront takes it from.
+#   2. The DNS record that proves the hostname is ours, kept in the zone so
+#      ACM can renew the certificate on its own.
 
 terraform {
   required_version = ">= 1.10"
   required_providers {
+    aws        = { source = "hashicorp/aws", version = "~> 6.0" }
     cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.52" }
-    tls        = { source = "hashicorp/tls", version = "~> 4.0" }
   }
   # Bucket and region are passed by the core command: the bucket name carries the account id.
   backend "s3" {
@@ -26,92 +20,42 @@ terraform {
   }
 }
 
+provider "aws" {
+  region = var.edge_region
+  default_tags {
+    tags = var.tags
+  }
+}
+
 provider "cloudflare" {}
 
-# ── 1. Origin certificate ────────────────────────────────────────────────
+# ── 1. Certificate ───────────────────────────────────────────────────────
 
-resource "tls_private_key" "origin" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
+resource "aws_acm_certificate" "edge" {
+  domain_name       = var.hostname
+  validation_method = "DNS"
 
-resource "tls_cert_request" "origin" {
-  private_key_pem = tls_private_key.origin.private_key_pem
-  subject {
-    common_name = var.hostname
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
-resource "cloudflare_origin_ca_certificate" "origin" {
-  csr                = tls_cert_request.origin.cert_request_pem
-  hostnames          = [var.hostname]
-  request_type       = "origin-rsa"
-  requested_validity = 5475
-}
+# ── 2. Proof of the hostname ─────────────────────────────────────────────
 
-# ── 2. Client certificate Cloudflare presents to the origin ──────────────
-
-resource "tls_private_key" "client_authority" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "tls_self_signed_cert" "client_authority" {
-  private_key_pem       = tls_private_key.client_authority.private_key_pem
-  is_ca_certificate     = true
-  validity_period_hours = 87600
-  allowed_uses          = ["cert_signing", "crl_signing"]
-  subject {
-    common_name  = "${var.hostname} origin client authority"
-    organization = "aws-prod"
+resource "cloudflare_record" "certificate_validation" {
+  for_each = {
+    for option in aws_acm_certificate.edge.domain_validation_options : option.domain_name => option
   }
+  zone_id = var.zone_id
+  name    = trimsuffix(each.value.resource_record_name, ".")
+  type    = each.value.resource_record_type
+  content = trimsuffix(each.value.resource_record_value, ".")
+  proxied = false
+  ttl     = 60
+  comment = "aws-prod: proves the hostname to ACM; keep for renewals"
 }
 
-resource "tls_private_key" "client" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "tls_cert_request" "client" {
-  private_key_pem = tls_private_key.client.private_key_pem
-  subject {
-    common_name = "cloudflare-to-${var.hostname}"
-  }
-}
-
-resource "tls_locally_signed_cert" "client" {
-  cert_request_pem      = tls_cert_request.client.cert_request_pem
-  ca_private_key_pem    = tls_private_key.client_authority.private_key_pem
-  ca_cert_pem           = tls_self_signed_cert.client_authority.cert_pem
-  validity_period_hours = 43800
-  allowed_uses          = ["client_auth", "digital_signature", "key_encipherment"]
-}
-
-resource "cloudflare_authenticated_origin_pulls_certificate" "client" {
-  zone_id     = var.zone_id
-  certificate = tls_locally_signed_cert.client.cert_pem
-  private_key = tls_private_key.client.private_key_pem
-  type        = "per-hostname"
-}
-
-# ── 3. Client certificate load generators present on the direct path ─────
-
-resource "tls_private_key" "load_client" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "tls_cert_request" "load_client" {
-  private_key_pem = tls_private_key.load_client.private_key_pem
-  subject {
-    common_name = "load-generators-to-${var.hostname}"
-  }
-}
-
-resource "tls_locally_signed_cert" "load_client" {
-  cert_request_pem      = tls_cert_request.load_client.cert_request_pem
-  ca_private_key_pem    = tls_private_key.client_authority.private_key_pem
-  ca_cert_pem           = tls_self_signed_cert.client_authority.cert_pem
-  validity_period_hours = 43800
-  allowed_uses          = ["client_auth", "digital_signature", "key_encipherment"]
+resource "aws_acm_certificate_validation" "edge" {
+  certificate_arn         = aws_acm_certificate.edge.arn
+  validation_record_fqdns = [for record in cloudflare_record.certificate_validation : record.hostname]
 }

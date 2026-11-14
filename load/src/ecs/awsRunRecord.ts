@@ -12,7 +12,6 @@ type AwsRunDescription = {
   runsFolder: string;
   runId: string;
   step: string;
-  loadPath: 'direct' | 'cloudflare';
   /** The step's whole configuration. */
   config: Readonly<Record<string, unknown>>;
   images: Readonly<Record<string, string>>;
@@ -24,7 +23,8 @@ type AwsRunDescription = {
 
 /**
  * The record of a run on aws-prod, in its folder under `runsFolder`. The
- * run is judged by the limits its step had when the run began.
+ * run is judged by the limits its step had when the run began. Its
+ * generators reach aws-prod as users do, through CloudFront.
  */
 export function awsRunRecord(run: AwsRunDescription): RunRecord {
   const folder = join(run.runsFolder, run.runId);
@@ -35,7 +35,7 @@ export function awsRunRecord(run: AwsRunDescription): RunRecord {
         folder,
         runId: run.runId,
         step: run.step,
-        loadPath: run.loadPath,
+        loadPath: 'cloudfront',
         config: run.config,
         images: run.images,
         limitsOrNull: limitsFor(run.step, run.config),

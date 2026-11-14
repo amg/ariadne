@@ -1,6 +1,7 @@
-import { LAYOUT } from '../../../records/index.ts';
+import { AWS_METRIC_RESOURCES, LAYOUT } from '../../../records/index.ts';
 import type { InsightsSummary, Marker } from '../../types.ts';
-import { type Builder, type Section, inFile } from '../builder.ts';
+import { EDGE_SERVER_ERRORS } from '../../table/index.ts';
+import { type Builder, type Section, inAwsMetrics, inFile } from '../builder.ts';
 
 /** As many waits as the chart can tell apart by colour. */
 const WAITS_CHARTED = 6;
@@ -88,6 +89,38 @@ export function insightsSection({ split, chart }: Builder, insights: InsightsSum
             : 'No statement was measured behind any wait during the run.',
       },
     ],
+  };
+}
+
+/**
+ * CloudFront's distribution, in front of the load balancer: what it served,
+ * the errors it answered with, which of its server errors it gave itself,
+ * and how long the load balancer took to start answering it.
+ */
+export function edgeSection({ line, chart }: Builder): Section {
+  const edge = inAwsMetrics(AWS_METRIC_RESOURCES.distribution);
+  return {
+    heading: 'Traffic at the edge',
+    charts: [
+      chart('Requests', 'per minute', [line('requests', 'edge_requests', edge)]),
+      chart('Server errors', 'per minute', [
+        line('all', EDGE_SERVER_ERRORS.all, edge),
+        line('given by the edge itself', EDGE_SERVER_ERRORS.givenByEdge, edge),
+      ]),
+      chart('Errors, as a share of requests', '%', [
+        line('4xx', 'edge_4xx_percent', edge),
+        line('5xx', 'edge_5xx_percent', edge),
+        line('502', 'edge_502_percent', edge),
+        line('503', 'edge_503_percent', edge),
+        line('504', 'edge_504_percent', edge),
+      ]),
+      chart('How long the load balancer took to start answering', 'ms', [
+        line('average', 'edge_origin_latency_average_ms', edge),
+        line('slowest', 'edge_origin_latency_slowest_ms', edge),
+      ]),
+      chart('Sent to users', 'MiB per minute', [line('sent', 'edge_sent_mib', edge)]),
+    ],
+    tables: [],
   };
 }
 

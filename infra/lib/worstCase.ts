@@ -6,6 +6,9 @@ import { type ServiceConfig, type Step, maxTasksOf } from '../config/steps.ts';
 export const INTERFACE_ENDPOINT_COUNT = 7;
 const AVAILABILITY_ZONES = 2;
 
+/** Rules in the edge's web ACL. */
+export const EDGE_RULE_COUNT = 2;
+
 /** One load balancer capacity unit covers about 3,000 open connections. */
 const CONNECTIONS_PER_LCU = 3_000;
 
@@ -13,7 +16,7 @@ export function worstCaseOf(step: Step) {
   const appHours = SAFETY_NET.appMinutes / 60;
   const loadHours = SAFETY_NET.loadMinutes / 60;
   return {
-    raiseUsd: round(appCapacityPerHour(step) * appHours),
+    raiseUsd: round((appCapacityPerHour(step) + edgeRulesPerHour()) * appHours),
     loadUsd: round(
       (generatorsPerHour(step) + loadExitPerHour(step) + usageCeilingPerHour(step)) * loadHours,
     ),
@@ -45,6 +48,11 @@ function appCapacityPerHour(step: Step) {
   );
 }
 
+/** The edge's web ACL and its rules, for as long as they stand. */
+function edgeRulesPerHour() {
+  return (PRICES.waf.webAclPerMonth + EDGE_RULE_COUNT * PRICES.waf.rulePerMonth) / HOURS_PER_MONTH;
+}
+
 function databasePerHour(step: Step) {
   const instance = PRICES.rdsInstancePerHour[step.database.instanceClass];
   if (instance === undefined) {
@@ -63,7 +71,9 @@ function usageCeilingPerHour(step: Step) {
     lcus * PRICES.loadBalancer.perLcuHour +
     step.cache.maxStorageGb * PRICES.redisServerless.perGbHour +
     cacheEcpuMillions * PRICES.redisServerless.perMillionEcpu +
-    step.load.egressGbPerHour * PRICES.egressPerGb +
+    step.load.egressGbPerHour * PRICES.cloudFront.perGb +
+    step.load.requestMillionsPerHour *
+      (PRICES.cloudFront.perMillionRequests + PRICES.waf.perMillionRequests) +
     step.load.logsGbPerHour * PRICES.logsIngestPerGb
   );
 }

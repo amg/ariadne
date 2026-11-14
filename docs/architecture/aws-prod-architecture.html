@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aws-prod architecture: Cloudflare, AWS and the services</title>
+<title>aws-prod architecture: CloudFront, AWS and the services</title>
 <style>
   :root {
     --ink: #1d2733; --soft: #5b6b7c; --line: #d8dee6; --bg: #f4f6f9; --card: #ffffff;
     --op: #6b7280;  --op-soft: #eef0f3;
     --cf: #d9772b;  --cf-soft: #fdf0e4;
+    --cfr: #0f7c8c; --cfr-soft: #e0f3f5;
     --core: #2563a8; --core-soft: #e3edf8;
     --app: #2e7d5b; --app-soft: #e2f2ea;
     --load: #6e56cf; --load-soft: #ece7fb;
@@ -33,6 +34,7 @@
   .no { background: var(--bad-soft); color: var(--bad); }
   .part { background: var(--warn-soft); color: var(--warn); }
   .t-cf { background: var(--cf-soft); color: var(--cf); }
+  .t-cfr { background: var(--cfr-soft); color: var(--cfr); }
   .t-core { background: var(--core-soft); color: var(--core); }
   .t-app { background: var(--app-soft); color: var(--app); }
   .t-load { background: var(--load-soft); color: var(--load); }
@@ -43,6 +45,7 @@
   .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .l-op::before { background: var(--op-soft); border: 1.5px solid var(--op); }
   .l-cf::before { background: var(--cf-soft); border: 1.5px solid var(--cf); }
+  .l-cfr::before { background: var(--cfr-soft); border: 1.5px solid var(--cfr); }
   .l-core::before { background: var(--core-soft); border: 1.5px solid var(--core); }
   .l-app::before { background: var(--app-soft); border: 1.5px solid var(--app); }
   .l-load::before { background: var(--load-soft); border: 1.5px solid var(--load); }
@@ -52,12 +55,13 @@
   .pipe .a { flex: 0 0 18px; display: flex; align-items: center; justify-content: center; color: var(--soft); }
   .s.op { background: var(--op-soft); border-color: var(--op); }
   .s.cf { background: var(--cf-soft); border-color: var(--cf); }
+  .s.cfr { background: var(--cfr-soft); border-color: var(--cfr); }
   .s.core { background: var(--core-soft); border-color: var(--core); }
   .s.app { background: var(--app-soft); border-color: var(--app); }
   .s.load { background: var(--load-soft); border-color: var(--load); }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
   .gate { border-left: 4px solid var(--app); padding: 8px 14px; margin: 12px 0; background: #fbfcfd; }
   .gate.bad { border-left-color: var(--bad); }
+  .gate.warn { border-left-color: var(--warn); }
   .track { border-top: 3px solid var(--core); }
   .track.b { border-top-color: var(--cf); }
   .track.c { border-top-color: var(--app); }
@@ -68,31 +72,36 @@
 <body>
 <main>
 
-<h1>aws-prod architecture: Cloudflare, AWS and the services</h1>
+<h1>aws-prod architecture: CloudFront, AWS and the services</h1>
 <p class="sub">What aws-prod is made of and how its parts connect. How it is raised and run is in
 <a href="../../infra/README.md">infra/README.md</a>; how load runs are driven, supervised, recorded and judged is in
 <a href="load-testing-architecture.html">load-testing-architecture.html</a>; the decision behind it is
-<a href="../../adrs/0014-aws-prod-hosting.md">ADR 0014</a>. How work and news move inside the app, on any deployment,
+<a href="../../adrs/0014-aws-prod-hosting.md">ADR 0014</a>, and the one behind its front door
+<a href="../../adrs/0018-cloudfront-front-door.md">ADR 0018</a>. How work and news move inside the app, on any deployment,
 is in <a href="../flows/background-work.md">background-work.md</a>. <code>&lt;project&gt;</code> below stands for the
 operator's <code>AWS_PROD_PROJECT</code>.</p>
 
 <h2>1. The short version</h2>
 <div class="card">
-  <p>The hostname (<code>AWS_PROD_HOSTNAME</code>) is a <b>proxied</b> record at Cloudflare pointing at a public
-  AWS load balancer. Nobody reaches the load balancer except Cloudflare and, on a direct-path load run, that
-  run's own generators. Cloudflare forwards only the operator and the current run's load generators. Cloudflare and the load balancer prove themselves to
-  each other with two certificates, one in each direction, both made when core is set up.</p>
-  <p>There is no tunnel and no second CDN: Cloudflare handles public HTTPS and the allow-list, the load
-  balancer sends <code>/api/*</code> to the backend and everything else to nginx. Behind it, the API and a separate
-  worker share Postgres and Valkey; the auth core and inference (mocked during load tests) are their own services,
-  resolved directly through AWS Cloud Map private DNS without an internal load balancer.</p>
-  <p>Cloudflare is defined by Terraform, AWS by CDK. Everything lives in aws-prod's own AWS account in <code>ap-southeast-2</code>, in
-  three lifetimes: <b>core</b> stays, <b>app</b> exists while aws-prod is up, <b>load</b> runs generator tasks in a separate stack and VPC during a run.</p>
+  <p>The hostname (<code>AWS_PROD_HOSTNAME</code>) is a DNS-only record at Cloudflare pointing at a CloudFront
+  distribution. CloudFront ends users' TLS, and its web ACL lets in only the operator and the current raise's load
+  generators, and limits sign-ins per address. It caches the web app's static files by their own
+  <code>Cache-Control</code>, and passes <code>/api/*</code> through uncached. Behind it is a <b>private</b> load balancer
+  with no public address, which CloudFront reaches through a VPC origin, over plain HTTP inside AWS.</p>
+  <p>Users, the operator and the load generators all come in the same way, through CloudFront. The load balancer sends
+  <code>/api/*</code> to the backend and everything else to nginx. Behind it, the API and a separate worker share
+  Postgres and Valkey; the auth core and inference (mocked during load tests) are their own services, resolved directly
+  through AWS Cloud Map private DNS without an internal load balancer.</p>
+  <p>AWS is defined by CDK. Terraform holds the hostname's record at Cloudflare, and the certificate with the record that
+  proves it to ACM. Everything lives in aws-prod's own AWS account in
+  <code>ap-southeast-2</code>, except what CloudFront takes only from <code>us-east-1</code>: the certificate and the web ACL. There
+  are three lifetimes: <b>core</b> stays, <b>app</b> exists while aws-prod is up, <b>load</b> runs generator tasks in a separate stack
+  and VPC during a run.</p>
 </div>
 
 <h2>2. The services</h2>
 <div class="legend">
-  <span class="l-op">operator</span><span class="l-cf">Cloudflare</span><span class="l-core">core (always)</span>
+  <span class="l-op">operator</span><span class="l-cf">Cloudflare</span><span class="l-cfr">CloudFront and WAF</span><span class="l-core">core (always)</span>
   <span class="l-app">app (while up)</span><span class="l-load">load (during a run)</span>
 </div>
 <figure>
@@ -115,14 +124,23 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
   <rect x="270" y="10" width="404" height="56" rx="8" fill="#ece7fb" stroke="#6e56cf" stroke-width="1.5"/>
   <text x="284" y="28" class="th" fill="#4d32a8">LoadStack (load lifetime) · in AWS ap-southeast-2</text>
   <text x="284" y="44" class="ts">own VPC · private subnets · one NAT address · own ECS cluster</text>
-  <text x="284" y="58" class="ts">via Cloudflare with the run key (--edge), or straight in (direct)</text>
+  <text x="284" y="58" class="ts">through CloudFront with the run key, as users do</text>
 
-  <!-- Cloudflare -->
-  <rect x="20" y="82" width="590" height="58" rx="10" fill="#fdf0e4" stroke="#d9772b" stroke-width="1.5"/>
-  <text x="36" y="104" class="th">Cloudflare edge · proxied hostname</text>
-  <text x="36" y="124" class="ts">allow-list · strict TLS to the origin certificate · presents aws-prod's client certificate</text>
+  <!-- Cloudflare, for DNS only -->
+  <rect x="690" y="10" width="246" height="56" rx="8" fill="#fdf0e4" stroke="#d9772b" stroke-width="1.5"/>
+  <text x="704" y="30" class="th">Cloudflare · DNS only</text>
+  <text x="704" y="46" class="ts">hostname CNAME → *.cloudfront.net</text>
+  <text x="704" y="58" class="ts">not proxied · parked on teardown</text>
+
+  <!-- CloudFront -->
+  <rect x="20" y="82" width="590" height="58" rx="10" fill="#e0f3f5" stroke="#0f7c8c" stroke-width="1.5"/>
+  <text x="36" y="102" class="th" fill="#0b5f6b">CloudFront · the hostname's distribution</text>
+  <text x="36" y="118" class="ts">users' TLS ends here · WAF (us-east-1): operator or run key, sign-ins per address</text>
+  <text x="36" y="132" class="ts">/api/* uncached and uncompressed · everything else cached by its Cache-Control</text>
   <line x1="140" y1="66" x2="140" y2="82" class="ln"/>
   <line x1="472" y1="66" x2="472" y2="82" class="ln"/>
+  <path d="M812 66 V111 H612" fill="none" stroke="#d9772b" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="626" y="104" class="ts" fill="#b35f1f">the name resolves here</text>
 
   <!-- AWS region and app VPC -->
   <rect x="12" y="156" width="936" height="620" rx="12" fill="none" stroke="#9aa6b2" stroke-width="1.2" stroke-dasharray="6 4"/>
@@ -132,14 +150,12 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
 
   <!-- edge subnets -->
   <rect x="40" y="210" width="620" height="68" rx="8" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/>
-  <text x="50" y="225" class="ts">edge subnets (public)</text>
+  <text x="50" y="225" class="ts">edge subnets (isolated)</text>
   <rect x="190" y="220" width="380" height="50" rx="7" fill="#e2f2ea" stroke="#2e7d5b" stroke-width="1.5"/>
-  <text x="202" y="240" class="th">Load balancer · HTTPS 443</text>
-  <text x="202" y="258" class="ts">Cloudflare or the run's address · mutual TLS · host checked</text>
+  <text x="202" y="240" class="th">Load balancer · private · HTTP 80</text>
+  <text x="202" y="258" class="ts">only CloudFront's VPC origin · no public address · host checked</text>
   <line x1="360" y1="140" x2="360" y2="218" class="ln"/>
-  <text x="368" y="152" class="ts">HTTPS · mutual TLS</text>
-  <path d="M640 66 V196 H560 V218" fill="none" stroke="#6e56cf" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#sa)"/>
-  <text x="646" y="112" class="ts" fill="#4d32a8">direct</text><text x="646" y="125" class="ts" fill="#4d32a8">path</text>
+  <text x="368" y="152" class="ts">VPC origin · HTTP inside AWS</text>
 
   <!-- app subnets -->
   <rect x="40" y="292" width="620" height="300" rx="8" fill="#fff" stroke="#2e7d5b" stroke-dasharray="4 3"/>
@@ -222,36 +238,37 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
   <rect x="704" y="288" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="714" y="308" class="th">Secrets Manager</text><text x="714" y="325" class="ts">auth API key · population password</text>
   <rect x="704" y="344" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
-  <text x="714" y="364" class="th">SSM parameters</text><text x="714" y="381" class="ts">origin certificate ARN</text><text x="714" y="397" class="ts">run key · load client certificate</text>
+  <text x="714" y="364" class="th">SSM parameters</text><text x="714" y="381" class="ts">certificate ARN · web ACL ARN</text><text x="714" y="397" class="ts">run key · generators' image tag</text>
   <rect x="704" y="416" width="218" height="62" rx="7" fill="#fff" stroke="#2563a8"/>
-  <text x="714" y="436" class="th">Vault bucket (S3)</text><text x="714" y="453" class="ts">Terraform state · trust CA</text><text x="714" y="469" class="ts">spend ledger · access logs</text>
+  <text x="714" y="436" class="th">Vault bucket (S3)</text><text x="714" y="453" class="ts">Terraform state</text><text x="714" y="469" class="ts">spend ledger · access logs</text>
   <rect x="704" y="488" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
-  <text x="714" y="508" class="th">Origin certificate (ACM)</text><text x="714" y="525" class="ts">signed by Cloudflare's Origin CA</text>
+  <text x="714" y="508" class="th">Certificate (ACM, us-east-1)</text><text x="714" y="525" class="ts">the hostname's, proved through DNS</text>
   <rect x="704" y="544" width="218" height="46" rx="7" fill="#fff" stroke="#2563a8"/>
   <text x="714" y="564" class="th">Seed snapshot (RDS)</text><text x="714" y="581" class="ts">every step but seed starts here</text>
   <rect x="704" y="600" width="218" height="62" rx="7" fill="#fbe9e1" stroke="#c2542e"/>
-  <text x="714" y="620" class="th">Safety net</text><text x="714" y="637" class="ts">deletes the app and load stacks</text><text x="714" y="653" class="ts">once they outlive their limit</text>
+  <text x="714" y="620" class="th">Safety net</text><text x="714" y="637" class="ts">deletes the app, edge rules and</text><text x="714" y="653" class="ts">load stacks past their limit</text>
 
   <!-- what the app draws from core -->
   <line x1="648" y1="355" x2="702" y2="311" class="dl"/>
   <path d="M570 236 H682 V447 H702" class="dl"/>
-  <text x="576" y="254" class="ts">trust CA · logs</text>
+  <text x="576" y="254" class="ts">access logs</text>
 </svg>
 <figcaption>Solid arrows are requests and connections; dashed ones are operator access and what the app draws from core.
-Every task pulls its image, reads its secrets and writes its logs through the VPC endpoints. The load balancer
-presents the origin certificate from ACM, reads its trust CA from the vault, and writes access logs there.
+The dashed orange line is a DNS answer, not traffic: Cloudflare only tells browsers where the distribution is.
+Every task pulls its image, reads its secrets and writes its logs through the VPC endpoints. The distribution presents
+the certificate from ACM, and the load balancer writes access logs to the vault. The network keeps an internet gateway,
+which CloudFront's VPC origins need, but no subnet routes to it.
 Auth core and mock inference are discovered directly via AWS Cloud Map (Route 53 private DNS: <code>&lt;project&gt;.internal</code>) with no internal load balancer.
-Load generators run inside AWS as a separate LoadStack and VPC, and leave it through one NAT address. On an <code>--edge</code> run
-they go through Cloudflare, as users do; on the direct path they go straight to the load balancer, which the load stack opens to that one address.</figcaption>
+Load generators run inside AWS as a separate LoadStack and VPC, and leave it through one NAT address. They go through
+CloudFront, as users do, and the web ACL lets them in by the run key they carry, not by that address.</figcaption>
 </figure>
 
 <h3>Every connection</h3>
 <table>
   <tr><th>From</th><th>To</th><th>Port</th><th>How</th><th>For</th></tr>
-  <tr><td>operator</td><td>Cloudflare</td><td>443</td><td>HTTPS, public internet</td><td>browser access, allowed by operator IP at edge</td></tr>
-  <tr><td>load generators (LoadStack)</td><td>Cloudflare</td><td>443</td><td>HTTPS over internet, with <code>x-&lt;project&gt;-load-key</code></td><td>an <code>--edge</code> run: simulated users through the public edge</td></tr>
-  <tr><td>load generators (LoadStack)</td><td>load balancer</td><td>443</td><td>HTTPS, mutual TLS with the generators' own client certificate, from the one NAT address</td><td>a direct-path run: aws-prod measured without Cloudflare</td></tr>
-  <tr><td>Cloudflare</td><td>load balancer</td><td>443</td><td>HTTPS, mutual TLS</td><td>every request that passed the allow-list</td></tr>
+  <tr><td>operator</td><td>CloudFront</td><td>443</td><td>HTTPS, public internet</td><td>browser access, allowed by operator IP at the edge</td></tr>
+  <tr><td>load generators (LoadStack)</td><td>CloudFront</td><td>443</td><td>HTTPS over internet, with <code>x-&lt;project&gt;-load-key</code></td><td>a load run: simulated users, the way users come in</td></tr>
+  <tr><td>CloudFront</td><td>load balancer</td><td>80</td><td>HTTP through the VPC origin, inside AWS; short requests share connections the edge keeps open</td><td>every request that passed the web ACL and was not served from the cache</td></tr>
   <tr><td>load balancer</td><td>API</td><td>3001</td><td>HTTP, inside the VPC</td><td><code>/api/*</code> for the hostname</td></tr>
   <tr><td>load balancer</td><td>web (nginx)</td><td>8080</td><td>HTTP, inside the VPC</td><td>everything else for the hostname</td></tr>
   <tr><td>API, worker</td><td>auth core</td><td>3567</td><td>HTTP via Cloud Map (<code>auth.&lt;project&gt;.internal</code>), no internal ALB</td><td>sessions and sign-in</td></tr>
@@ -278,45 +295,56 @@ tasks, so the API is sized for the run's target rather than left to react. <code
 scales the API, the worker and the auth core on CPU instead.</p>
 
 <h2>3. The way in, and its checks</h2>
-<p>A request meets these in order. Checks 2, 4 and 5 each stand on their own: Cloudflare's address ranges are
-shared by every Cloudflare customer, so it is the client certificate that stops another customer's zone from
-proxying to this load balancer.</p>
+<p>A request meets these in order. The edge's web ACL decides who gets in, and the network does the rest: the load
+balancer has no public address, so nothing outside AWS can reach it at all.</p>
 <table>
   <tr><th>#</th><th>Where</th><th>Check</th><th>Defined in</th><th>A request that fails it sees</th></tr>
-  <tr><td>1</td><td><span class="tag t-cf">Cloudflare</span></td>
+  <tr><td>1</td><td><span class="tag t-cfr">WAF</span></td>
+      <td><b>Sign-in limit</b>: too many <code>/api/auth/*</code> requests from one address in a minute, unless they carry this run's key in the load-key header</td>
+      <td><code>lib/edgeRules/</code></td><td>403 from CloudFront, until the minute passes</td></tr>
+  <tr><td>2</td><td><span class="tag t-cfr">WAF</span></td>
       <td><b>Allow-list</b>: the source address is the operator's, or the request carries this run's key in the load-key header</td>
-      <td><code>cloudflare/app</code></td><td>Cloudflare's block page (403)</td></tr>
-  <tr><td>2</td><td><span class="tag t-app">AWS</span></td>
-      <td><b>Address</b>: the load balancer's security group admits only Cloudflare's published IPv4 ranges, and during a direct-path run the load stack's one address</td>
-      <td><code>config/cloudflareRanges.ts</code></td><td>a connection that never opens (Cloudflare shows 522)</td></tr>
-  <tr><td>3</td><td>both</td>
-      <td><b>Origin certificate</b>: Cloudflare, in strict mode for this hostname, accepts only a certificate its Origin CA signed for it</td>
-      <td><code>cloudflare/core</code>, <code>cloudflare/app</code></td><td>Cloudflare 526</td></tr>
-  <tr><td>4</td><td>both</td>
-      <td><b>Client certificate</b>: the listener runs mutual TLS in verify mode and accepts only a client certificate signed by aws-prod's own CA</td>
-      <td><code>cloudflare/core</code>, <code>lib/app/origin.ts</code></td><td>a failed handshake (Cloudflare shows 525)</td></tr>
-  <tr><td>5</td><td><span class="tag t-app">AWS</span></td>
+      <td><code>lib/edgeRules/</code></td><td>403 from CloudFront</td></tr>
+  <tr><td>3</td><td><span class="tag t-app">AWS</span></td>
+      <td><b>Network</b>: the load balancer is internal, and its security group admits only CloudFront's VPC origin</td>
+      <td><code>lib/app/origin.ts</code>, <code>lib/app/frontDoor.ts</code></td><td>nothing outside AWS can reach it</td></tr>
+  <tr><td>4</td><td><span class="tag t-app">AWS</span></td>
       <td><b>Host</b>: only requests for the hostname match a listener rule</td>
       <td><code>lib/app/origin.ts</code></td><td>421 Misdirected request</td></tr>
 </table>
-<div class="gate bad"><b>There is no rate limiting in aws-prod.</b> The backend's AWS entry point (<code>server.aws.ts</code>)
-turns the app's limits off and leaves them to the edge, and the edge's sign-in limit is off because the Free plan
-can't hold it to this hostname or let the generators through. The allow-list is the only gate. That holds while it
-stays on, and Terraform refuses to switch it off unless the edge limit is on; opening aws-prod to the public needs a
-rate limit back first.</div>
+<div class="gate"><b>Sign-ins are limited at the edge.</b> The backend's AWS entry point (<code>server.aws.ts</code>)
+turns the app's own limits off and leaves them to the edge, which counts sign-ins per address and lets the load
+generators past by their run key. The app's limit would count every generator's thousands of users against one
+address.</div>
 
-<h2>4. One message, step by step</h2>
+<h2>4. What the edge changes during a surge</h2>
+<p>Every new user opens a TCP connection and a TLS handshake. Without an edge, each of those lands on the load
+balancer, which grows to meet them and can lag behind a surge: in <code>20261031T040409Z</code>, 27,076 sign-ins never
+got a connection while it grew from about 30 to about 560 capacity units.</p>
+<div class="pipe">
+  <div class="s load"><b>New user</b>a fresh connection</div><div class="a">→</div>
+  <div class="s cfr"><b>CloudFront</b>TCP and TLS end here, on a fleet shared by all of AWS</div><div class="a">→</div>
+  <div class="s app"><b>Load balancer</b>short requests arrive on connections already open; no TLS</div><div class="a">→</div>
+  <div class="s app"><b>API</b></div>
+</div>
+<div class="gate warn"><b>What the edge does not change: push streams.</b> An open push stream holds one connection from
+CloudFront to the load balancer for as long as it lives, so 50,000 streams are still about 50,000 connections there,
+opened as users arrive. A stream cut while the load balancer grows is still cut. The browser reconnects within the
+stream's random <code>retry:</code> delay, and on connect the stream resends the user's current state, so nothing is lost.
+A run records how many streams were cut and how fast they came back.</div>
+
+<h2>5. One message, step by step</h2>
 <div class="card">
 <ol>
-  <li>The browser posts to <code>/api/threads/:id/chat</code>. Cloudflare checks the allow-list and forwards it over strict TLS, presenting the client certificate.</li>
-  <li>The load balancer verifies the certificate, matches the host and the <code>/api/*</code> path, and picks an API task.</li>
+  <li>The browser posts to <code>/api/threads/:id/chat</code>. CloudFront ends its TLS, checks the web ACL, and forwards it uncached through the VPC origin, on a connection it already holds open.</li>
+  <li>The load balancer matches the host and the <code>/api/*</code> path, and picks an API task.</li>
   <li>The API verifies the session (the auth core holds the signing keys), stores the arrival and queues its judgment in one Postgres transaction. It subscribes to the user's Valkey channel <em>before</em> the commit.</li>
   <li>A worker task picks up the job, asks the mock for an embedding (and, if needed, a judge or rewrite call), commits the verdict, then publishes it to Valkey.</li>
-  <li>The API task holding the request hears the verdict and streams the mock's reply back through the load balancer and Cloudflare. The browser's push stream, held on any API task, hears the title and Fact news later.</li>
+  <li>The API task holding the request hears the verdict and streams the mock's reply back through the load balancer and CloudFront. The browser's push stream, held on any API task, hears the title and Fact news later.</li>
 </ol>
 </div>
 
-<h2>5. Why Valkey</h2>
+<h2>6. Why Valkey</h2>
 <div class="card">
   <p>With several copies of the API and the worker, the code that produces news and the code waiting for it usually
   run in different processes. Three things must cross between them:</p>
@@ -339,43 +367,30 @@ rate limit back first.</div>
 </table>
 <p class="note">The decision and its failure rules are in <a href="../../adrs/0012-server-push-event-bus.md">ADR 0012</a>.</p>
 
-<h2>6. The two certificates</h2>
-<p>All the keys are generated by Terraform on the operator's machine and kept in Terraform's state, in the vault
-bucket (encrypted, no public access). Cloudflare's Origin CA only signs; it never sees a private key.</p>
-<div class="grid2">
-  <div class="card">
-    <h3 style="margin-top:0">Origin certificate: the load balancer proves itself</h3>
-    <table>
-      <tr><td>Signed by</td><td>Cloudflare's Origin CA</td></tr>
-      <tr><td>Presented by</td><td>the load balancer, from ACM</td></tr>
-      <tr><td>Checked by</td><td>Cloudflare (strict TLS, this hostname only)</td></tr>
-      <tr><td>Valid for</td><td>15 years</td></tr>
-    </table>
-  </div>
-  <div class="card">
-    <h3 style="margin-top:0">Client certificate: Cloudflare proves itself</h3>
-    <table>
-      <tr><td>Signed by</td><td>aws-prod's own CA, made by Terraform</td></tr>
-      <tr><td>Presented by</td><td>Cloudflare, for this hostname only</td></tr>
-      <tr><td>Checked by</td><td>the load balancer's trust store, which reads the CA's public certificate from the vault</td></tr>
-      <tr><td>Valid for</td><td>CA 10 years, certificate 5 years</td></tr>
-    </table>
-  </div>
+<h2>7. The certificate</h2>
+<p>One certificate, for the hostname, which CloudFront presents to every browser and generator. The last hop, from
+CloudFront to the load balancer, never leaves AWS, so it carries no TLS and needs no certificate.</p>
+<div class="card">
+  <table>
+    <tr><td>Issued by</td><td>ACM, in <code>us-east-1</code>, the only region CloudFront takes a certificate from</td></tr>
+    <tr><td>Proved by</td><td>a DNS record in Cloudflare's zone, kept there so ACM renews the certificate on its own</td></tr>
+    <tr><td>Presented by</td><td>the distribution, which reads its ARN from SSM at each raise</td></tr>
+    <tr><td>Kept</td><td>with core: it costs nothing, and a raise never waits on issuance</td></tr>
+  </table>
 </div>
-<p class="note">Neither renews itself; the earliest to expire is the client certificate, five years after core was first set up.</p>
 
-<h2>7. Who owns what, and for how long</h2>
+<h2>8. Who owns what, and for how long</h2>
 <table>
-  <tr><th>Lifetime</th><th>Cloudflare (Terraform)</th><th>AWS (CDK)</th></tr>
+  <tr><th>Lifetime</th><th>Terraform</th><th>CDK</th></tr>
   <tr><td><span class="tag t-core">core</span><br><span class="note">always</span></td>
-      <td><code>cloudflare/core</code>: origin certificate, client CA and client certificate (a per-hostname origin-pull certificate)</td>
-      <td>the <code>CDKToolkit</code> stack, vault bucket (Terraform state for both roots, trust CA, spend ledger, access logs), image repositories, secrets, safety net, seed snapshot, origin certificate in ACM</td></tr>
+      <td><code>cloudflare/core</code>: the certificate's DNS proof record, and the certificate itself in ACM (<code>us-east-1</code>)</td>
+      <td>the <code>CDKToolkit</code> stacks in both regions, vault bucket (Terraform state for both roots, spend ledger, access logs), image repositories, secrets, safety net, seed snapshot</td></tr>
   <tr><td><span class="tag t-app">app</span><br><span class="note">while up</span></td>
-      <td><code>cloudflare/app</code>: the proxied hostname record, the client-certificate binding, strict TLS, the allow-list (and the sign-in limit, off)</td>
-      <td>network, database, Valkey, the five services, load balancer, bastion</td></tr>
+      <td><code>cloudflare/app</code>: the DNS-only hostname record, parked at <code>192.0.2.1</code> while aws-prod is down</td>
+      <td>network, database, Valkey, the five services, load balancer, bastion, the distribution and its VPC origin; and in <code>us-east-1</code>, the <code>EdgeRules</code> stack's web ACL</td></tr>
   <tr><td><span class="tag t-load">load</span><br><span class="note">during a run</span></td>
-      <td>nothing: on an <code>--edge</code> run the generators reach Cloudflare over the internet, as users do</td>
-      <td><code>LoadStack</code>: the generators' own VPC (private subnets behind one NAT gateway), ECS cluster, task definition, CloudWatch log group, and on the direct path the rule that lets its address into the load balancer</td></tr>
+      <td>nothing: the generators reach the hostname over the internet, as users do</td>
+      <td><code>LoadStack</code>: the generators' own VPC (private subnets behind one NAT gateway), ECS cluster, task definition, CloudWatch log group</td></tr>
 </table>
 <figure>
 <svg viewBox="0 0 940 230" role="img" aria-label="lifetimes over a test day">
@@ -400,27 +415,25 @@ bucket (encrypted, no public access). Cloudflare's Origin CA only signs; it neve
 </figure>
 <p class="note"><b><code>CDKToolkit</code></b> is what <code>cdk bootstrap</code> creates, once per account and region: a bucket for
 templates and file assets, an ECR repository for image assets, and the roles CDK uses to publish, look up and deploy, including
-the CloudFormation execution role stacks are created through. aws-prod creates the permissions boundary that fences those roles
-itself, before bootstrapping. The Cloudflare zone and API token are set up by hand. The app root takes over the zone's
-<code>http_config_settings</code>, <code>http_request_firewall_custom</code> and <code>http_ratelimit</code> rule phases; a zone has one
-of each, so a raise is refused if anything else already owns one.</p>
+the CloudFormation execution role stacks are created through. aws-prod bootstraps its own region and <code>us-east-1</code>, and
+creates the permissions boundary that fences those roles in each, before bootstrapping. The Cloudflare zone and its DNS token
+are set up by hand.</p>
 
-<h2>8. What passes between Cloudflare and AWS</h2>
+<h2>9. What passes between the parts</h2>
 <table>
   <tr><th>Value</th><th>From → to</th><th>How</th><th>When</th></tr>
-  <tr><td>Origin certificate + key</td><td>Terraform state → ACM → listener</td><td>streamed by the core command; ARN kept in SSM</td><td>core</td></tr>
-  <tr><td>Client CA</td><td>Terraform state → vault bucket → trust store</td><td>core command</td><td>core</td></tr>
-  <tr><td>Client certificate id</td><td><code>cloudflare/core</code> → <code>cloudflare/app</code></td><td>Terraform output, passed as a variable</td><td>every raise</td></tr>
-  <tr><td>Load balancer DNS name</td><td>CloudFormation output → hostname record</td><td>passed as a Terraform variable</td><td>every raise, after the app stack</td></tr>
-  <tr><td>Run key</td><td>SSM → allow-list and generators</td><td>Terraform reads it from the environment, never the command line; generators get it as a task secret</td><td>minted per raise</td></tr>
-  <tr><td>Operator's addresses</td><td>operator's machine → allow-list</td><td>asked of Cloudflare's trace endpoint, IPv4 and IPv6</td><td>every edge apply</td></tr>
-  <tr><td>Cloudflare's IPv4 ranges</td><td>repo config → security group</td><td>synthesized into the app stack, compared with Cloudflare's live list before each raise</td><td>every raise</td></tr>
+  <tr><td>Certificate's DNS proof</td><td>ACM → Cloudflare's zone</td><td><code>cloudflare/core</code> writes the record ACM asks for</td><td>core</td></tr>
+  <tr><td>Certificate ARN</td><td>Terraform state → SSM → distribution</td><td>written by the core command, read by the app stack at deploy</td><td>core</td></tr>
+  <tr><td>Run key</td><td>SSM → web ACL and generators</td><td>a hidden parameter of the edge rules stack; generators get it as a task secret</td><td>minted per raise</td></tr>
+  <tr><td>Operator's address</td><td>operator's machine → web ACL</td><td>asked of <code>checkip.amazonaws.com</code>, IPv4 only; the distribution takes no IPv6</td><td>every raise</td></tr>
+  <tr><td>Web ACL ARN</td><td>edge rules stack (<code>us-east-1</code>) → SSM → distribution</td><td>written by the up command, read by the app stack at deploy</td><td>every raise, before the app stack</td></tr>
+  <tr><td>Distribution's name</td><td>CloudFormation output → hostname record</td><td>passed as a Terraform variable</td><td>every raise, after the app stack</td></tr>
   <tr><td>Terraform state</td><td>both roots → vault bucket</td><td>S3 backend with a lockfile, encrypted</td><td>every apply</td></tr>
 </table>
-<p class="note">The dependency runs one way at a time. At core, Cloudflare's side is made first and AWS takes its
-certificates. At each raise, AWS's side is made first and Cloudflare takes its load balancer's name.</p>
+<p class="note">At each raise the edge rules come first, then the app stack and its distribution, then the hostname's record.
+A teardown runs the other way, and deleting the distribution, which must be disabled first, takes some minutes.</p>
 
-<h2>9. The backend this shape needs</h2>
+<h2>10. The backend this shape needs</h2>
 <div class="card">
   <ul>
     <li><b>The API and the worker run apart.</b> The AWS entry point serves the API only and refuses to start without Valkey; the worker is its own process, chosen by <code>PROCESS_ROLE</code>.</li>
@@ -428,11 +441,11 @@ certificates. At each raise, AWS's side is made first and Cloudflare takes its l
     <li><b>Thread passes hold no connection across inference.</b> They commit optimistically, so only connections doing work count against the database's limit (<a href="../../adrs/0011-durable-background-work-queue.md">ADR 0011</a>).</li>
     <li><b>One pending reply per Thread</b> is enforced by the database, so two copies cannot start the same Exchange.</li>
     <li><b>A worker frees only jobs whose lock outlived the task time limit</b>, which only a crashed or frozen worker leaves, so many workers can share the queue.</li>
-    <li><b>Rate-limit counters stay per process</b>, and aws-prod runs with them off (section 3).</li>
+    <li><b>Rate-limit counters stay per process</b>, and aws-prod runs with them off, leaving sign-ins to the edge (section 3).</li>
   </ul>
 </div>
 
-<h2>10. Decisions the ADR left open</h2>
+<h2>11. Decisions the ADRs left open</h2>
 <table>
   <tr><th>Decision</th><th>Why</th></tr>
   <tr><td>Migrations run at API start</td><td>A deploy never races an empty database. The migration lock serializes tasks that start together.</td></tr>
@@ -442,7 +455,8 @@ certificates. At each raise, AWS's side is made first and Cloudflare takes its l
   <tr><td>Seeding goes through the real sign-up</td><td>The population is created exactly as users are, with Thread and Exchange rows to match.</td></tr>
   <tr><td>Percentiles come from every request line, never from running totals</td><td>A line per request is kept, so any figure can be computed again exactly, across any number of generators.</td></tr>
   <tr><td>Performance Insights, Container Insights, load-balancer access logs, flow logs (rejects only)</td><td>A test run is only worth what it can measure. All of them are usage-priced and small.</td></tr>
-  <tr><td>Terraform owns the zone's three rule-phase entrypoints, guarded before each raise</td><td>A zone has one entrypoint per phase, so taking one over would replace other rules and deleting it would remove them.</td></tr>
+  <tr><td>The distribution publishes its additional metrics</td><td>The share of 502s, 503s and 504s, and how long the load balancer took to answer, tell an error the edge gave from one it passed on. They bill by the hour, while aws-prod is up.</td></tr>
+  <tr><td>The distribution takes no IPv6</td><td>The allow-list names the operator by one IPv4 address, so a browser that preferred IPv6 would be turned away.</td></tr>
   <tr><td>Valkey in every step</td><td>One shape to test, and it costs pennies. It carries news and stops between backend copies.</td></tr>
 </table>
 

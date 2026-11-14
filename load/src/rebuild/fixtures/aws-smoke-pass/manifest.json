@@ -17,7 +17,7 @@
     }
   },
   "target": "aws-prod",
-  "loadPath": "direct",
+  "loadPath": "cloudfront",
   "images": {
     "backend": "20261018000000-abc1234",
     "load": "20261018000000-abc1234"
@@ -153,6 +153,11 @@
       "path": "metrics/aws/database.jsonl",
       "size": 522,
       "sha256": "6659bf7543553419e5dc422014b906cd4eef535ce616c0641e86e049f420cfc6"
+    },
+    {
+      "path": "metrics/aws/distribution.jsonl",
+      "size": 1295,
+      "sha256": "168ab68479ac71d245012f6cbd90f0904b11707822a073078317a852b4d6e276"
     },
     {
       "path": "metrics/aws/ecs-cluster-app.jsonl",

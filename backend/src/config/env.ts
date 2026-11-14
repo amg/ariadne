@@ -221,7 +221,7 @@ export const env = {
     return getBoolean('AUTH_SIGNUP_ENABLED', true);
   },
   /**
-   * Whether a Cloudflare rule limits the auth routes by real client
+   * Whether a rule at the edge limits the auth routes by real client
    * address, so the app leaves them unlimited. Off: the app limits them.
    */
   get AUTH_RATE_LIMIT_AT_EDGE() {
@@ -232,7 +232,7 @@ export const env = {
   /**
    * The Redis every backend copy shares for news and stops (event bus).
    * Unset: everything stays inside this one process. Rate-limit counts are
-   * in-memory (home) or at the Cloudflare edge (prod).
+   * in-memory (home) or at the edge (prod).
    */
   get VALKEY_URL() {
     return process.env.VALKEY_URL?.trim() || undefined;

@@ -37,7 +37,7 @@ class AppLogController extends LogController {
 type AppOptions = {
   /** CORS origins to allow. Required for production deployments. */
   corsOrigins: string[];
-  /** Whether to enable in-memory rate limiting. False when edge (Cloudflare) handles it. */
+  /** Whether to enable in-memory rate limiting. False when the edge handles it. */
   enableRateLimiting: boolean;
 };
 
@@ -83,7 +83,7 @@ export async function createApp(features: FeatureFlags, options: AppOptions) {
   app.setErrorHandler(errorHandler());
 
   // Rate limiting: in-memory only. Disabled in multi-copy deployments where
-  // edge (Cloudflare) handles rate limiting by real client address.
+  // the edge handles rate limiting by real client address.
   if (options.enableRateLimiting) await registerRateLimits(app);
   registerRoutes(app, features);
 

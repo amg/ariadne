@@ -7,6 +7,7 @@ import { markLifetime } from '../lifetime.ts';
 import type { CoreResources } from '../types/core.ts';
 import { Cache } from './cache.ts';
 import { Database } from './database.ts';
+import { FrontDoor } from './frontDoor.ts';
 import { Network, SUBNETS } from './network.ts';
 import { OperatorAccess } from './operatorAccess.ts';
 import { Origin } from './origin.ts';
@@ -60,6 +61,7 @@ export class AppStack extends Stack {
       web: services.web,
       reservedCapacityUnits: step.loadBalancer.reservedCapacityUnits,
     });
+    const frontDoor = new FrontDoor(this, 'FrontDoor', { network, origin });
     const access = new OperatorAccess(this, 'OperatorAccess', {
       network,
       database,
@@ -70,6 +72,7 @@ export class AppStack extends Stack {
 
     const outputs: Record<string, string> = {
       [OUTPUTS.originDnsName]: origin.loadBalancer.loadBalancerDnsName,
+      [OUTPUTS.distributionDomainName]: frontDoor.distribution.distributionDomainName,
       [OUTPUTS.clusterName]: cluster.clusterName,
       [OUTPUTS.databaseId]: database.instance.instanceIdentifier,
       [OUTPUTS.databaseEndpoint]: database.instance.dbInstanceEndpointAddress,
