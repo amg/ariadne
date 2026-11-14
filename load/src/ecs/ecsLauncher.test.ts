@@ -13,6 +13,7 @@ const start: GeneratorStart = {
   userCount: 250,
   rampSeconds: 120,
   holdSeconds: 600,
+  fallSeconds: 0,
   endsAt: null,
   thinkSeconds: 30,
   timeoutMs: 840_000,
@@ -81,7 +82,11 @@ describe('starting a generator', () => {
     await launcher.launch({ ...start, endsAt: Date.parse('2026-10-17T00:05:00.000Z') }, never);
 
     expect(ecs.tasks[0]?.environment.ENDS_AT).toBe('2026-10-17T00:05:00.000Z');
-    expect(ecs.tasks[0]?.environment).toMatchObject({ RAMP_SECONDS: '120', HOLD_SECONDS: '600' });
+    expect(ecs.tasks[0]?.environment).toMatchObject({
+      RAMP_SECONDS: '120',
+      HOLD_SECONDS: '600',
+      FALL_SECONDS: '0',
+    });
   });
 
   it('gives no end moment to a plan that has none', async () => {

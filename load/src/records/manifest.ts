@@ -119,6 +119,29 @@ export const manifestSchema = z.object({
 });
 export type Manifest = z.infer<typeof manifestSchema>;
 
+const servicesConfig = z.object({
+  services: z.record(
+    z.string(),
+    z.looseObject({
+      count: z.number(),
+      scaling: z.looseObject({ maxCount: z.number() }).optional(),
+    }),
+  ),
+});
+
+/**
+ * The services a run's step lets scale, each with the tasks it starts at
+ * and may grow to, in the order the configuration names them. Empty where
+ * no service scales, or the configuration does not say.
+ */
+export function scalingServicesOf(config: Manifest['config']) {
+  const parsed = servicesConfig.safeParse(config);
+  if (!parsed.success) return [];
+  return Object.entries(parsed.data.services).flatMap(([service, { count, scaling }]) =>
+    scaling === undefined ? [] : [{ service, floor: count, ceiling: scaling.maxCount }],
+  );
+}
+
 /** Reads a manifest from its JSON text, refusing a run folder of a version this reader does not know. */
 export function readManifest(text: string) {
   const document: unknown = JSON.parse(text);

@@ -62,6 +62,7 @@ function setup(
     generators?: number;
     rampSeconds?: number;
     holdSeconds?: number;
+    fallSeconds?: number;
     replacesLostGenerators?: boolean;
     launcher?: (controlled: GeneratorLauncher) => GeneratorLauncher;
   } = {},
@@ -86,6 +87,7 @@ function setup(
       slices: sliceUsers({ users: 10, generators: input.generators ?? 2 }),
       rampSeconds: input.rampSeconds ?? 5,
       holdSeconds: input.holdSeconds ?? 295,
+      fallSeconds: input.fallSeconds ?? 0,
       thinkSeconds: 5,
       replacesLostGenerators: input.replacesLostGenerators,
     });
@@ -203,6 +205,95 @@ describe('superviseStage', () => {
     ]);
   });
 
+  it('gives each generator the fall, and records its hold as ending where the fall begins', async () => {
+    const test = setup({ rampSeconds: 5, holdSeconds: 295, fallSeconds: 100 });
+    const supervising = test.supervise();
+    await settle();
+
+    expect(test.find(0, 1).start).toMatchObject({
+      rampSeconds: 5,
+      holdSeconds: 295,
+      fallSeconds: 100,
+      userCount: 5,
+      timeoutMs: (400 + 120) * 1_000,
+    });
+    expect(test.events[0]).toMatchObject({
+      planned: {
+        rampEndsAt: new Date(seconds(5)).toISOString(),
+        holdEndsAt: new Date(seconds(300)).toISOString(),
+      },
+    });
+    test.run.abort(new Error('stop'));
+    await expect(supervising).rejects.toThrow('stop');
+  });
+
+  it('gives a generator replaced before the fall the whole fall, ending with the stage', async () => {
+    const test = setup({ rampSeconds: 5, holdSeconds: 295, fallSeconds: 100 });
+    const supervising = test.supervise();
+    await settle();
+
+    test.setClock(100);
+    test.find(1, 1).end({ how: 'stopped', reason: 'interrupted', detail: 'Spot', report: null });
+    await settle();
+
+    expect(test.find(1, 2).start).toMatchObject({
+      userCount: 5,
+      rampSeconds: 60,
+      holdSeconds: 140,
+      fallSeconds: 100,
+      endsAt: seconds(400),
+    });
+    test.run.abort(new Error('stop'));
+    await expect(supervising).rejects.toThrow('stop');
+  });
+
+  it('resumes a slice lost mid-fall where its fall had got to, with only the users still there', async () => {
+    const test = setup({ rampSeconds: 5, holdSeconds: 295, fallSeconds: 100 });
+    const supervising = test.supervise();
+    await settle();
+
+    // 90 s of the stage are left: a minute to bring users back, then the last 30 s of the fall.
+    test.setClock(310);
+    test.find(1, 1).end({ how: 'stopped', reason: 'interrupted', detail: 'Spot', report: null });
+    await settle();
+
+    expect(test.find(1, 2).start).toMatchObject({
+      firstUser: 5,
+      userCount: 2,
+      rampSeconds: 60,
+      holdSeconds: 0,
+      fallSeconds: 30,
+      endsAt: seconds(400),
+    });
+    expect(
+      test.events.find((event) => event.kind === 'generator-launched' && event.attempt === 2),
+    ).toMatchObject({
+      firstUser: 5,
+      userCount: 2,
+      planned: {
+        rampEndsAt: new Date(seconds(370)).toISOString(),
+        holdEndsAt: new Date(seconds(370)).toISOString(),
+      },
+    });
+    test.run.abort(new Error('stop'));
+    await expect(supervising).rejects.toThrow('stop');
+  });
+
+  it('leaves a slice down when its users would all have left by the time they were back', async () => {
+    const test = setup({ rampSeconds: 5, holdSeconds: 295, fallSeconds: 100 });
+    const supervising = test.supervise();
+    await settle();
+
+    test.setClock(350);
+    test.find(1, 1).end({ how: 'stopped', reason: 'interrupted', detail: 'Spot', report: null });
+    await settle();
+
+    expect(test.launched).toHaveLength(2);
+    expect(test.said.at(-1)).toMatch(/stay down: too little of the stage is left/);
+    test.run.abort(new Error('stop'));
+    await expect(supervising).rejects.toThrow('stop');
+  });
+
   it('gives a replacement launched near the end only the time that is left', async () => {
     const test = setup();
     const supervising = test.supervise();
@@ -236,6 +327,7 @@ describe('superviseStage', () => {
       slices: sliceUsers({ users: 10, generators: 1 }),
       rampSeconds: 5,
       holdSeconds: 295,
+      fallSeconds: 0,
       thinkSeconds: 5,
     });
     await settle();
@@ -353,6 +445,7 @@ describe('superviseStage', () => {
         slices: sliceUsers({ users: 10, generators: 2 }),
         rampSeconds: 5,
         holdSeconds: 295,
+        fallSeconds: 0,
         thinkSeconds: 5,
       }),
     ).rejects.toThrow(/Generator 1 attempt 1 could not be started: no capacity anywhere/);

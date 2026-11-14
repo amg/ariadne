@@ -241,4 +241,34 @@ describe('summarize, push streams', () => {
       mostEndedInAMinute: { minute: at(0), count: 2 },
     });
   });
+
+  it('leaves out the streams users closed as they left in the fall, and counts one cut under a user still there', () => {
+    const lasting = (user: number, seconds: number, outcome: 'failed' | 'held') =>
+      requestWith({
+        kind: 'push',
+        user,
+        startedAt: at(10),
+        totalMs: seconds * 1_000,
+        status: 200,
+        outcome,
+      });
+    const fallingSlice = sliceWith({ hold: { from: at(10), to: at(60) }, endedAt: at(120) });
+
+    const summary = summarize(
+      runDataWith({
+        slices: [
+          sliceDataWith(fallingSlice, {
+            requests: [
+              lasting(3, 70, 'held'),
+              lasting(2, 80, 'held'),
+              lasting(1, 75, 'failed'),
+              lasting(0, 110, 'held'),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(summary.pushStreams).toMatchObject({ opened: 4, endedEarly: 1, cut: 1, reopened: 0 });
+  });
 });

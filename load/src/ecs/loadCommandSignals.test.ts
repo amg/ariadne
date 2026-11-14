@@ -47,6 +47,7 @@ function loadCommand(input: { mode?: 'load' | 'seed'; record?: RunRecord | null 
         generators: 4,
         rampSeconds: 120,
         holdSeconds: 600,
+        fallSeconds: 0,
         thinkSeconds: 30,
         signal,
         keepStoppedTask: async () => undefined,

@@ -30,6 +30,7 @@ const plan: Plan = {
   chattingShare: 0,
   rampSeconds: 0,
   holdSeconds: 0,
+  fallSeconds: 0,
   endsAt: null,
   thinkSeconds: 30,
   seedConcurrency: 1,

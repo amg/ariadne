@@ -15,6 +15,7 @@ const PRINTED_STEP10 = JSON.stringify({
     chattingShare: 0.2,
     rampSeconds: 600,
     holdSeconds: 1_200,
+    fallSeconds: 0,
     warmUp: { rampSeconds: 390, holdSeconds: 120 },
     thinkSeconds: 30,
     egressGbPerHour: 2,
@@ -40,6 +41,14 @@ describe('parseStepConfig', () => {
       minPushStreams: 9_800,
       minChatters: 1_960,
     });
+  });
+
+  it('refuses a configuration that does not say how long its users take to leave', () => {
+    const load = Object.fromEntries(
+      Object.entries(JSON.parse(PRINTED_STEP10).load).filter(([key]) => key !== 'fallSeconds'),
+    );
+
+    expect(() => parseStepConfig(JSON.stringify({ load }))).toThrow(/load\.fallSeconds/);
   });
 
   it('refuses a configuration that does not say how many of the users chat', () => {

@@ -121,6 +121,102 @@ describe('the role each backend service runs as', () => {
   });
 });
 
+describe('how the API reaches auth', () => {
+  /** Each service of a step's raise, by the command its container runs, or by its port when it runs the image's own. */
+  function servicesOf(stepName: string) {
+    const template = appTemplateOf(stepName);
+    const definitions = template.findResources('AWS::ECS::TaskDefinition');
+    return Object.entries(template.findResources('AWS::ECS::Service')).map(([id, service]) => {
+      const container =
+        definitions[service.Properties.TaskDefinition.Ref]?.Properties.ContainerDefinitions[0];
+      return {
+        id,
+        command: (container?.Command ?? []).join(' '),
+        ports: container?.PortMappings ?? [],
+        connect: service.Properties.ServiceConnectConfiguration,
+        registries: service.Properties.ServiceRegistries,
+        dependsOn: service.DependsOn ?? [],
+      };
+    });
+  }
+  const authOf = (services: ReturnType<typeof servicesOf>) =>
+    services.find((service) =>
+      service.ports.some((port: { ContainerPort: number }) => port.ContainerPort === 3567),
+    );
+  const apiOf = (services: ReturnType<typeof servicesOf>) =>
+    services.find((service) => service.command.includes('dist/server.aws.js'));
+
+  it('offers auth through Service Connect at the name the backend already calls, and not by DNS', () => {
+    const auth = authOf(servicesOf('step10'));
+
+    assert.deepEqual(auth?.connect?.Services, [
+      {
+        PortName: 'main',
+        DiscoveryName: 'auth',
+        ClientAliases: [{ DnsName: 'auth.aws-prod.internal', Port: 3567 }],
+      },
+    ]);
+    assert.equal(auth?.registries, undefined);
+    assert.deepEqual(auth?.ports, [
+      { ContainerPort: 3567, Name: 'main', AppProtocol: 'http', Protocol: 'tcp' },
+    ]);
+  });
+
+  it('makes the API a client of Service Connect, raised once auth is offered there', () => {
+    const services = servicesOf('step10');
+    const api = apiOf(services);
+
+    assert.equal(api?.connect?.Enabled, true);
+    assert.equal(api?.connect?.Services, undefined);
+    assert.ok(api?.dependsOn.includes(authOf(services)?.id));
+  });
+
+  it('leaves the worker, which never calls auth, and mock, found by DNS, out of it', () => {
+    const others = servicesOf('step10').filter(
+      (service) =>
+        service.command.includes('dist/worker.js') || service.command.includes('mock/server.ts'),
+    );
+
+    assert.equal(others.length, 2);
+    for (const service of others) assert.equal(service.connect, undefined);
+  });
+});
+
+describe('the scaling rehearsal’s raise', () => {
+  it('starts each service that scales at its floor, free to grow to its ceiling on its CPU', () => {
+    const template = appTemplateOf('scale10');
+    const targets = Object.values(
+      template.findResources('AWS::ApplicationAutoScaling::ScalableTarget'),
+    ).map((target) => [target.Properties.MinCapacity, target.Properties.MaxCapacity]);
+    const cpuTargets = Object.values(
+      template.findResources('AWS::ApplicationAutoScaling::ScalingPolicy'),
+    ).map(
+      (policy) => policy.Properties.TargetTrackingScalingPolicyConfiguration.TargetValue as number,
+    );
+
+    assert.deepEqual(
+      targets.sort((a, b) => a[1] - b[1]),
+      [
+        [2, 6],
+        [2, 8],
+        [2, 12],
+      ],
+    );
+    assert.deepEqual(
+      cpuTargets.sort((a, b) => a - b),
+      [60, 65, 70],
+    );
+  });
+
+  it('leaves the count of a service that scales to the autoscaler, and fixes the rest', () => {
+    const counts = Object.values(appTemplateOf('scale10').findResources('AWS::ECS::Service')).map(
+      (service) => service.Properties.DesiredCount,
+    );
+
+    assert.deepEqual(counts.filter((count) => count !== undefined).sort(), [1, 2]);
+  });
+});
+
 describe('the load balancer’s reserved capacity', () => {
   const reservedOf = (stepName: string) => {
     const [balancer] = Object.values(

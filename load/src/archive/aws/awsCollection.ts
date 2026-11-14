@@ -6,6 +6,7 @@ import {
   type Finding,
   LAYOUT,
   type RunEvent,
+  scalingServicesOf,
 } from '../../records/index.ts';
 import type { TaskInfo } from '../../types/archive.ts';
 import { attemptsBySlice } from '../attempts.ts';
@@ -30,9 +31,18 @@ type Collection = Parameters<typeof sealRun>[0]['collection'];
  */
 const TRAILING_MS = 5 * 60_000;
 
+/**
+ * How long after a run's end they are collected when some of the step's
+ * services scale. Those services take 10 to 15 minutes to go back down to
+ * their floors once the load has gone, and the watch must see them get there.
+ */
+const SCALING_TRAILING_MS = 30 * 60_000;
+
 /** When the stretch after a run's end, which the archive also collects, ends. */
-export function trailingEndOf(endedAt: string) {
-  return new Date(Date.parse(endedAt) + TRAILING_MS).toISOString();
+export function trailingEndOf(run: { endedAt: string; config: Readonly<Record<string, unknown>> }) {
+  const scales = scalingServicesOf(run.config).length > 0;
+  const trailingMs = scales ? SCALING_TRAILING_MS : TRAILING_MS;
+  return new Date(Date.parse(run.endedAt) + trailingMs).toISOString();
 }
 
 type AwsRunInput = {
@@ -40,18 +50,20 @@ type AwsRunInput = {
   raise: Raise;
   startedAt: string;
   endedAt: string;
+  /** When the stretch after the run's end, which is collected too, ends. */
+  trailingEndsAt: string;
   /** How the run ended; worked out from how its generators stopped when not given. */
   outcome?: Extract<RunEvent, { kind: 'run-ended' }>['outcome'];
-  /** The seconds a generator ramps and holds, from the step's configuration. */
-  plan: { rampSeconds: number; holdSeconds: number };
+  /** The seconds a generator ramps, holds and falls, from the step's configuration. */
+  plan: { rampSeconds: number; holdSeconds: number; fallSeconds: number };
 };
 
 /**
  * The windows of an archive: what the run did, the run with the stretch
  * after it, and the whole raise the run was part of with that stretch.
  */
-function windowsOf(input: Pick<AwsRunInput, 'raise' | 'startedAt' | 'endedAt'>) {
-  const to = new Date(trailingEndOf(input.endedAt));
+function windowsOf(input: Pick<AwsRunInput, 'raise' | 'startedAt' | 'endedAt' | 'trailingEndsAt'>) {
+  const to = new Date(input.trailingEndsAt);
   return {
     run: { from: new Date(input.startedAt), to: new Date(input.endedAt) },
     runAndAfter: { from: new Date(input.startedAt), to },

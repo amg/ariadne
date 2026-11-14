@@ -90,8 +90,10 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
   with no public address, which CloudFront reaches through a VPC origin, over plain HTTP inside AWS.</p>
   <p>Users, the operator and the load generators all come in the same way, through CloudFront. The load balancer sends
   <code>/api/*</code> to the backend and everything else to nginx. Behind it, the API and a separate worker share
-  Postgres and Valkey; the auth core and inference (mocked during load tests) are their own services, resolved directly
-  through AWS Cloud Map private DNS without an internal load balancer.</p>
+  Postgres and Valkey; the auth core and inference (mocked during load tests) are their own services, with no internal
+  load balancer. The API reaches auth through ECS Service Connect: a proxy beside each API task knows every healthy auth
+  task and picks one for each request, so auth tasks added under load take their share. Inference is found through AWS
+  Cloud Map private DNS.</p>
   <p>AWS is defined by CDK. Terraform holds the hostname's record at Cloudflare, and the certificate with the record that
   proves it to ACM. Everything lives in aws-prod's own AWS account in
   <code>ap-southeast-2</code>, except what CloudFront takes only from <code>us-east-1</code>: the certificate and the web ACL. There
@@ -178,12 +180,12 @@ operator's <code>AWS_PROD_PROJECT</code>.</p>
 
   <!-- Cloud Map namespace for internal services -->
   <rect x="222" y="416" width="292" height="92" rx="8" fill="#f4faf7" stroke="#2e7d5b" stroke-dasharray="4 3"/>
-  <text x="232" y="432" class="ts" font-weight="700" fill="#206a4a">AWS Cloud Map · &lt;project&gt;.internal (Route 53 Private DNS)</text>
+  <text x="232" y="432" class="ts" font-weight="700" fill="#206a4a">AWS Cloud Map · &lt;project&gt;.internal</text>
 
   <rect x="230" y="440" width="134" height="60" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
-  <text x="240" y="458" class="th">Auth core</text><text x="240" y="474" class="ts">:3567 · auth.internal</text><text x="240" y="490" class="ts">no ALB</text>
+  <text x="240" y="458" class="th">Auth core</text><text x="240" y="474" class="ts">:3567 · auth.internal</text><text x="240" y="490" class="ts">Service Connect</text>
   <rect x="372" y="440" width="134" height="60" rx="7" fill="#e2f2ea" stroke="#2e7d5b"/>
-  <text x="382" y="458" class="th">Mock inference</text><text x="382" y="474" class="ts">:4141 · mock.internal</text><text x="382" y="490" class="ts">no ALB</text>
+  <text x="382" y="458" class="th">Mock inference</text><text x="382" y="474" class="ts">:4141 · mock.internal</text><text x="382" y="490" class="ts">private DNS</text>
   <rect x="528" y="440" width="120" height="60" rx="7" fill="#eef0f3" stroke="#6b7280"/>
   <text x="540" y="462" class="th">Bastion</text><text x="540" y="480" class="ts">SSM only, no ports</text>
 
@@ -258,7 +260,7 @@ The dashed orange line is a DNS answer, not traffic: Cloudflare only tells brows
 Every task pulls its image, reads its secrets and writes its logs through the VPC endpoints. The distribution presents
 the certificate from ACM, and the load balancer writes access logs to the vault. The network keeps an internet gateway,
 which CloudFront's VPC origins need, but no subnet routes to it.
-Auth core and mock inference are discovered directly via AWS Cloud Map (Route 53 private DNS: <code>&lt;project&gt;.internal</code>) with no internal load balancer.
+Neither the auth core nor mock inference sits behind an internal load balancer. The API reaches auth through ECS Service Connect, whose proxy beside each API task spreads requests across every healthy auth task; the backend reaches mock inference through AWS Cloud Map private DNS (<code>&lt;project&gt;.internal</code>).
 Load generators run inside AWS as a separate LoadStack and VPC, and leave it through one NAT address. They go through
 CloudFront, as users do, and the web ACL lets them in by the run key they carry, not by that address.</figcaption>
 </figure>
@@ -271,7 +273,7 @@ CloudFront, as users do, and the web ACL lets them in by the run key they carry,
   <tr><td>CloudFront</td><td>load balancer</td><td>80</td><td>HTTP through the VPC origin, inside AWS; short requests share connections the edge keeps open</td><td>every request that passed the web ACL and was not served from the cache</td></tr>
   <tr><td>load balancer</td><td>API</td><td>3001</td><td>HTTP, inside the VPC</td><td><code>/api/*</code> for the hostname</td></tr>
   <tr><td>load balancer</td><td>web (nginx)</td><td>8080</td><td>HTTP, inside the VPC</td><td>everything else for the hostname</td></tr>
-  <tr><td>API, worker</td><td>auth core</td><td>3567</td><td>HTTP via Cloud Map (<code>auth.&lt;project&gt;.internal</code>), no internal ALB</td><td>sessions and sign-in</td></tr>
+  <tr><td>API</td><td>auth core</td><td>3567</td><td>HTTP through Service Connect (<code>auth.&lt;project&gt;.internal</code>), a proxy in each API task picking an auth task per request; no internal ALB</td><td>sessions and sign-in</td></tr>
   <tr><td>API, worker</td><td>mock inference</td><td>4141</td><td>HTTP via Cloud Map (<code>mock.&lt;project&gt;.internal</code>), no internal ALB</td><td>replies, embeddings, judge and rewrite calls</td></tr>
   <tr><td>API, worker</td><td>Postgres</td><td>5432</td><td>TLS, certificate verified</td><td>app data and the queue; the API runs migrations at start</td></tr>
   <tr><td>auth core</td><td>Postgres</td><td>5432</td><td>TLS</td><td>its own <code>auth</code> schema</td></tr>
@@ -290,9 +292,10 @@ are built from the same backend image but each starts its own command: the API r
 <code>server.aws.js</code>, the worker <code>worker.js</code>, the mock <code>mock/server.ts</code>. The auth core is SuperTokens'
 own server, the same container the single-server setup runs; the backend talks to it through the <code>supertokens-node</code> library.
 Each step's sizes live in <code>infra/config/steps.ts</code>.</p>
-<p class="note">A load step fixes every count before the run starts. Long-lived connections never move to new
+<p class="note">Most load steps fix every count before the run starts. Long-lived connections never move to new
 tasks, so the API is sized for the run's target rather than left to react. <code>step-prod</code>, which runs no load,
-scales the API, the worker and the auth core on CPU instead.</p>
+scales the API, the worker and the auth core on CPU instead, and <code>scale10</code> rehearses that scaling under a load
+that rises, holds and falls.</p>
 
 <h2>3. The way in, and its checks</h2>
 <p>A request meets these in order. The edge's web ACL decides who gets in, and the network does the rest: the load

@@ -11,12 +11,13 @@ type RequestLog = ReturnType<typeof createRequestLog>;
 
 /**
  * A load generator. In `load` mode it brings its users up evenly over the
- * ramp, holds them for the hold, then stops them all. Told to stop, it
+ * ramp, holds them for the hold, then lets them go one at a time over the
+ * fall, or all at once when it has none. Told to stop, it
  * stops its users and prints its report, marked as interrupted.
  * Every request carries the stop signal, so its users stop at once.
  * Whatever way it ends, it exits as soon as its report is written out.
- * When its plan has an end moment, it fits its ramp and hold to the time
- * left when it starts. In `seed` mode it creates its slice of
+ * When its plan has an end moment, it fits its ramp, hold and fall to the
+ * time left when it starts. In `seed` mode it creates its slice of
  * accounts as fast as the concurrency allows. Either way it prints a line
  * for every request it makes, a state line at the interval its plan sets,
  * and one REPORT line at the end. Where its plan

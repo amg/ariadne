@@ -15,6 +15,7 @@ const stepConfigSchema = z
         chattingShare: z.number().min(0).max(1),
         rampSeconds: z.number().nonnegative(),
         holdSeconds: z.number().nonnegative(),
+        fallSeconds: z.number().nonnegative(),
         warmUp: z
           .object({ rampSeconds: z.number().positive(), holdSeconds: z.number().nonnegative() })
           .nullable(),

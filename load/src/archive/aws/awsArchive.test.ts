@@ -294,6 +294,24 @@ describe('archiveAwsRun', () => {
       expect(manifest.trailingEndsAt).toBe('2026-10-15T00:17:00.000Z');
     });
 
+    it('is recorded as ending half an hour after the run, for a step whose services scale', async () => {
+      const scaling = {
+        ...description,
+        config: {
+          ...description.config,
+          services: {
+            api: { count: 2, scaling: { maxCount: 6, targetCpuPercent: 65 } },
+            web: { count: 2 },
+          },
+        },
+      };
+      beginAwsRun({ folder, raise, description: scaling });
+
+      const { manifest } = await archive();
+
+      expect(manifest.trailingEndsAt).toBe('2026-10-15T00:42:00.000Z');
+    });
+
     it('is kept in the backend’s records, which stop where it ends', async () => {
       await begin();
       const base = fakeSources();

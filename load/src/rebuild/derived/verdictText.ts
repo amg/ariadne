@@ -1,5 +1,6 @@
 import type { Judgement } from '../../types/criteria.ts';
 import type { decide } from '../judging/decide.ts';
+import type { scalingOf } from '../judging/scaling.ts';
 import { compareText, roundTo } from '../numbers.ts';
 import type {
   CrossCheck,
@@ -12,6 +13,8 @@ import type {
 } from '../types.ts';
 
 type Decision = ReturnType<typeof decide>;
+
+type ServiceScaling = ReturnType<typeof scalingOf>[number];
 
 /** A table cell's text, safe to put between the bars: a bar in it would start a new cell, a line break would end the row, and a backslash would escape the bar that follows. */
 export function cellText(cell: string | number | null) {
@@ -78,6 +81,10 @@ export function reasonText(reason: Reason) {
       return `the generators and ${reason.against} disagree on ${reason.what}`;
     case 'cross-check-not-made':
       return `the generators could not be checked against ${reason.against}: ${reason.why}`;
+    case 'not-back-at-floor':
+      return `${reason.service} still ran ${roundTo(reason.tasks, 1)} tasks at the end of the watch after the run, above its floor of ${reason.floor}`;
+    case 'scaling-not-recorded':
+      return `${reason.service} scales, and the run recorded none of its running tasks at the end of the watch${reason.atWatchEnd === null ? '' : ` (${reason.atWatchEnd})`} to judge it back at its floor by`;
     case 'never-ended':
       return 'the run never recorded its end';
     case 'ended-early':
@@ -99,6 +106,7 @@ export function verdictText(input: {
   decision: Decision;
   judgements: readonly Judgement[];
   crossChecks: readonly CrossCheck[];
+  scaling: ReturnType<typeof scalingOf>;
 }) {
   const { run, guardStop, gaps } = input.facts;
   const lines: string[] = [
@@ -130,6 +138,7 @@ export function verdictText(input: {
     '',
   );
   lines.push(...holdLines(input.facts.hold));
+  lines.push(...scalingLines({ scaling: input.scaling, trailingEndsAt: run.trailingEndsAt }));
   lines.push(...pushStreamLines(input.facts.summary));
   if (guardStop !== null) {
     lines.push('## Stopped by the guard', '');
@@ -223,6 +232,50 @@ export function holdLines(hold: HoldFacts | null) {
           null,
         ]),
       ],
+    ),
+    '',
+  ];
+}
+
+/**
+ * How each service that scales moved: its floor and ceiling, its most
+ * running tasks and when, and when it was back at its floor. Nothing for a
+ * step whose services run fixed counts.
+ */
+function scalingLines({
+  scaling,
+  trailingEndsAt,
+}: {
+  scaling: ReturnType<typeof scalingOf>;
+  trailingEndsAt: string | null;
+}) {
+  if (scaling.length === 0) return [];
+  const watch =
+    trailingEndsAt === null
+      ? 'The run kept no watch after its end.'
+      : `The watch after the run ended at ${trailingEndsAt}.`;
+  const backAt = (service: ServiceScaling) => {
+    if (service.peak === null) return null;
+    if (service.peak.tasks <= service.floor) return 'never left it';
+    return service.backAtFloor ?? 'not back';
+  };
+  return [
+    '## Scaling',
+    '',
+    `Running tasks of each service that scales, a minute at a time. ${watch}`,
+    '',
+    ...table(
+      ['Service', 'Floor to ceiling', 'Peak tasks', 'At', 'Back at floor', 'Tasks at the end'],
+      scaling.map((service) =>
+        row([
+          service.service,
+          `${service.floor} to ${service.ceiling}`,
+          service.peak?.tasks ?? null,
+          service.peak?.minute ?? null,
+          backAt(service),
+          service.atEnd?.tasks ?? null,
+        ]),
+      ),
     ),
     '',
   ];

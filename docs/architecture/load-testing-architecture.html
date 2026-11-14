@@ -344,8 +344,8 @@ The load stack itself is in <code>infra/lib/load/</code>, and the shell commands
   <rect x="688" y="84" width="256" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="696" y="101" class="ls">stop every generator · seal · rebuild</text>
   <!-- generators -->
   <rect x="378" y="144" width="80" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="386" y="161" class="ls">ramp</text>
-  <rect x="458" y="144" width="224" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="466" y="161" class="ls">hold · request + state lines stream to Logs</text>
-  <rect x="528" y="174" width="18" height="14" fill="#fbe9e1" stroke="#c2542e"/><text x="550" y="185" class="ls" fill="#c2542e">slice lost → replacement ramps back, holds what is left</text>
+  <rect x="458" y="144" width="224" height="26" rx="5" fill="#ece7fb" stroke="#6e56cf"/><text x="466" y="161" class="ls">hold, then fall · lines stream to Logs</text>
+  <rect x="528" y="174" width="18" height="14" fill="#fbe9e1" stroke="#c2542e"/><text x="550" y="185" class="ls" fill="#c2542e">slice lost → replacement ramps back, runs what is left</text>
   <!-- archive -->
   <rect x="688" y="204" width="256" height="26" rx="5" fill="#e3edf8" stroke="#2563a8"/><text x="696" y="221" class="ls">wait for the last minute's metrics · collect · self-check</text>
   <!-- run folder -->
@@ -366,11 +366,12 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
   <code>.sources/raise.json</code> into the new run folder: what the raise was made of, so the run can be archived after its
   stacks are gone. A run folder with no manifest is visibly unsealed, and <code>down</code> refuses while the raise has one.</li>
   <li><b>Supervise.</b> The command's supervisor splits the users into even slices and launches one generator per slice.</li>
-  <li><b>Run.</b> Generators ramp, hold and stop. Every line goes to CloudWatch Logs as it is written, and its EMF block
-  becomes metrics.</li>
+  <li><b>Run.</b> Generators ramp, hold, and let their users go over the step's fall, or all at once when it has
+  none. Every line goes to CloudWatch Logs as it is written, and its EMF block becomes metrics.</li>
   <li><b>Seal.</b> Once the generators have ended, or have been stopped because the run ended early, the command seals the
-  run. The archive waits until CloudWatch has the run's last whole minute, collects every source for the run's window and
-  the few minutes after it, checks itself, writes the raw files, and writes the manifest last.</li>
+  run. The archive waits until CloudWatch has the last whole minute of the watch after the run, collects every source
+  for the run's window and that watch, checks itself, writes the raw files, and writes the manifest last. The watch
+  lasts five minutes, or half an hour for a step whose services scale, long enough to see them go back to their floors.</li>
   <li><b>Rebuild.</b> The load command hands the sealed run to rebuild, which writes <code>derived/</code> beside it: the
   verdict, the report and the tables.</li>
   <li><b>Tear down the generators.</b> The shell deletes the load stack once the command has returned, because the archive reads its tasks until then.</li>
@@ -399,7 +400,8 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
     <ul>
       <li>One Node process, so one core. It runs on a small task and carries one slice of the users, so many small generators
       beat a few big ones.</li>
-      <li>Brings its users up evenly over the ramp from the moment it starts, holds them, then stops them.</li>
+      <li>Brings its users up evenly over the ramp from the moment it starts and holds them. Over the fall it lets them
+      go one at a time, evenly spaced, the last to arrive the first to leave; with no fall it stops them all at once.</li>
       <li>Writes a request line per request, a state line every few seconds from three levels it keeps (users signed in,
       push streams open, chatters active), and one end report: its request counts by kind and its phases.</li>
       <li>When it is told to stop (SIGTERM from Spot or the supervisor), it stops its users and prints its report marked
@@ -408,7 +410,8 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
     </ul>
   </div>
 </div>
-<p class="note">Each step's users, chatting share, generators, ramp and hold live in <code>infra/config/steps.ts</code>.
+<p class="note">Each step's users, chatting share, generators, ramp, hold and fall live in <code>infra/config/steps.ts</code>.
+<code>scale10</code> rises over 30 minutes, holds for 15 and falls over 20, against services that start at their floors and scale.
 <code>smoke</code> runs several generators, so a lost one can be replaced while the others carry on. <code>seed</code> creates the
 population once, On-Demand on larger tasks, unsupervised; it is not a load run and is not archived.</p>
 
@@ -437,7 +440,7 @@ population once, On-Demand on larger tasks, unsupervised; it is not a load run a
   <rect x="420" y="230" width="200" height="40" rx="8" fill="#fbf3d6" stroke="#a07800"/><text x="430" y="255" class="dh">leave the slice down (a gap)</text>
   <rect x="680" y="200" width="270" height="90" rx="8" fill="#ece7fb" stroke="#6e56cf"/><text x="692" y="222" class="dh">replace on the same slice</text>
   <text x="692" y="240" class="d">next attempt number, Spot then On-Demand</text>
-  <text x="692" y="256" class="d">ramp back, hold what is left</text>
+  <text x="692" y="256" class="d">ramp back, hold and fall what is left</text>
   <text x="692" y="272" class="d">record why the last one stopped</text>
   <path class="da" d="M150,135 L188,40"/><path class="da" d="M150,145 L188,110"/>
   <path class="da" d="M350,40 L418,40"/><text x="370" y="34" class="d">yes</text>
@@ -450,13 +453,14 @@ population once, On-Demand on larger tasks, unsupervised; it is not a load run a
   <path class="da" d="M330,270 C 400,298 640,298 678,262"/><text x="500" y="294" class="d">no</text>
 </svg>
 <figcaption>A slice whose generator ends early is replaced, not abandoned. The stage ends when the first generator's plan
-does, so a replacement only fills the time left. A run whose slice cannot be kept running is stopped as a whole,
+does, so a replacement only fills the time left. One replaced during the fall brings back only the users who have not
+left by then, and lets them go on the fall's schedule. A run whose slice cannot be kept running is stopped as a whole,
 because a partial fleet would measure the wrong load.</figcaption>
 </figure>
 <ul>
   <li><b>Watching.</b> One regular poll of ECS covers every task. A generator counts as launched once its task is RUNNING,
   so its plan counts from when it can start.</li>
-  <li><b>Timeouts.</b> A generator that runs past its ramp and hold plus a two-minute grace is stopped as <i>timed out</i>.</li>
+  <li><b>Timeouts.</b> A generator that runs past its ramp, hold and fall plus a two-minute grace is stopped as <i>timed out</i>.</li>
   <li><b>Why a task stopped.</b> ECS forgets a stopped task about an hour later. The supervisor therefore writes each task's
   description (stop code, reason, exit code, capacity provider, environment) into the run folder's <code>.sources/</code>
   as soon as it stops. The archive reads it from there.</li>
@@ -507,7 +511,7 @@ limit, because a cancelled run rarely costs its worst case. Every later claim an
 because it may have cost something. <code>reset-budget</code> clears the day by hand. Generators are priced at Spot; a
 fallback to On-Demand costs more for as long as it runs.</p>
 <div class="gate warn">The safety net does not know about runs. The app stack's database is destroyed with the stack, so
-a run that is not sealed before the three-hour sweep loses its Performance Insights, and ECS forgets its services'
+a run that is not sealed before the four-hour sweep loses its Performance Insights, and ECS forgets its services'
 tasks. Its logs and metrics survive for a while, because their groups are retained and CloudWatch keeps its points.</div>
 
 <h3>6.4 People: the live view</h3>
@@ -598,9 +602,13 @@ on aws-prod and on cubi.</p>
   <li><b>Limits come from the manifest.</b> A run records its limits when it begins, worked out from its step and its
   configuration, and is judged by them. <i>Home</i> steps limit host CPU, memory, first byte and errors. <i>Smoke</i> has
   none: smoke proves the tools, so it passes on its records being whole, agreeing and covering its plan. The sized steps,
-  step10 and step50, scale their limits with the step: nearly all of the step's push streams and chatters held through the hold,
+  step10, scale10 and step50, scale their limits with the step: nearly all of the step's push streams and chatters held through the hold,
   and ceilings on chat first byte p95, gate waits at the limit, sign-in failures and generator CPU. A run that recorded no limits, or one no criterion judges, is still rebuilt, and its verdict says it could not be
   judged. There is no judging an old run by newer limits: a run is read as it was run.</li>
+  <li><b>A run that rises and falls.</b> Only the hold is judged against the limits. A push stream its user closed on
+  leaving, in the fall, did not end early; one cut while its user was still there did. For a step whose services scale,
+  rebuild reads each one's running tasks through the watch after the run. The verdict shows its floor and ceiling, its
+  peak and when it was back at its floor, and fails the run when one is still above its floor at the end of the watch.</li>
   <li><b>Gaps are explicit.</b> A slice that was down, or a source that went silent, is named with its window. It is never
   filled or averaged over. The windows come from the manifest, and every reader leaves out the same ones: a slice's own
   requests inside its down window, and the minutes it was down, are left out of the criteria and the cross-checks rather
@@ -704,7 +712,6 @@ should not come back without a reading that needs them.</p>
 <p class="note">These describe the system as it stands. Remove each line when it no longer holds.</p>
 <ul>
   <li>step100 has no pass criteria yet. Its run is rebuilt, but its verdict says it could not be judged.</li>
-  <li>A generator has no ramp-down. All its users stop together at the end of the hold.</li>
 </ul>
 
 </main>

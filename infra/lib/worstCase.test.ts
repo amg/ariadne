@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { SAFETY_NET } from '../config/names.ts';
+import { DAILY_WORST_CASE_LIMIT_USD, SAFETY_NET } from '../config/names.ts';
 import { PRICES } from '../config/prices.ts';
-import { type Step, stepNamed } from '../config/steps.ts';
+import { STEPS, type Step, stepNamed } from '../config/steps.ts';
 import { worstCaseOf } from './worstCase.ts';
 
 const LOAD_HOURS = SAFETY_NET.loadMinutes / 60;
@@ -85,5 +85,18 @@ describe('the worst case of a load run on a reserved load balancer', () => {
       worstCaseOf({ ...smoke, loadBalancer: { reservedCapacityUnits: units } }).loadUsd;
 
     assertClose(reserving(null) - reserving(1_000), PRICES.loadBalancer.perLcuHour * LOAD_HOURS);
+  });
+});
+
+describe('the worst case of a step', () => {
+  it('fits a raise and one load run of every step inside a day’s limit, with every service at its ceiling', () => {
+    for (const step of Object.values(STEPS)) {
+      const { raiseUsd, loadUsd } = worstCaseOf(step);
+
+      assert.ok(
+        raiseUsd + loadUsd <= DAILY_WORST_CASE_LIMIT_USD,
+        `${step.name} could cost ${raiseUsd + loadUsd} USD, past the ${DAILY_WORST_CASE_LIMIT_USD} USD a day allows`,
+      );
+    }
   });
 });

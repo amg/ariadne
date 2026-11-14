@@ -15,11 +15,13 @@ export type GeneratorStart = {
   rampSeconds: number;
   /** How long the generator holds its users, when it starts at once. */
   holdSeconds: number;
+  /** How long the generator takes to let its users go after the hold, one at a time. */
+  fallSeconds: number;
   /**
    * When the run's stage ends, in milliseconds. A generator given one begins
-   * its plan when it is ready, and ramps and holds only for the time left
-   * until then, so a slow start cannot push it past the stage's end. Null
-   * for a generator that runs the whole plan above.
+   * its plan when it is ready, and ramps, holds and falls only for the time
+   * left until then, so a slow start cannot push it past the stage's end.
+   * Null for a generator that runs the whole plan above.
    */
   endsAt: number | null;
   thinkSeconds: number;

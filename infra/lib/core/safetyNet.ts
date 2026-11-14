@@ -12,8 +12,8 @@ import type { StackLimit } from './safetyNetHandler.ts';
 const CHECK_EVERY = Duration.minutes(5);
 
 /**
- * Deletes the app stack and its edge rules three hours after a raise, and
- * the load stack 100 minutes after it starts, whoever forgot them. The edge
+ * Deletes the app stack and its edge rules four hours after a raise, and
+ * the load stack 150 minutes after it starts, whoever forgot them. The edge
  * rules cannot go while the app's distribution still uses them, so their
  * deletion fails until the app stack is gone, and the next check tries
  * again. It never touches Cloudflare: a record left pointing at a deleted

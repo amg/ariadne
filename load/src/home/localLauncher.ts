@@ -47,6 +47,7 @@ export function localLauncher(input: {
           chattingShare: 1,
           rampSeconds: start.rampSeconds,
           holdSeconds: start.holdSeconds,
+          fallSeconds: start.fallSeconds,
           endsAt: start.endsAt,
           thinkSeconds: start.thinkSeconds,
           seedConcurrency: 1,

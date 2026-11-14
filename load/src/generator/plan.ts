@@ -24,8 +24,13 @@ export type Plan = {
   rampSeconds: number;
   holdSeconds: number;
   /**
+   * How long the users take to leave after the hold, one at a time, the
+   * last to arrive the first to go. 0 stops them all at once.
+   */
+  fallSeconds: number;
+  /**
    * When the plan ends, in milliseconds; null for a plan that lasts as long
-   * as its ramp and hold. `planAt` fits the ramp and hold to the time left.
+   * as its ramp, hold and fall. `planAt` fits them to the time left.
    */
   endsAt: number | null;
   thinkSeconds: number;
@@ -53,6 +58,7 @@ export function readPlan(env: NodeJS.ProcessEnv): Plan {
     chattingShare: number({ env, key: 'CHATTING_SHARE', fallback: 0 }),
     rampSeconds: number({ env, key: 'RAMP_SECONDS', fallback: 60 }),
     holdSeconds: number({ env, key: 'HOLD_SECONDS', fallback: 300 }),
+    fallSeconds: number({ env, key: 'FALL_SECONDS', fallback: 0 }),
     endsAt: env.ENDS_AT ? instant(env, 'ENDS_AT') : null,
     thinkSeconds: number({ env, key: 'THINK_SECONDS', fallback: 30 }),
     seedConcurrency: number({ env, key: 'SEED_CONCURRENCY', fallback: 200 }),
@@ -62,15 +68,29 @@ export function readPlan(env: NodeJS.ProcessEnv): Plan {
 }
 
 /**
- * The plan as it stands at `now`. A plan that has an end moment ramps for
- * its ramp, or for the time left if that is shorter, and holds for the rest
- * of the time left, so that it ends at that moment however late it began.
+ * The plan as it stands at `now`. A plan that has an end moment keeps its
+ * fall last. It ramps for its ramp, or for the time left before the fall if
+ * that is shorter, and holds for the rest, so that it ends at that moment
+ * however late it began. One that begins after its fall should have begun
+ * falls for the time left, with only the users who would not have left by
+ * then.
  */
 export function planAt(plan: Plan, now: number) {
   if (plan.endsAt === null) return plan;
   const secondsLeft = Math.max(0, (plan.endsAt - now) / 1_000);
-  const rampSeconds = Math.min(plan.rampSeconds, secondsLeft);
-  return { ...plan, rampSeconds, holdSeconds: secondsLeft - rampSeconds };
+  const fallSeconds = Math.min(plan.fallSeconds, secondsLeft);
+  const rampSeconds = Math.min(plan.rampSeconds, secondsLeft - fallSeconds);
+  const userCount =
+    fallSeconds === plan.fallSeconds
+      ? plan.userCount
+      : Math.min(plan.userCount, Math.ceil((plan.userCount * fallSeconds) / plan.fallSeconds));
+  return {
+    ...plan,
+    userCount,
+    rampSeconds,
+    holdSeconds: secondsLeft - fallSeconds - rampSeconds,
+    fallSeconds,
+  };
 }
 
 /** The synthetic account behind a user number: the same number always names the same account. */

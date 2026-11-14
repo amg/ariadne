@@ -90,6 +90,7 @@ describe('generatorEnvironment', () => {
     chattingShare: 1,
     rampSeconds: 5,
     holdSeconds: 30,
+    fallSeconds: 0,
     endsAt: null,
     thinkSeconds: 5,
     seedConcurrency: 4,
@@ -109,6 +110,14 @@ describe('generatorEnvironment', () => {
 
   it('names the generator and the attempt, which mark every record it writes', () => {
     expect(generatorEnvironment('/usr/bin', slice)).toMatchObject({ GENERATOR: '2', ATTEMPT: '3' });
+  });
+
+  it('gives the generator its ramp, hold and fall', () => {
+    expect(generatorEnvironment('/usr/bin', { ...slice, fallSeconds: 20 })).toMatchObject({
+      RAMP_SECONDS: '5',
+      HOLD_SECONDS: '30',
+      FALL_SECONDS: '20',
+    });
   });
 
   it('gives the moment the generator’s plan ends, when it has one', () => {

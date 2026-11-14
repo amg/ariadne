@@ -54,7 +54,8 @@ type GeneratorSlice = {
   chattingShare: number;
   rampSeconds: number;
   holdSeconds: number;
-  /** When the generator's plan ends, in milliseconds; null for a plan that lasts its ramp and hold. */
+  fallSeconds: number;
+  /** When the generator's plan ends, in milliseconds; null for a plan that lasts its ramp, hold and fall. */
   endsAt: number | null;
   thinkSeconds: number;
   seedConcurrency: number;
@@ -83,6 +84,7 @@ export function generatorEnvironment(path: string | undefined, slice: GeneratorS
     CHATTING_SHARE: String(slice.chattingShare),
     RAMP_SECONDS: String(slice.rampSeconds),
     HOLD_SECONDS: String(slice.holdSeconds),
+    FALL_SECONDS: String(slice.fallSeconds),
     ...(slice.endsAt === null ? {} : { ENDS_AT: new Date(slice.endsAt).toISOString() }),
     THINK_SECONDS: String(slice.thinkSeconds),
     SEED_CONCURRENCY: String(slice.seedConcurrency),

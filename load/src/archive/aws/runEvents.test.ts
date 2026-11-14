@@ -23,7 +23,7 @@ const events = (tasks: TaskInfo[]) =>
     startedAt: '2026-10-15T00:00:00.000Z',
     endedAt: '2026-10-15T00:11:00.000Z',
     outcome: 'finished',
-    plan: { rampSeconds: 120, holdSeconds: 480 },
+    plan: { rampSeconds: 120, holdSeconds: 480, fallSeconds: 0 },
     tasks,
   });
 
@@ -206,6 +206,70 @@ describe('runEventsOf', () => {
     });
   });
 
+  it('ends a generator’s hold where its fall begins, by the step’s plan', () => {
+    const [, launched] = runEventsOf({
+      startedAt: '2026-10-15T00:00:00.000Z',
+      endedAt: '2026-10-15T00:21:00.000Z',
+      outcome: 'finished',
+      plan: { rampSeconds: 120, holdSeconds: 480, fallSeconds: 600 },
+      tasks: [task()],
+    });
+
+    expect(launched).toMatchObject({
+      planned: {
+        rampEndsAt: '2026-10-15T00:02:30.000Z',
+        holdEndsAt: '2026-10-15T00:10:30.000Z',
+      },
+    });
+  });
+
+  it('ends a replacement’s hold its own fall before the moment its plan ends', () => {
+    const [, launched] = events([
+      task({
+        environment: {
+          GENERATOR: '0',
+          ATTEMPT: '2',
+          FIRST_USER: '0',
+          USER_COUNT: '40',
+          RAMP_SECONDS: '60',
+          HOLD_SECONDS: '0',
+          FALL_SECONDS: '120',
+          ENDS_AT: '2026-10-15T00:03:30.000Z',
+        },
+      }),
+    ]);
+
+    expect(launched).toMatchObject({
+      userCount: 40,
+      planned: {
+        rampEndsAt: '2026-10-15T00:01:30.000Z',
+        holdEndsAt: '2026-10-15T00:01:30.000Z',
+      },
+    });
+  });
+
+  it('plans a generator replaced late in the fall, which only lets its users go', () => {
+    const [, launched] = events([
+      task({
+        environment: {
+          GENERATOR: '0',
+          ATTEMPT: '2',
+          RAMP_SECONDS: '0',
+          HOLD_SECONDS: '0',
+          FALL_SECONDS: '60',
+          ENDS_AT: '2026-10-15T00:01:30.000Z',
+        },
+      }),
+    ]);
+
+    expect(launched).toMatchObject({
+      planned: {
+        rampEndsAt: '2026-10-15T00:00:30.000Z',
+        holdEndsAt: '2026-10-15T00:00:30.000Z',
+      },
+    });
+  });
+
   it('never plans a ramp past the moment the plan ends', () => {
     const [, launched] = events([
       task({
@@ -232,7 +296,7 @@ describe('runEventsOf', () => {
       startedAt: '2026-10-15T00:00:00.000Z',
       endedAt: '2026-10-15T00:11:00.000Z',
       outcome: 'finished',
-      plan: { rampSeconds: 0, holdSeconds: 0 },
+      plan: { rampSeconds: 0, holdSeconds: 0, fallSeconds: 0 },
       tasks: [task()],
     });
 

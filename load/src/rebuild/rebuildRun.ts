@@ -11,7 +11,7 @@ import {
   verdictText,
 } from './derived/index.ts';
 import { runFactsOf } from './facts/index.ts';
-import { crossCheckChats, crossCheckLoadBalancer, decide } from './judging/index.ts';
+import { crossCheckChats, crossCheckLoadBalancer, decide, scalingOf } from './judging/index.ts';
 import { reportHtml } from './report/index.ts';
 import { loadRun } from './runData/index.ts';
 import { minuteTable } from './table/index.ts';
@@ -40,8 +40,9 @@ export function rebuildRun(folder: string): Rebuilt {
   const facts = runFactsOf(data);
   const { judgements, criteriaUnknown } = judgedOrUnknown(facts);
   const crossChecks = [...crossCheckChats(facts), ...crossCheckLoadBalancer(table, facts)];
-  const decision = decide({ facts, judgements, criteriaUnknown, crossChecks });
-  const text = verdictText({ facts, decision, judgements, crossChecks });
+  const scaling = scalingOf({ table, facts });
+  const decision = decide({ facts, judgements, criteriaUnknown, crossChecks, scaling });
+  const text = verdictText({ facts, decision, judgements, crossChecks, scaling });
   const reasons = decision.reasons.map(reasonText);
   const slices = slicesWhenAnyDown(facts.slices);
   const summary = {
@@ -56,6 +57,7 @@ export function rebuildRun(folder: string): Rebuilt {
     },
     verdict: { result: decision.verdict, reasons, limits: facts.run.limits, judgements },
     hold: facts.hold,
+    ...(scaling.length === 0 ? {} : { scaling }),
     ...facts.summary,
     guardStop: facts.guardStop,
     gaps: facts.gaps,

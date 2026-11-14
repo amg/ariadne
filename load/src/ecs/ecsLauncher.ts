@@ -144,6 +144,7 @@ function environmentOf(
     USER_COUNT: String(start.userCount),
     RAMP_SECONDS: String(start.rampSeconds),
     HOLD_SECONDS: String(start.holdSeconds),
+    FALL_SECONDS: String(start.fallSeconds),
     THINK_SECONDS: String(start.thinkSeconds),
   };
 }

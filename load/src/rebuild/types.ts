@@ -1,7 +1,12 @@
 import type { AppRequestLine, AppStateLine, ExchangeLine, JobLine } from '../records/appRecords.ts';
 import type { AwsEvent, Insight, MetricSeries } from '../records/awsRecords.ts';
 import type { RunEvent } from '../records/event.ts';
-import type { DownWindow, Manifest, ManifestSlice } from '../records/manifest.ts';
+import type {
+  DownWindow,
+  Manifest,
+  ManifestSlice,
+  scalingServicesOf,
+} from '../records/manifest.ts';
 import type { RequestKind, RequestLine, StateLine } from '../records/request.ts';
 import type { HostSample } from '../records/samples.ts';
 import type { Judgement, Limits, RunFigures } from '../types/criteria.ts';
@@ -304,6 +309,10 @@ export type RunFacts = {
     limits: Limits | null;
     /** The ECPU a second the step allowed the cache; null where its configuration does not say. */
     cacheEcpuCap: number | null;
+    /** When the watch after the run's end ends; null for a run that kept none. */
+    trailingEndsAt: string | null;
+    /** The services the step lets scale, with the tasks each starts at and may grow to. */
+    scalingServices: ReturnType<typeof scalingServicesOf>;
   };
   /** How the run ended; null when it never recorded its end. */
   outcome: RunOutcome | null;
@@ -366,5 +375,7 @@ export type Reason =
   | { kind: 'file-unusable'; path: string; why: string }
   | { kind: 'records-disagree'; what: string; against: string }
   | { kind: 'cross-check-not-made'; against: string; why: string }
+  | { kind: 'not-back-at-floor'; service: string; tasks: number; floor: number }
+  | { kind: 'scaling-not-recorded'; service: string; atWatchEnd: string | null }
   | { kind: 'never-ended' }
   | { kind: 'ended-early'; outcome: string };

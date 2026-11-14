@@ -3,6 +3,7 @@ export {
   BALANCER_ANSWERS,
   BUSIEST_GENERATOR_CPU,
   EDGE_SERVER_ERRORS,
+  RUNNING_TASKS,
   busiestGeneratorCpu,
 } from './columns/awsColumns.ts';
 export {

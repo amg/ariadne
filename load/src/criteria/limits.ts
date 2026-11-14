@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Limits } from '../types/criteria.ts';
 import { UnknownCriteria, sizeOfLoad } from './criterion.ts';
 import { HOME_LINES } from './home.ts';
-import { sizedLines } from './sized.ts';
+import { SIZED_STEPS, sizedLines } from './sized.ts';
 
 const stepConfig = z.object({
   load: z.object({ users: z.number(), chattingShare: z.number() }),
@@ -19,13 +19,13 @@ const SMOKE_LIMITS: Limits = {};
 /**
  * The limits a new run of a step records; null for a
  * step that has none yet, which a rebuild names as not judged. The limits
- * of step10 and step50 follow the step's size, and are worked out from the
+ * of the sized steps follow the step's size, and are worked out from the
  * users and share of chatters its `config` gives.
  */
 export function limitsFor(step: string, config: Readonly<Record<string, unknown>>) {
   if (step.startsWith('home-')) return HOME_LINES;
   if (step === 'smoke') return SMOKE_LIMITS;
-  if (step !== 'step10' && step !== 'step50') return null;
+  if (!SIZED_STEPS.includes(step)) return null;
   const parsed = stepConfig.safeParse(config);
   if (!parsed.success) {
     throw new UnknownCriteria(

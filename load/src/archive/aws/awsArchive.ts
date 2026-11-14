@@ -18,9 +18,13 @@ type AwsRunInput = Parameters<typeof awsCollection>[0]['run'];
 
 type WaitForMetrics = Parameters<typeof awaitMetricsUntil>[0]['wait'];
 
-/** What the step's configuration says about the plan a generator runs. */
+/** What the step's configuration says about the plan a generator runs; a configuration that names no fall has none. */
 const planOfConfig = z.object({
-  load: z.object({ rampSeconds: z.number(), holdSeconds: z.number() }),
+  load: z.object({
+    rampSeconds: z.number(),
+    holdSeconds: z.number(),
+    fallSeconds: z.number().default(0),
+  }),
 });
 
 /**
@@ -92,11 +96,8 @@ export async function archiveAwsRun(input: {
   if (endedAt === null) {
     throw new Error(`Nothing says when ${runId} ended; give it with --ended`);
   }
-  const description: RunDescription = {
-    ...pending.description,
-    endedAt,
-    trailingEndsAt: trailingEndOf(endedAt),
-  };
+  const trailingEndsAt = trailingEndOf({ endedAt, config: pending.description.config });
+  const description: RunDescription = { ...pending.description, endedAt, trailingEndsAt };
   savePendingRun(folder, { ...pending, description });
 
   const { manifest } = await sealRun({
@@ -110,6 +111,7 @@ export async function archiveAwsRun(input: {
         raise,
         startedAt: description.startedAt,
         endedAt,
+        trailingEndsAt,
         outcome: input.outcome,
         plan: planOfConfig.parse(description.config).load,
       },

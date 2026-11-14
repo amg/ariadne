@@ -188,9 +188,12 @@ const FIGURES: Readonly<Record<string, readonly AwsFigure[]>> = {
   ],
 };
 
+/** The figure of how many tasks each service ran, split into one column per service. */
+export const RUNNING_TASKS = 'ecs_running_tasks';
+
 /** The figures every service's file holds, each split into one column per service. */
 const SERVICE_FIGURES: readonly AwsFigure[] = [
-  figure('ecs_running_tasks', SIGNALS.service.runningTasks),
+  figure(RUNNING_TASKS, SIGNALS.service.runningTasks),
   figure('ecs_desired_tasks', SIGNALS.service.desiredTasks),
   figure('ecs_pending_tasks', SIGNALS.service.pendingTasks),
   figure('service_cpu_average_percent', SIGNALS.service.cpuAverage),

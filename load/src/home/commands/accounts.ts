@@ -48,6 +48,7 @@ runCommand(async () => {
         chattingShare: 0,
         rampSeconds: 0,
         holdSeconds: 0,
+        fallSeconds: 0,
         endsAt: null,
         thinkSeconds: 1,
         seedConcurrency: SIGN_UPS_AT_ONCE,

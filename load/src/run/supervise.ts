@@ -4,7 +4,8 @@ import { GeneratorDidNotFinish, TaskMayStillRun } from './launcher.ts';
 import { replacementPlan } from './replacement.ts';
 import type { sliceUsers } from './slices.ts';
 
-type RampAndHold = NonNullable<ReturnType<typeof replacementPlan>>;
+/** What one generator on a slice is asked to do: how many of its users, and for how long each stretch. */
+type AttemptPlan = NonNullable<ReturnType<typeof replacementPlan>>;
 
 type Slice = ReturnType<typeof sliceUsers>[number];
 
@@ -25,6 +26,8 @@ type SliceRun = Supervision & {
   sleep: (milliseconds: number) => Promise<void>;
   slice: Slice;
   thinkSeconds: number;
+  /** How long the users of the stage leave over, at its end. */
+  fallSeconds: number;
   /** When the stage is due to end; set once its first generator has been launched. */
   stage: { endsAt: number | null };
   /** Aborts when the run ends, or when another slice could not be kept running. */
@@ -35,10 +38,12 @@ type SliceRun = Supervision & {
  * Runs one stage: a generator for each slice, all at once, and watches
  * them. The stage ends when the plan of the first generator launched does.
  * A generator that stops before the stage's end is replaced on the same
- * slice, which brings its users back over about a minute and holds until
- * the stage's end. A replacement that cannot be launched is tried again
- * for a while, and then its slice is left down for the rest of the stage.
- * Every start and every stop, with its reason, is recorded.
+ * slice, which brings its users back over about a minute, holds, and lets
+ * them go with the rest of the stage's fall. One replaced during the fall
+ * brings back only the users who have not left by then. A replacement that
+ * cannot be launched is tried again for a while, and then its slice is left
+ * down for the rest of the stage. Every start and every stop, with its
+ * reason, is recorded.
  *
  * Resolves with the reports of the generators that wrote one. Rejects with
  * what ended the run when `signal` aborts, and with `GeneratorDidNotFinish`
@@ -51,24 +56,30 @@ export async function superviseStage(
     slices: readonly Slice[];
     rampSeconds: number;
     holdSeconds: number;
+    fallSeconds: number;
     thinkSeconds: number;
   },
 ): Promise<Report[]> {
   const now = input.now ?? Date.now;
   const sleep =
     input.sleep ?? ((milliseconds) => new Promise((done) => setTimeout(done, milliseconds)));
-  const firstPlan = { rampSeconds: input.rampSeconds, holdSeconds: input.holdSeconds };
   const stage: { endsAt: number | null } = { endsAt: null };
   const failure = new AbortController();
   const stageSignal = AbortSignal.any([input.signal, failure.signal]);
   const results = await Promise.allSettled(
     input.slices.map((slice) =>
-      superviseSlice({ ...input, now, sleep, slice, stage, stageSignal }, firstPlan).catch(
-        (error: unknown) => {
-          failure.abort(error);
-          throw error;
+      superviseSlice(
+        { ...input, now, sleep, slice, stage, stageSignal },
+        {
+          rampSeconds: input.rampSeconds,
+          holdSeconds: input.holdSeconds,
+          fallSeconds: input.fallSeconds,
+          userCount: slice.userCount,
         },
-      ),
+      ).catch((error: unknown) => {
+        failure.abort(error);
+        throw error;
+      }),
     ),
   );
   const failed = results.find((result) => result.status === 'rejected');
@@ -77,7 +88,7 @@ export async function superviseStage(
 }
 
 /** Keeps one slice's generator running to the stage's end, and returns the reports of every attempt that wrote one. */
-async function superviseSlice(run: SliceRun, firstPlan: RampAndHold): Promise<Report[]> {
+async function superviseSlice(run: SliceRun, firstPlan: AttemptPlan): Promise<Report[]> {
   const reports: Report[] = [];
   let attempt = 1;
   let stops = 0;
@@ -92,8 +103,8 @@ async function superviseSlice(run: SliceRun, firstPlan: RampAndHold): Promise<Re
     const next = nextStepAfter(end, {
       generator: run.slice.generator,
       stops,
-      left: secondsLeft(run),
       replaces: run.replacesLostGenerators ?? true,
+      plan: replacementPlanOf(run),
     });
     sayAfterStop(run, attempt, end, next);
     if (next.kind === 'give-up') {
@@ -128,7 +139,7 @@ function withReplacementFailure(stop: Stop, reason: string): Stop {
 }
 
 /** Starts a slice's first generator. A generator that cannot be started ends its slice, and with it the stage. */
-async function startFirstGenerator(run: SliceRun, plan: RampAndHold) {
+async function startFirstGenerator(run: SliceRun, plan: AttemptPlan) {
   try {
     return await launchAttempt(run, 1, plan, null);
   } catch (error) {
@@ -157,7 +168,7 @@ async function startReplacement(run: SliceRun, firstAttempt: number): Promise<Re
   let reason = '';
   for (let attempt = firstAttempt; ; attempt += 1) {
     run.stageSignal.throwIfAborted();
-    const plan = replacementPlan(secondsLeft(run));
+    const plan = replacementPlanOf(run);
     if (plan === null)
       return { kind: 'not-started', reason: reason || 'too little of the stage was left' };
     try {
@@ -183,35 +194,38 @@ async function startReplacement(run: SliceRun, firstAttempt: number): Promise<Re
 async function launchAttempt(
   run: SliceRun,
   attempt: number,
-  plan: RampAndHold,
+  plan: AttemptPlan,
   endsAt: number | null,
 ) {
   const { slice } = run;
+  const plannedSeconds = plan.rampSeconds + plan.holdSeconds + plan.fallSeconds;
   const generator = await run.launcher.launch(
     {
       generator: slice.generator,
       attempt,
       firstUser: slice.firstUser,
-      userCount: slice.userCount,
+      userCount: plan.userCount,
       rampSeconds: plan.rampSeconds,
       holdSeconds: plan.holdSeconds,
+      fallSeconds: plan.fallSeconds,
       endsAt,
       thinkSeconds: run.thinkSeconds,
-      timeoutMs: (plan.rampSeconds + plan.holdSeconds + GRACE_SECONDS) * 1_000,
+      timeoutMs: (plannedSeconds + GRACE_SECONDS) * 1_000,
     },
     run.stageSignal,
   );
   // A launch can take a while, so the first plan counts from when it has finished.
   const launchedAt = run.now();
-  run.stage.endsAt ??= launchedAt + (plan.rampSeconds + plan.holdSeconds) * 1_000;
-  const holdEndsAt = endsAt ?? launchedAt + (plan.rampSeconds + plan.holdSeconds) * 1_000;
+  const planEndsAt = endsAt ?? launchedAt + plannedSeconds * 1_000;
+  run.stage.endsAt ??= planEndsAt;
+  const holdEndsAt = planEndsAt - plan.fallSeconds * 1_000;
   run.record({
     kind: 'generator-launched',
     at: instantOf(launchedAt),
     generator: slice.generator,
     attempt,
     firstUser: slice.firstUser,
-    userCount: slice.userCount,
+    userCount: plan.userCount,
     task: generator.task,
     spot: generator.spot,
     planned: {
@@ -242,7 +256,7 @@ async function stopForRunEnd(
 /** What a generator's end means for its slice. */
 type NextStep =
   | { kind: 'done' }
-  | { kind: 'replace'; plan: RampAndHold }
+  | { kind: 'replace'; plan: AttemptPlan }
   | { kind: 'leave-down'; why: string }
   | { kind: 'give-up'; error: GeneratorDidNotFinish };
 
@@ -256,7 +270,13 @@ type NextStep =
  */
 function nextStepAfter(
   end: GeneratorEnd,
-  context: { generator: number; stops: number; left: number; replaces: boolean },
+  context: {
+    generator: number;
+    stops: number;
+    replaces: boolean;
+    /** The plan a replacement would run; null when it would have nothing to do. */
+    plan: AttemptPlan | null;
+  },
 ): NextStep {
   if (end.how === 'finished') return { kind: 'done' };
   if (end.reason === 'timed-out') {
@@ -286,10 +306,18 @@ function nextStepAfter(
       ),
     };
   }
-  const plan = replacementPlan(context.left);
-  return plan === null
+  return context.plan === null
     ? { kind: 'leave-down', why: 'too little of the stage is left to bring its users back' }
-    : { kind: 'replace', plan };
+    : { kind: 'replace', plan: context.plan };
+}
+
+/** The plan of a replacement started now on the slice, for what is left of the stage. */
+function replacementPlanOf(run: SliceRun) {
+  return replacementPlan({
+    secondsLeft: secondsLeft(run),
+    fallSeconds: run.fallSeconds,
+    userCount: run.slice.userCount,
+  });
 }
 
 function stopOf(end: GeneratorEnd): { reason: StopReason; detail: string | null } {
