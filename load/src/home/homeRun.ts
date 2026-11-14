@@ -125,6 +125,8 @@ async function runGenerators(input: {
     slices: sliceUsers({ users: options.users, generators: options.generators }),
     rampSeconds: options.rampSeconds,
     holdSeconds: options.holdSeconds,
+    // Every home user stops at once, at the end of the hold.
+    fallSeconds: 0,
     thinkSeconds: options.thinkSeconds,
   });
   const { succeeded } = input.launcher.users();

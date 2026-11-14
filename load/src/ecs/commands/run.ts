@@ -85,7 +85,9 @@ const imagesSchema = z.record(z.string(), z.string());
  * The users are shared between the generators. A generator that stops
  * before the run's end, such as one Spot took back or one stopped by hand,
  * is started again on the same slice of users, which come back over about
- * a minute, and holds only for the time the run has left. Every generator
+ * a minute, and holds and lets them go only for the time the run has left.
+ * One started during the fall brings back only the users who have not left
+ * by then. Every generator
  * that stops is kept in the run's folder as ECS described it, with its
  * reason, so that the archive has it after ECS forgets.
  *
@@ -142,6 +144,7 @@ if (options.mode === 'load' && warmUp !== null) {
         runId: `${options.run}-warm-up`,
         rampSeconds: warmUp.rampSeconds,
         holdSeconds: warmUp.holdSeconds,
+        fallSeconds: 0,
         keepStoppedTask: async () => undefined,
       }),
     stopEveryGenerator: stopGenerators,
@@ -180,6 +183,7 @@ const outcome = await carryOutRun({
       ...fleet,
       runId: options.run,
       holdSeconds: config.load.holdSeconds,
+      fallSeconds: config.load.fallSeconds,
       keepStoppedTask,
     }),
   stopEveryGenerator: stopGenerators,

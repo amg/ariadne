@@ -46,6 +46,53 @@ describe('planAt', () => {
     expect(planAt(plan, T0 + 400_000)).toMatchObject({ rampSeconds: 0, holdSeconds: 0 });
   });
 
+  it('has no fall unless it is given one', () => {
+    expect(readPlan(env).fallSeconds).toBe(0);
+    expect(readPlan({ ...env, FALL_SECONDS: '120' }).fallSeconds).toBe(120);
+  });
+
+  it('keeps its fall last and in full, shortening the hold when it begins late', () => {
+    const plan = readPlan({ ...env, FALL_SECONDS: '100', ENDS_AT: '2026-10-17T00:06:40.000Z' });
+
+    expect(planAt(plan, T0 + 120_000)).toMatchObject({
+      rampSeconds: 60,
+      holdSeconds: 120,
+      fallSeconds: 100,
+    });
+  });
+
+  it('shortens its ramp before its fall when too little is left to hold', () => {
+    const plan = readPlan({
+      ...env,
+      USER_COUNT: '8',
+      FALL_SECONDS: '100',
+      ENDS_AT: '2026-10-17T00:06:40.000Z',
+    });
+
+    expect(planAt(plan, T0 + 270_000)).toMatchObject({
+      rampSeconds: 30,
+      holdSeconds: 0,
+      fallSeconds: 100,
+      userCount: 8,
+    });
+  });
+
+  it('brings up only the users who would not have left, when it begins after its fall should have', () => {
+    const plan = readPlan({
+      ...env,
+      USER_COUNT: '8',
+      FALL_SECONDS: '100',
+      ENDS_AT: '2026-10-17T00:06:40.000Z',
+    });
+
+    expect(planAt(plan, T0 + 350_000)).toMatchObject({
+      rampSeconds: 0,
+      holdSeconds: 0,
+      fallSeconds: 50,
+      userCount: 4,
+    });
+  });
+
   it('refuses an end moment that is not a time', () => {
     expect(() => readPlan({ ...env, ENDS_AT: 'soon' })).toThrow('ENDS_AT must be a time');
   });

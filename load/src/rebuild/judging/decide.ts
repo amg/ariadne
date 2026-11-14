@@ -1,5 +1,6 @@
 import type { Judgement } from '../../types/criteria.ts';
 import type { CrossCheck, Reason, RunFacts, Verdict } from '../types.ts';
+import type { scalingOf } from './scaling.ts';
 
 type Decision = {
   verdict: Verdict;
@@ -15,10 +16,11 @@ const BLIND_GUARD_LINE = 'host-unreadable';
  * and a pass. A run is a pass only when every criterion was judged and
  * held, the archive sealed it as complete, no file of it is missing or
  * changed, the records agree where they overlap, every cross-check the run
- * needs was made, and the run finished its plan without the guard stopping
- * it. A missed criterion, or a guard stop
- * on a criterion's line, fails the run; every other reason only leaves it
- * incomplete.
+ * needs was made, every service that scales was back at its floor by the
+ * end of the watch after the run, as its last few minutes recorded it, and
+ * the run finished its plan without the guard stopping it. A missed criterion, a service still above its floor, or
+ * a guard stop on a criterion's line, fails the run; every other reason only
+ * leaves it incomplete.
  */
 export function decide(input: {
   facts: Pick<RunFacts, 'run' | 'trouble' | 'guardStop' | 'outcome'>;
@@ -26,8 +28,10 @@ export function decide(input: {
   /** Why the run could not be judged by its criteria at all; null when it was. */
   criteriaUnknown: string | null;
   crossChecks: readonly CrossCheck[];
+  /** How each service the step lets scale moved; empty for a step whose services run fixed counts. */
+  scaling: ReturnType<typeof scalingOf>;
 }): Decision {
-  const { facts, judgements, criteriaUnknown, crossChecks } = input;
+  const { facts, judgements, criteriaUnknown, crossChecks, scaling } = input;
   const { guardStop } = facts;
   const guardReason: Reason[] =
     guardStop === null ? [] : [{ kind: 'guard-stopped', message: guardStop.message }];
@@ -37,6 +41,11 @@ export function decide(input: {
     ...judgements.flatMap((judgement): Reason[] =>
       judgement.result === 'fail' && judgement.observed !== null
         ? [{ kind: 'criterion-missed', judgement, observed: judgement.observed }]
+        : [],
+    ),
+    ...scaling.flatMap(({ service, floor, atEnd }): Reason[] =>
+      atEnd !== null && atEnd.tasks > floor
+        ? [{ kind: 'not-back-at-floor', service, tasks: atEnd.tasks, floor }]
         : [],
     ),
     ...(stoppedBlind ? [] : guardReason),
@@ -62,6 +71,11 @@ export function decide(input: {
         : [],
     ),
     ...checksNotMade(crossChecks),
+    ...scaling.flatMap(({ service, atEnd }): Reason[] =>
+      atEnd === null
+        ? [{ kind: 'scaling-not-recorded', service, atWatchEnd: facts.run.trailingEndsAt }]
+        : [],
+    ),
     ...(stoppedBlind ? guardReason : []),
     ...unfinished(facts.outcome),
   ];

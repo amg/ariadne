@@ -23,6 +23,7 @@ const plan: Plan = {
   chattingShare: 1,
   rampSeconds: 4,
   holdSeconds: 30,
+  fallSeconds: 0,
   endsAt: null,
   thinkSeconds: 5,
   seedConcurrency: 1,
@@ -176,6 +177,69 @@ describe('runLoad', () => {
 
     expect(result.interrupted).toBe(true);
     expect(runUser).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets its users go one at a time over the fall, the last to arrive the first to go', async () => {
+    const letGoAt = new Map<number, number>();
+    vi.mocked(runUser).mockImplementation(
+      ({ userNumber, signal }) =>
+        new Promise((resolve) =>
+          signal.addEventListener('abort', () => {
+            letGoAt.set(userNumber, Date.now());
+            resolve();
+          }),
+        ),
+    );
+    const startedAt = Date.now();
+    const running = runLoad({
+      plan: { ...plan, fallSeconds: 8 },
+      levels: createLevels(),
+      requests: requests(),
+      interrupt: new AbortController().signal,
+    });
+    await vi.advanceTimersByTimeAsync(50_000);
+
+    const { interrupted, phases } = await running;
+
+    // Four users over an eight-second fall that starts 34 s in: one every two seconds.
+    const secondsIn = (user: number) => ((letGoAt.get(user) ?? 0) - startedAt) / 1_000;
+    expect([13, 12, 11, 10].map(secondsIn)).toEqual([36, 38, 40, 42]);
+    expect(interrupted).toBe(false);
+    const at = (seconds: number) => new Date(startedAt + seconds * 1_000).toISOString();
+    expect(phases).toEqual({
+      ramp: { startedAt: at(0), endedAt: at(4) },
+      hold: { startedAt: at(4), endedAt: at(34) },
+      rampDown: { startedAt: at(34), endedAt: at(42) },
+    });
+  });
+
+  it('stops every user still there at once when told to stop mid-fall', async () => {
+    const stillThere: number[] = [];
+    vi.mocked(runUser).mockImplementation(
+      ({ userNumber, signal }) =>
+        new Promise((resolve) => {
+          stillThere.push(userNumber);
+          signal.addEventListener('abort', () => {
+            stillThere.splice(stillThere.indexOf(userNumber), 1);
+            resolve();
+          });
+        }),
+    );
+    const interrupt = new AbortController();
+    const running = runLoad({
+      plan: { ...plan, fallSeconds: 8 },
+      levels: createLevels(),
+      requests: requests(),
+      interrupt: interrupt.signal,
+    });
+    await vi.advanceTimersByTimeAsync(37_000);
+    expect(stillThere).toEqual([10, 11, 12]);
+
+    interrupt.abort();
+    const result = await running;
+
+    expect(result.interrupted).toBe(true);
+    expect(stillThere).toEqual([]);
   });
 
   it('reports without waiting for users that will not stop inside the time it was given', async () => {

@@ -17,10 +17,12 @@ const MINUTE_MS = 60_000;
 /**
  * CloudWatch delivers a minute's figures a few minutes after it ends, so an
  * archive that starts as the run ends finds none for the stretch after it.
- * Waits until CloudWatch has the figures for the last whole minute before
- * `until`, and then a little longer for the figures that come later still.
- * Gives up after the longest wait. Returns at once when the figures are
- * there already, or when `until` is so long past that none are still to come.
+ * Waits for `until` to pass, however long that is, then until CloudWatch
+ * has the figures for the last whole minute before it, and then a little
+ * longer for the figures that come later still. Gives up once it has waited
+ * the longest wait past `until`. Returns at once when the figures are
+ * there already, or when `until` is so long past that none are still to
+ * come.
  */
 export async function awaitMetricsUntil(input: {
   metrics: RaiseSources['metricSeries'];
@@ -32,6 +34,8 @@ export async function awaitMetricsUntil(input: {
 }) {
   const { metrics, probe, until, wait } = input;
   const now = input.now ?? (() => new Date());
+  const ahead = until.getTime() - now().getTime();
+  if (ahead > 0) await wait.sleep(ahead);
   if (now().getTime() - until.getTime() > wait.mostMs) return;
   const lastWholeMinute = Math.floor(until.getTime() / MINUTE_MS) * MINUTE_MS - MINUTE_MS;
   const window = { from: new Date(lastWholeMinute - 2 * MINUTE_MS), to: until };

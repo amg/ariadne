@@ -48,7 +48,9 @@ export class Services extends Construct {
       size: step.services.auth,
       deploy: step.deploy,
       port: PORTS.auth,
-      discoveryName: INTERNAL_NAMES.auth,
+      // Each API task's proxy knows every healthy auth task and picks one per
+      // request, so auth tasks added under load take their share of sign-ins.
+      serviceConnect: { role: 'offers', name: INTERNAL_NAMES.auth, alias: AUTH_HOST },
       environment: {
         POSTGRESQL_HOST: database.instance.dbInstanceEndpointAddress,
         POSTGRESQL_PORT: String(PORTS.postgres),
@@ -86,7 +88,14 @@ export class Services extends Construct {
       environment: { ...backend.environment, PROCESS_ROLE: 'api' },
       secrets: backend.secrets,
       systemControls: [PUSH_STREAM_GIVE_UP],
+      serviceConnect: { role: 'client' },
     });
+    // A client learns of the services offered through Service Connect when its
+    // tasks start. Only the two services wait on each other: their security
+    // groups already refer to one another.
+    const authService = this.auth.service.node.defaultChild;
+    if (authService !== undefined)
+      this.api.service.node.defaultChild?.node.addDependency(authService);
 
     this.worker = new AppService(this, 'Worker', {
       cluster: props.cluster,
@@ -124,6 +133,9 @@ export class Services extends Construct {
   }
 }
 
+/** The name the backend calls auth by, which Service Connect answers inside each API task. */
+const AUTH_HOST = `${INTERNAL_NAMES.auth}.${INTERNAL_DOMAIN}`;
+
 function jobConcurrencySetting(jobConcurrency: number | undefined): Record<string, string> {
   return jobConcurrency === undefined ? {} : { WORKER_JOB_CONCURRENCY: String(jobConcurrency) };
 }
@@ -158,7 +170,7 @@ function backendSettings(props: ServicesProps): {
       DB_PORT: String(PORTS.postgres),
       DB_NAME: DATABASE.name,
       MOCK_AI_BASE_URL: `http://${INTERNAL_NAMES.mock}.${INTERNAL_DOMAIN}:${PORTS.mock}/v1`,
-      SUPERTOKENS_CONNECTION_URI: `http://${INTERNAL_NAMES.auth}.${INTERNAL_DOMAIN}:${PORTS.auth}`,
+      SUPERTOKENS_CONNECTION_URI: `http://${AUTH_HOST}:${PORTS.auth}`,
       CORS_ORIGINS: `https://${HOSTNAME}`,
       AUTH_SIGNUP_ENABLED: String(step.signupOpen),
       // The edge's web ACL limits sign-ins per address and lets the load

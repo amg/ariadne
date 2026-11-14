@@ -25,6 +25,7 @@ export {
   findingSchema,
   manifestSchema,
   readManifest,
+  scalingServicesOf,
 } from './manifest.ts';
 export type {
   DownWindow,

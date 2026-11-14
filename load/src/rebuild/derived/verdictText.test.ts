@@ -180,6 +180,7 @@ describe('the verdict’s tables', () => {
       decision: { verdict: 'pass', reasons: [] },
       judgements: [],
       crossChecks: [],
+      scaling: [],
     });
 
     const row = text.split('\n').find((line) => line.includes('went quiet'));

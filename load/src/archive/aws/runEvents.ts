@@ -30,12 +30,20 @@ export function stopOf(task: TaskInfo): {
 
 /**
  * The generator a task ran, and which try at its slice it was; null for a
- * task that is not a generator's. A replacement carries its own ramp and
- * hold, since it holds only for the time the run had left.
+ * task that is not a generator's. A replacement carries its own ramp, hold
+ * and fall, since it runs only for the time the run had left.
  */
 function generatorOfTaskOrNull(task: TaskInfo) {
-  const { GENERATOR, ATTEMPT, FIRST_USER, USER_COUNT, RAMP_SECONDS, HOLD_SECONDS, ENDS_AT } =
-    task.environment;
+  const {
+    GENERATOR,
+    ATTEMPT,
+    FIRST_USER,
+    USER_COUNT,
+    RAMP_SECONDS,
+    HOLD_SECONDS,
+    FALL_SECONDS,
+    ENDS_AT,
+  } = task.environment;
   if (GENERATOR === undefined) return null;
   return {
     generator: Number(GENERATOR),
@@ -48,6 +56,7 @@ function generatorOfTaskOrNull(task: TaskInfo) {
         : {
             rampSeconds: Number(RAMP_SECONDS),
             holdSeconds: Number(HOLD_SECONDS),
+            fallSeconds: Number(FALL_SECONDS ?? 0),
             endsAt: instantOrNull(ENDS_AT),
           },
   };
@@ -82,24 +91,26 @@ export function generatorTasksOf(tasks: readonly TaskInfo[]) {
  * generator's launch and stop, as ECS tells them. A task that never
  * started counts from when it was created, and one still running has no
  * stop. A generator whose slice was run again is replaced by the next
- * attempt at it. A generator is planned by the ramp and hold it was started
- * with, and by `plan` when it was started with none.
+ * attempt at it. A generator is planned by the ramp, hold and fall it was
+ * started with, and by `plan` when it was started with none. Its hold ends
+ * where its fall begins.
  */
 export function runEventsOf(input: {
   startedAt: string;
   endedAt: string;
   outcome: Extract<RunEvent, { kind: 'run-ended' }>['outcome'];
-  /** The seconds a generator ramps its users up and holds them; both zero for a generator with no plan. */
-  plan: { rampSeconds: number; holdSeconds: number };
+  /** The seconds a generator ramps its users up, holds them and lets them go; all zero for a generator with no plan. */
+  plan: { rampSeconds: number; holdSeconds: number; fallSeconds: number };
   tasks: readonly TaskInfo[];
 }): RunEvent[] {
   const generators = generatorTasksOf(input.tasks);
   const events = generators.flatMap(({ task, generator, attempt, firstUser, userCount, plan }) => {
-    const { rampSeconds, holdSeconds } = plan ?? input.plan;
-    const hasPlan = rampSeconds + holdSeconds > 0;
+    const { rampSeconds, holdSeconds, fallSeconds } = plan ?? input.plan;
+    const hasPlan = rampSeconds + holdSeconds + fallSeconds > 0;
     const launchedAt = task.startedAt ?? task.createdAt ?? input.startedAt;
     const after = (seconds: number): number => Date.parse(launchedAt) + seconds * 1_000;
-    const holdEndsAt = plan?.endsAt ?? after(rampSeconds + holdSeconds);
+    const planEndsAt = plan?.endsAt ?? after(rampSeconds + holdSeconds + fallSeconds);
+    const holdEndsAt = planEndsAt - fallSeconds * 1_000;
     const launched: RunEvent = {
       kind: 'generator-launched',
       at: launchedAt,

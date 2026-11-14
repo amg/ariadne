@@ -51,7 +51,7 @@ const decideWith = (
     data?: ReturnType<typeof runDataWith>;
     guardStop?: GuardStop | null;
   } & Partial<
-    Pick<Parameters<typeof decide>[0], 'judgements' | 'criteriaUnknown' | 'crossChecks'>
+    Pick<Parameters<typeof decide>[0], 'judgements' | 'criteriaUnknown' | 'crossChecks' | 'scaling'>
   > = {},
 ) => {
   const { data = runDataWith(), guardStop = null, ...rest } = input;
@@ -60,6 +60,7 @@ const decideWith = (
     judgements: [held],
     criteriaUnknown: null,
     crossChecks: [agree],
+    scaling: [],
     ...rest,
   });
 };

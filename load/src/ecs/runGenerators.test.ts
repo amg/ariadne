@@ -25,6 +25,7 @@ function setup(input: { generators?: number; users?: number; mode?: 'load' | 'se
       generators: input.generators ?? 4,
       rampSeconds: 120,
       holdSeconds: 600,
+      fallSeconds: 0,
       thinkSeconds: 30,
       signal: interrupt.signal,
       keepStoppedTask: async (task) => {

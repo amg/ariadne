@@ -124,6 +124,11 @@ export type Step = {
     rampSeconds: number;
     holdSeconds: number;
     /**
+     * How long the users take to leave after the hold, one at a time, the
+     * last to arrive the first to go. 0 lets them all go at once.
+     */
+    fallSeconds: number;
+    /**
      * An unrecorded pass of the same users before the measured run. A
      * growing load balancer cuts open push streams, so the warm-up grows it
      * first. Null runs none.
@@ -140,7 +145,7 @@ export type Step = {
   signupOpen: boolean;
 };
 
-export type StepName = 'seed' | 'smoke' | 'step10' | 'step50' | 'step100' | 'step-prod';
+export type StepName = 'seed' | 'smoke' | 'step10' | 'scale10' | 'step50' | 'step100' | 'step-prod';
 
 /**
  * A load generator is one Node process and uses one core, so many small
@@ -188,6 +193,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 1,
       rampSeconds: 0,
       holdSeconds: 0,
+      fallSeconds: 0,
       warmUp: null,
       thinkSeconds: 0,
       egressGbPerHour: 2,
@@ -219,6 +225,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 120,
       holdSeconds: 600,
+      fallSeconds: 0,
       warmUp: null,
       thinkSeconds: 30,
       egressGbPerHour: 1,
@@ -254,7 +261,67 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 600,
       holdSeconds: 1_200,
+      fallSeconds: 0,
       warmUp: { rampSeconds: 390, holdSeconds: WARM_UP_HOLD_SECONDS },
+      thinkSeconds: 30,
+      egressGbPerHour: 2,
+      logsGbPerHour: 0.5,
+      requestMillionsPerHour: 0.6,
+    },
+    signupOpen: false,
+  },
+
+  /**
+   * A rehearsal of production's scaling at step10's load: the API, worker
+   * and auth start at their floors and scale on CPU, while the users
+   * arrive over half an hour, hold, and leave. Nothing warms the load
+   * balancer first, as nothing would for real users. The fixed parts are
+   * step10's, which carried the same users.
+   */
+  scale10: {
+    name: 'scale10',
+    deploy: REPLACE_DEPLOY,
+    database: { instanceClass: 'm7g.xlarge', storageGiB: 50, source: 'seedSnapshot' },
+    cache: { maxStorageGb: 1, maxEcpuPerSecond: 25_000 },
+    loadBalancer: GROWS_ON_ITS_OWN,
+    services: {
+      api: {
+        cpu: 1024,
+        memoryMiB: 2048,
+        count: 2,
+        scaling: { maxCount: 6, targetCpuPercent: 65 },
+      },
+      worker: {
+        cpu: 1024,
+        memoryMiB: 2048,
+        count: 2,
+        jobConcurrency: STEP50_WORKER_JOBS_AT_ONCE,
+        scaling: {
+          maxCount: 12,
+          targetCpuPercent: 70,
+          scaleInCooldown: 180,
+          scaleOutCooldown: 45,
+        },
+      },
+      auth: {
+        cpu: 2048,
+        memoryMiB: 4096,
+        count: 2,
+        scaling: { maxCount: 8, targetCpuPercent: 60 },
+      },
+      mock: { cpu: 512, memoryMiB: 1024, count: 1 },
+      web: WEB,
+    },
+    load: {
+      generators: 2,
+      generator: GENERATOR,
+      spot: true,
+      users: 10_000,
+      chattingShare: 0.2,
+      rampSeconds: 1_800,
+      holdSeconds: 900,
+      fallSeconds: 1_200,
+      warmUp: null,
       thinkSeconds: 30,
       egressGbPerHour: 2,
       logsGbPerHour: 0.5,
@@ -293,6 +360,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 900,
       holdSeconds: 1_200,
+      fallSeconds: 0,
       // As slow as the run's own ramp. A faster warm-up signs users in
       // quicker than auth serves them, and stalls before the load balancer
       // has grown.
@@ -326,6 +394,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 1_200,
       holdSeconds: 1_200,
+      fallSeconds: 0,
       // As slow as the run's own ramp, as step50's.
       warmUp: { rampSeconds: 1_200, holdSeconds: WARM_UP_HOLD_SECONDS },
       thinkSeconds: 30,
@@ -384,6 +453,7 @@ export const STEPS: Record<StepName, Step> = {
       chattingShare: 0.2,
       rampSeconds: 0,
       holdSeconds: 0,
+      fallSeconds: 0,
       warmUp: null,
       thinkSeconds: 0,
       egressGbPerHour: 1,

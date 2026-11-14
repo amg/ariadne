@@ -228,6 +228,27 @@ describe('holdPush', () => {
     expect(lines).toMatchObject([{ kind: 'push', outcome: 'failed', status: 503 }]);
   });
 
+  it('records a stream open when its user leaves as held, not as one that ended early', async () => {
+    const leaves = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const open = watchedResponse(200, init?.signal ?? undefined);
+        return open.response;
+      }),
+    );
+    const { lines, requests } = recording();
+
+    const holding = userOf({ requests, signal: leaves.signal }).holdPush({
+      onEvent: () => undefined,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    leaves.abort();
+    await holding;
+
+    expect(lines).toMatchObject([{ kind: 'push', outcome: 'held', status: 200 }]);
+  });
+
   it('resolves when a stream breaks after it opened, recorded as failed with its status', async () => {
     const broken = new Response(
       new ReadableStream<Uint8Array>({

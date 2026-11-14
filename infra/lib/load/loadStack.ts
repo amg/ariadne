@@ -87,6 +87,7 @@ export class LoadStack extends Stack {
         CHATTING_SHARE: String(step.load.chattingShare),
         RAMP_SECONDS: String(step.load.rampSeconds),
         HOLD_SECONDS: String(step.load.holdSeconds),
+        FALL_SECONDS: String(step.load.fallSeconds),
         THINK_SECONDS: String(step.load.thinkSeconds),
         // Each request and state line also publishes its figures as metrics.
         PUBLISH_METRICS: 'true',

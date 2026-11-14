@@ -22,6 +22,7 @@ type GeneratorRun = {
   generators: number;
   rampSeconds: number;
   holdSeconds: number;
+  fallSeconds: number;
   thinkSeconds: number;
   /** Aborts when the run must end, which stops every generator. */
   signal: AbortSignal;
@@ -68,6 +69,7 @@ export async function runGenerators(run: GeneratorRun): Promise<void> {
     slices: sliceUsers({ users: run.users, generators: run.generators }),
     rampSeconds: seeding ? 0 : run.rampSeconds,
     holdSeconds: seeding ? SEEDING_MOST_SECONDS : run.holdSeconds,
+    fallSeconds: seeding ? 0 : run.fallSeconds,
     thinkSeconds: run.thinkSeconds,
   });
 }

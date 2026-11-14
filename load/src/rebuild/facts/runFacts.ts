@@ -1,4 +1,4 @@
-import type { RunEvent } from '../../records/index.ts';
+import { type RunEvent, scalingServicesOf } from '../../records/index.ts';
 import { cacheEcpuCapOrNull, loadMinutesOf } from '../runData/index.ts';
 import type { RunData, RunFacts } from '../types.ts';
 import { chatCountsOf } from './chats.ts';
@@ -28,6 +28,8 @@ export function runFactsOf(data: RunData): RunFacts {
       seal: manifest.seal,
       limits: manifest.limits,
       cacheEcpuCap: cacheEcpuCapOrNull(manifest),
+      trailingEndsAt: manifest.trailingEndsAt,
+      scalingServices: scalingServicesOf(manifest.config),
     },
     outcome: ended?.outcome ?? null,
     slices: summarizeSlices(data),

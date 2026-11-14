@@ -53,6 +53,29 @@ describe('awaitMetricsUntil', () => {
     expect(slept).toEqual([]);
   });
 
+  it('waits for the end of the stretch to pass before asking for its last minute', async () => {
+    const { slept, wait } = waiting();
+    let clock = until.getTime() - 25 * 60_000;
+    const metrics = delivering([LAST_MINUTE]);
+
+    await awaitMetricsUntil({
+      metrics,
+      probe,
+      until,
+      wait: {
+        ...wait,
+        sleep: async (ms: number) => {
+          slept.push(ms);
+          clock += ms;
+        },
+      },
+      now: () => new Date(clock),
+    });
+
+    expect(slept).toEqual([25 * 60_000]);
+    expect(metrics.asked()).toBe(1);
+  });
+
   it('waits for the last whole minute of the stretch, then once more for slower resources', async () => {
     const { slept, wait } = waiting();
     const metrics = delivering(

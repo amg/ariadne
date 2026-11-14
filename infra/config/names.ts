@@ -75,10 +75,14 @@ export const RAISE_TAGS = {
 } as const;
 export const PROJECT_TAG = `${PROJECT}:project`;
 
-/** How long a raise may live before the safety net deletes it. */
+/**
+ * How long a raise may live before the safety net deletes it. The load
+ * stack outlasts a run of up to 95 minutes, rise, hold and fall together,
+ * and the half hour after it that the archive keeps watching.
+ */
 export const SAFETY_NET = {
-  appMinutes: 180,
-  loadMinutes: 100,
+  appMinutes: 240,
+  loadMinutes: 150,
 } as const;
 
 /** A raise is refused once the day's recorded worst cases would pass this. */
@@ -92,7 +96,10 @@ export const PORTS = {
   postgres: 5432,
 } as const;
 
-/** Private DNS names the services find each other by, inside the app network. */
+/**
+ * Names the services find each other by, inside the app network: mock by
+ * private DNS, and auth through Service Connect.
+ */
 export const INTERNAL_DOMAIN = `${PROJECT}.internal`;
 export const INTERNAL_NAMES = {
   auth: 'auth',

@@ -43,7 +43,7 @@ export class AppStack extends Stack {
     const cluster = new ecs.Cluster(this, 'Cluster', {
       vpc: network.vpc,
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
-      defaultCloudMapNamespace: { name: INTERNAL_DOMAIN, useForServiceConnect: false },
+      defaultCloudMapNamespace: { name: INTERNAL_DOMAIN, useForServiceConnect: true },
     });
 
     const services = new Services(this, 'Services', {

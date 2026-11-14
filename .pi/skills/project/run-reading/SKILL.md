@@ -52,6 +52,36 @@ open questions, as something for rebuild to compute.
    reason and gap in `verdict.md` is accounted for.
 4. **Tell the operator** the path and the one-line gist.
 
+## A run that rises and falls
+
+A step whose services scale has a `## Scaling` section in `verdict.md`: each
+scaling service's floor and ceiling, its peak running tasks with their
+minute, and the minute it was back at its floor. Its `metrics.tsv` runs on
+past the run's end, through the watch after it. The users leave over the
+fall, so the hold is the only stretch judged; the rise and the fall are
+read here. Each target is in the manifest's `config.services`. Answer
+these in **Where it strained**, each with its minutes and figures:
+
+1. **How fast each service reacted.** The minutes between
+   `service_cpu_average_percent_<service>` first crossing its target and
+   `ecs_desired_tasks_<service>`, then `ecs_running_tasks_<service>`,
+   growing.
+2. **Whether users felt the wait.** Whether `chat_first_byte_p95_ms`,
+   `app_job_wait_p95_ms` or `app_oldest_job_wait_max_ms` rose before the
+   new tasks were running, and whether they rose while CPU stayed under
+   its target, which says CPU is the wrong signal.
+3. **Whether the load balancer's growth cut push streams on the way up.**
+   `push_streams_cut` and `push_streams_ended_early` in the minutes
+   `balancer_capacity_units_peak` stepped up.
+4. **Whether streams were cut on the way down.** `push_streams_cut` in the
+   minutes `ecs_running_tasks_api` fell, and whether those users reopened
+   (`push_streams_reopened`).
+5. **Whether new auth tasks took their share.**
+   `service_cpu_busiest_percent_auth` against
+   `service_cpu_average_percent_auth` as `ecs_running_tasks_auth` grew,
+   and sign-in latency at the API (`app.requests.byRoute["no route"]` in
+   `summary.json`).
+
 ## Comparing runs
 
 Read each run as above, then compare the same keys across them. Runs judged

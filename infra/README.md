@@ -65,6 +65,7 @@ scripts/aws-prod seed          # once: create the synthetic population and snaps
 scripts/aws-prod snapshot      # replace the seed snapshot with the database that is up
 
 scripts/aws-prod up smoke      # raise (about twenty minutes); run again to resume after a failure
+scripts/aws-prod up scale10    # rehearse production's scaling: services start at their floors, and a load rises, holds and falls
 scripts/aws-prod up step-prod  # raise production configuration with auto-scaling (no load generator).
 scripts/aws-prod load-image    # build the generators' image alone; the next run's generators use it, with no new raise
 scripts/aws-prod load          # one load run at the raised step, through CloudFront as users reach it, then archive it into load/.runs/ and rebuild its verdict
@@ -91,13 +92,15 @@ A raise is refused when the day's recorded worst cases would pass $100. A
 load run that does not run its whole plan, because it was interrupted or
 failed, stops counting toward that limit; the ledger still lists it, since it
 may have cost something. `reset-budget` clears the day by hand. And
-the safety net deletes the app stack and its edge rules three hours
-after a raise and the load stack 100 minutes after it starts, whether or not
+the safety net deletes the app stack and its edge rules four hours
+after a raise and the load stack 150 minutes after it starts, whether or not
 anyone remembers.
 
 ## Runs
 
 A growing load balancer cuts open push streams. So step10, step50 and step100 first run an unrecorded warm-up under `<run id>-warm-up`, which grows the load balancer before the measured run. Its requests stay out of the run's folder. When it does not finish, the run does not begin.
+
+A run's users arrive over its ramp and stay through its hold. A step with a fall then lets them go one at a time over it, the last to arrive the first to leave; any other step lets them all go at once. Only the hold is judged against the pass criteria, and a push stream closed by a user who left is not one that ended early. When the step's services scale, the archive keeps watching for half an hour after the run, instead of five minutes, and the verdict fails a run whose scaling services are not back at their floors by then.
 
 Every load run is archived into its folder on the operator's machine, `load/.runs/<run id>/`, before `load` returns: the generators' request lines, the API's, worker's and auth's logs, every CloudWatch metric of the raise, the database's Performance Insights, and what ECS and scaling recorded. The load balancer's access logs stay where it writes them, under the vault's `origin-access-logs/`. A run is sealed when its folder holds its manifest, written last; one that has begun and has no manifest is unsealed, and `down` refuses while the raise has one. The vault keeps no runs: runs from before this (under the vault's `runs/`) can be deleted with `aws s3 rm s3://<vault bucket>/runs/ --recursive`.
 
@@ -152,7 +155,7 @@ lets the generators in by the load key they carry, not by that address, so
 nothing at the origin opens or closes with a run. `load` deletes the stack
 once the run is sealed, or at once when it fails before the run begins
 recording. A run that could not be sealed keeps its stack for `archive`, and
-`down` or the safety net, 100 minutes after the stack started, takes it then.
+`down` or the safety net, 150 minutes after the stack started, takes it then.
 The gateway is in the run's worst case, and so are CloudFront's and the web
 ACL's charges for the run's traffic.
 
@@ -161,6 +164,12 @@ locations, where real users would spread across many. Read AWS's guidance on
 load testing CloudFront before a step50-sized run.
 
 ## Steps
+
+`seed`, `smoke`, `step10`, `step50` and `step100` run fixed task counts.
+`scale10` rehearses production's scaling at step10's load: the API, the
+worker and auth start at their floors and scale on CPU, with no warm-up,
+while 10,000 users arrive over 30 minutes, hold for 15 and leave over 20.
+`step-prod` is the production shape, and runs no generators.
 
 Every step runs the API and the worker as separate services sharing
 Valkey. `seed` creates the synthetic population once and snapshots the

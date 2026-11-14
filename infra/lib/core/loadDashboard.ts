@@ -8,8 +8,8 @@ import {
   type Signal,
   passLineOf,
 } from '../../../lib/metrics/catalogue.ts';
-import { sizedLinesOfLoad } from '../../../load/src/criteria/sized.ts';
-import { PROJECT } from '../../config/names.ts';
+import { SIZED_STEPS, sizedLinesOfLoad } from '../../../load/src/criteria/sized.ts';
+import { PROJECT, SAFETY_NET } from '../../config/names.ts';
 import { STEPS } from '../../config/steps.ts';
 import {
   MINUTE,
@@ -60,11 +60,11 @@ function fargateVcpu(signal: Signal, label: string): cloudwatch.IMetric[] {
 }
 
 /** The steps whose pass lines follow their size. */
-const SIZED_STEPS = [STEPS.step10, STEPS.step50];
+const SIZED_STEP_CONFIGS = Object.values(STEPS).filter((step) => SIZED_STEPS.includes(step.name));
 
 /** The push streams and chatters each sized step must hold, named by step. */
 function userLines() {
-  return SIZED_STEPS.flatMap((step) => {
+  return SIZED_STEP_CONFIGS.flatMap((step) => {
     const lines = sizedLinesOfLoad(step.load);
     return [
       {
@@ -81,7 +81,7 @@ function userLines() {
 
 /** The ECPU a second each sized step’s cache may use, named by step. */
 function cacheCapLines() {
-  return SIZED_STEPS.map((step) => ({
+  return SIZED_STEP_CONFIGS.map((step) => ({
     value: step.cache.maxEcpuPerSecond,
     label: `${step.name} cap ${step.cache.maxEcpuPerSecond.toLocaleString('en-US')} a second`,
   }));
@@ -115,7 +115,8 @@ export class LoadDashboard extends Construct {
     super(scope, id);
     this.dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {
       dashboardName: `${PROJECT}-load`,
-      start: '-PT3H',
+      // The longest a raise can live, so the page opens on the whole of the latest one.
+      start: `-PT${SAFETY_NET.appMinutes}M`,
       widgets: [
         [
           new cloudwatch.TextWidget({

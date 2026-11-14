@@ -21,12 +21,22 @@ type AppServiceProps = {
   secrets?: Record<string, ecs.Secret>;
   /** Registers `<name>.<internal domain>` so other services can find this one. */
   discoveryName?: string;
+  /**
+   * The service's part in Service Connect. One that offers its port is
+   * reached at `<alias>:<port>` by clients, which spread their requests
+   * across every healthy task. A client reaches the ports others offer by
+   * their aliases.
+   */
+  serviceConnect?: { role: 'offers'; name: string; alias: string } | { role: 'client' };
   /** Kernel settings of the task's own network, beyond the platform's defaults. */
   systemControls?: ecs.SystemControl[];
 };
 
 /** Long-lived streams hold many sockets open in one process. */
 const OPEN_FILES = 65_536;
+
+/** The name of the one port a service offers through Service Connect. */
+const CONNECT_PORT_NAME = 'main';
 
 /**
  * One container per task on Fargate, in the private app subnets, with its
@@ -55,7 +65,10 @@ export class AppService extends Construct {
       command: props.command,
       environment: props.environment ?? {},
       secrets: props.secrets ?? {},
-      portMappings: props.port !== undefined ? [{ containerPort: props.port }] : [],
+      portMappings:
+        props.port !== undefined
+          ? [portMappingOf({ port: props.port, serviceConnect: props.serviceConnect })]
+          : [],
       ulimits: [{ name: ecs.UlimitName.NOFILE, softLimit: OPEN_FILES, hardLimit: OPEN_FILES }],
       systemControls: props.systemControls,
       logging: ecs.LogDrivers.awsLogs({
@@ -83,6 +96,7 @@ export class AppService extends Construct {
               dnsRecordType: servicediscovery.DnsRecordType.A,
               dnsTtl: Duration.seconds(10),
             },
+      serviceConnectConfiguration: serviceConnectOf(props),
     });
 
     const { scaling } = props.size;
@@ -114,5 +128,49 @@ export class AppService extends Construct {
   acceptFrom(peer: ec2.IConnectable): void {
     if (this.port === 0) return;
     this.service.connections.allowFrom(peer, ec2.Port.tcp(this.port));
+  }
+}
+
+/** A service's one port, named and marked as HTTP when it is offered through Service Connect. */
+function portMappingOf({
+  port,
+  serviceConnect,
+}: {
+  port: number;
+  serviceConnect: AppServiceProps['serviceConnect'];
+}): ecs.PortMapping {
+  if (serviceConnect?.role !== 'offers') return { containerPort: port };
+  return { containerPort: port, name: CONNECT_PORT_NAME, appProtocol: ecs.AppProtocol.http };
+}
+
+/**
+ * How a service takes part in Service Connect: offering its port under an
+ * alias, reaching the ports others offer, or neither. The proxy gives up on
+ * a request after 15 s and on an idle connection after 5 minutes, its own
+ * defaults.
+ */
+function serviceConnectOf({
+  serviceConnect,
+  port,
+}: Pick<AppServiceProps, 'serviceConnect' | 'port'>): ecs.ServiceConnectProps | undefined {
+  if (serviceConnect === undefined) return undefined;
+  switch (serviceConnect.role) {
+    case 'client':
+      return {};
+    case 'offers':
+      return {
+        services: [
+          {
+            portMappingName: CONNECT_PORT_NAME,
+            discoveryName: serviceConnect.name,
+            dnsName: serviceConnect.alias,
+            port,
+          },
+        ],
+      };
+    default: {
+      const _check: never = serviceConnect;
+      return _check;
+    }
   }
 }
