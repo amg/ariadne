@@ -294,8 +294,12 @@ own server, the same container the single-server setup runs; the backend talks t
 Each step's sizes live in <code>infra/config/steps.ts</code>.</p>
 <p class="note">Most load steps fix every count before the run starts. Long-lived connections never move to new
 tasks, so the API is sized for the run's target rather than left to react. <code>step-prod</code>, which runs no load,
-scales the API, the worker and the auth core on CPU instead, and <code>scale10</code> rehearses that scaling under a load
-that rises, holds and falls.</p>
+scales the API, the worker and the auth core on CPU instead, and <code>scale10</code> and <code>scale50</code> rehearse that
+scaling under a load that rises, holds and falls.</p>
+<p class="note">Each service that scales has two policies on its average CPU. Target tracking holds it near its target,
+adding tasks after several minutes above it, a few at a time, and it alone removes tasks, slowly. A quick scale-out at
+the same target adds tasks from the first minute's reading, in larger leaps the further CPU is past it. When both add
+tasks, the one asking for more wins.</p>
 
 <h2>3. The way in, and its checks</h2>
 <p>A request meets these in order. The edge's web ACL decides who gets in, and the network does the rest: the load

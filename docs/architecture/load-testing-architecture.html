@@ -411,7 +411,8 @@ rebuilds it. Only then does the shell delete the load stack.</figcaption>
   </div>
 </div>
 <p class="note">Each step's users, chatting share, generators, ramp, hold and fall live in <code>infra/config/steps.ts</code>.
-<code>scale10</code> rises over 30 minutes, holds for 15 and falls over 20, against services that start at their floors and scale.
+<code>scale10</code> rises over 30 minutes, holds for 15 and falls over 20, and <code>scale50</code> rises over 45, holds for 20
+and falls over 30, against services that start at their floors and scale.
 <code>smoke</code> runs several generators, so a lost one can be replaced while the others carry on. <code>seed</code> creates the
 population once, On-Demand on larger tasks, unsupervised; it is not a load run and is not archived.</p>
 
@@ -602,7 +603,7 @@ on aws-prod and on cubi.</p>
   <li><b>Limits come from the manifest.</b> A run records its limits when it begins, worked out from its step and its
   configuration, and is judged by them. <i>Home</i> steps limit host CPU, memory, first byte and errors. <i>Smoke</i> has
   none: smoke proves the tools, so it passes on its records being whole, agreeing and covering its plan. The sized steps,
-  step10, scale10 and step50, scale their limits with the step: nearly all of the step's push streams and chatters held through the hold,
+  step10, scale10, step50 and scale50, scale their limits with the step: nearly all of the step's push streams and chatters held through the hold,
   and ceilings on chat first byte p95, gate waits at the limit, sign-in failures and generator CPU. A run that recorded no limits, or one no criterion judges, is still rebuilt, and its verdict says it could not be
   judged. There is no judging an old run by newer limits: a run is read as it was run.</li>
   <li><b>A run that rises and falls.</b> Only the hold is judged against the limits. A push stream its user closed on

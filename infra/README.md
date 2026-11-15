@@ -166,10 +166,18 @@ load testing CloudFront before a step50-sized run.
 ## Steps
 
 `seed`, `smoke`, `step10`, `step50` and `step100` run fixed task counts.
-`scale10` rehearses production's scaling at step10's load: the API, the
-worker and auth start at their floors and scale on CPU, with no warm-up,
-while 10,000 users arrive over 30 minutes, hold for 15 and leave over 20.
+`scale10` and `scale50` rehearse production's scaling at step10's and
+step50's loads: the API, the worker and auth start at their floors and
+scale on CPU, with no warm-up. `scale10`'s 10,000 users arrive over 30
+minutes, hold for 15 and leave over 20. `scale50`'s 50,000 arrive over 45,
+hold for 20 and leave over 30, and its ceilings are step50's counts.
 `step-prod` is the production shape, and runs no generators.
+
+A service that scales is held near its CPU target, and only that removes
+tasks, slowly. Holding near the target adds tasks only after several
+minutes above it, a few at a time, so a quick scale-out at the same target
+adds them from the first minute's reading, in larger leaps the further CPU
+is past it. Its settings sit beside the target in `config/steps.ts`.
 
 Every step runs the API and the worker as separate services sharing
 Valkey. `seed` creates the synthetic population once and snapshots the
