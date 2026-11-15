@@ -70,7 +70,16 @@ export class Origin extends Construct {
       port: props.api.port,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [props.api.service],
-      healthCheck: { path: '/api/health', healthyHttpCodes: '200' },
+      // An API task that is overloaded answers slowly but still answers. It is
+      // removed only after five missed checks, about two and a half minutes,
+      // which is long enough for scaling to add tasks beside it.
+      healthCheck: {
+        path: '/api/health',
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(30),
+        timeout: Duration.seconds(10),
+        unhealthyThresholdCount: 5,
+      },
       deregistrationDelay: Duration.seconds(30),
     });
 

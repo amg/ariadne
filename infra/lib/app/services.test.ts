@@ -256,7 +256,7 @@ function scalingOf(stepName: string) {
 }
 
 describe('the scaling rehearsal at step50’s load', () => {
-  it('starts each service that scales at its floor, free to grow to step50’s counts on its CPU', () => {
+  it('starts the API and worker at 2 and auth at 4, free to grow to step50’s counts on their CPU', () => {
     const services = scalingOf('scale50');
 
     assert.deepEqual(
@@ -264,7 +264,7 @@ describe('the scaling rehearsal at step50’s load', () => {
         .sort((a, b) => a.ceiling - b.ceiling)
         .map(({ floor, ceiling }) => [floor, ceiling]),
       [
-        [2, 16],
+        [4, 16],
         [2, 20],
         [2, 40],
       ],
@@ -354,6 +354,39 @@ describe('the quick scale-out', () => {
       assert.notEqual(tracking[0].DisableScaleIn, true);
     }
   });
+});
+
+describe('the API’s health check', () => {
+  it('removes an API task only after five missed checks of ten seconds each, thirty seconds apart', () => {
+    const groups = Object.values(
+      appTemplateOf('scale50').findResources('AWS::ElasticLoadBalancingV2::TargetGroup', {
+        Properties: { HealthCheckPath: '/api/health' },
+      }),
+    );
+
+    assert.equal(groups.length, 1);
+    const { HealthCheckIntervalSeconds, HealthCheckTimeoutSeconds, UnhealthyThresholdCount } =
+      groups[0]?.Properties ?? {};
+    assert.deepEqual(
+      { HealthCheckIntervalSeconds, HealthCheckTimeoutSeconds, UnhealthyThresholdCount },
+      { HealthCheckIntervalSeconds: 30, HealthCheckTimeoutSeconds: 10, UnhealthyThresholdCount: 5 },
+    );
+  });
+});
+
+describe('the database’s checkpoints', () => {
+  for (const name of ['smoke', 'scale50', 'step-prod']) {
+    it(`keep 8 GB of log and at most 15 minutes between them on ${name}`, () => {
+      const groups = Object.values(appTemplateOf(name).findResources('AWS::RDS::DBParameterGroup'));
+
+      assert.equal(groups.length, 1);
+      const { max_wal_size, checkpoint_timeout } = groups[0]?.Properties.Parameters ?? {};
+      assert.deepEqual(
+        { max_wal_size, checkpoint_timeout },
+        { max_wal_size: '8192', checkpoint_timeout: '900' },
+      );
+    });
+  }
 });
 
 describe('the load balancer’s reserved capacity', () => {

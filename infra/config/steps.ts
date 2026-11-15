@@ -128,8 +128,8 @@ export type Step = {
      * Every sign-up and sign-in checks a deliberately slow password hash, about
      * four a second per vCPU (measured on smoke). Each step's auth handles its
      * ramp (users / rampSeconds) at about 60% busy; any less and sign-ins
-     * queue, and the run measures the queue. An auth that scales starts below
-     * that and grows into it.
+     * queue, and the run measures the queue. An auth that scales does so at
+     * its floor.
      */
     auth: ServiceConfig;
     mock: ServiceConfig;
@@ -349,7 +349,7 @@ export const STEPS: Record<StepName, Step> = {
           maxCount: 12,
           targetCpuPercent: 70,
           quickScaleOut: QUICK_SCALE_OUT,
-          scaleInCooldown: 180,
+          scaleInCooldown: 60,
           scaleOutCooldown: 45,
         },
       },
@@ -452,14 +452,14 @@ export const STEPS: Record<StepName, Step> = {
           maxCount: 40,
           targetCpuPercent: 70,
           quickScaleOut: QUICK_SCALE_OUT,
-          scaleInCooldown: 180,
+          scaleInCooldown: 60,
           scaleOutCooldown: 45,
         },
       },
       auth: {
         cpu: 2048,
         memoryMiB: 4096,
-        count: 2,
+        count: 4,
         scaling: { maxCount: 16, targetCpuPercent: 60, quickScaleOut: QUICK_SCALE_OUT },
       },
       mock: { cpu: 1024, memoryMiB: 2048, count: 6 },
@@ -543,7 +543,7 @@ export const STEPS: Record<StepName, Step> = {
           maxCount: 12,
           targetCpuPercent: 70,
           quickScaleOut: QUICK_SCALE_OUT,
-          scaleInCooldown: 180,
+          scaleInCooldown: 60,
           scaleOutCooldown: 45,
         },
       },
