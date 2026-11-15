@@ -162,6 +162,14 @@ function usableFiles(
   };
 }
 
+/** The byte that ends a line; in UTF-8 it is never part of another character. */
+const NEWLINE = 0x0a;
+
+/**
+ * The records of a file, one per line, without the blank ones. Each line is
+ * decoded on its own, so a file longer than the longest string the runtime
+ * can hold is still read.
+ */
 function readLines<Schema extends z.ZodType>(
   path: string,
   kind: RecordKind<Schema>,
@@ -170,7 +178,17 @@ function readLines<Schema extends z.ZodType>(
   const file = usable.get(path);
   if (file === undefined) return { records: null, trouble: [] };
   try {
-    return { records: kind.readLines(file.toString('utf8')), trouble: [] };
+    const records: z.infer<Schema>[] = [];
+    let number = 0;
+    for (let start = 0; start <= file.length; ) {
+      const found = file.indexOf(NEWLINE, start);
+      const end = found === -1 ? file.length : found;
+      number += 1;
+      const record = kind.readLine(file.toString('utf8', start, end), number);
+      if (record !== null) records.push(record);
+      start = end + 1;
+    }
+    return { records, trouble: [] };
   } catch (error) {
     if (!(error instanceof InvalidRecordLine)) throw error;
     return { records: null, trouble: [{ path, reason: `not valid: ${error.message}` }] };

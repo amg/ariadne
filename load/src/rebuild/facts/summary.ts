@@ -167,7 +167,9 @@ function requestsSummary(appRequests: RunData['appRequests']) {
   const byRoute = new Map<string, AppRequestLine[]>();
   for (const line of appRequests) {
     const route = line.route ?? NO_ROUTE;
-    byRoute.set(route, [...(byRoute.get(route) ?? []), line]);
+    const own = byRoute.get(route);
+    if (own === undefined) byRoute.set(route, [line]);
+    else own.push(line);
   }
   return {
     count: appRequests.length,

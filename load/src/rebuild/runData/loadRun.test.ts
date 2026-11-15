@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { constants } from 'node:buffer';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +9,8 @@ import { loadRun } from './loadRun.ts';
 import { exchangeWith, manifestWith } from './testing.ts';
 
 const exchange = JSON.stringify(exchangeWith());
+
+const STRING_MAX_LENGTH = constants.MAX_STRING_LENGTH;
 
 /** A run folder holding the given files, sealed by a manifest that lists them. */
 function sealedFolder(files: Record<string, Buffer | string>) {
@@ -36,6 +39,23 @@ describe('loadRun', () => {
     expect(data.exchanges).toHaveLength(1);
     expect(data.trouble).toEqual([]);
   });
+
+  it('reads a file longer than the longest string the runtime can hold', () => {
+    const blankLine = Buffer.from(`${' '.repeat(1024 * 1024 - 1)}\n`);
+    const blankLines = Math.ceil(STRING_MAX_LENGTH / blankLine.byteLength);
+    const content = Buffer.concat([
+      ...Array.from({ length: blankLines }, () => blankLine),
+      Buffer.from(`${exchange}\n`),
+    ]);
+    expect(content.byteLength).toBeGreaterThan(STRING_MAX_LENGTH);
+    const folder = sealedFolder({ [LAYOUT.exchanges]: content });
+
+    const data = loadRun(folder);
+    rmSync(folder, { recursive: true });
+
+    expect(data.exchanges).toHaveLength(1);
+    expect(data.trouble).toEqual([]);
+  }, 60_000);
 
   it('reports a line that is not a record of its kind, naming the line', () => {
     const folder = sealedFolder({ [LAYOUT.exchanges]: `${exchange}\ngarbage\n` });
