@@ -86,7 +86,7 @@ export const SAFETY_NET = {
 } as const;
 
 /** A raise is refused once the day's recorded worst cases would pass this. */
-export const DAILY_WORST_CASE_LIMIT_USD = 100;
+export const DAILY_WORST_CASE_LIMIT_USD = 150;
 
 export const PORTS = {
   api: 3001,

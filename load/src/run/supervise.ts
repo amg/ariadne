@@ -28,6 +28,8 @@ type SliceRun = Supervision & {
   thinkSeconds: number;
   /** How long the users of the stage leave over, at its end. */
   fallSeconds: number;
+  /** How fast the stage's users arrive over its ramp, all slices together. */
+  usersPerSecond: number;
   /** When the stage is due to end; set once its first generator has been launched. */
   stage: { endsAt: number | null };
   /** Aborts when the run ends, or when another slice could not be kept running. */
@@ -38,8 +40,8 @@ type SliceRun = Supervision & {
  * Runs one stage: a generator for each slice, all at once, and watches
  * them. The stage ends when the plan of the first generator launched does.
  * A generator that stops before the stage's end is replaced on the same
- * slice, which brings its users back over about a minute, holds, and lets
- * them go with the rest of the stage's fall. One replaced during the fall
+ * slice, which brings its users back at the stage's arrival rate, holds, and
+ * lets them go with the rest of the stage's fall. One replaced during the fall
  * brings back only the users who have not left by then. A replacement that
  * cannot be launched is tried again for a while, and then its slice is left
  * down for the rest of the stage. Every start and every stop, with its
@@ -66,10 +68,15 @@ export async function superviseStage(
   const stage: { endsAt: number | null } = { endsAt: null };
   const failure = new AbortController();
   const stageSignal = AbortSignal.any([input.signal, failure.signal]);
+  const stageUsers = input.slices.reduce((total, slice) => total + slice.userCount, 0);
+  const usersPerSecond =
+    stageUsers > 0 && input.rampSeconds > 0
+      ? stageUsers / input.rampSeconds
+      : Number.POSITIVE_INFINITY;
   const results = await Promise.allSettled(
     input.slices.map((slice) =>
       superviseSlice(
-        { ...input, now, sleep, slice, stage, stageSignal },
+        { ...input, now, sleep, slice, stage, stageSignal, usersPerSecond },
         {
           rampSeconds: input.rampSeconds,
           holdSeconds: input.holdSeconds,
@@ -317,6 +324,7 @@ function replacementPlanOf(run: SliceRun) {
     secondsLeft: secondsLeft(run),
     fallSeconds: run.fallSeconds,
     userCount: run.slice.userCount,
+    usersPerSecond: run.usersPerSecond,
   });
 }
 

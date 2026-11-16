@@ -44,7 +44,17 @@ export class Database extends Construct {
       enablePerformanceInsights: true,
       parameterGroup: new rds.ParameterGroup(this, 'Parameters', {
         engine: ENGINE,
-        parameters: { 'rds.force_ssl': '1' },
+        parameters: {
+          'rds.force_ssl': '1',
+          // Every checkpoint makes the next change to each page write the whole
+          // page into the log. Under a full chat load, the default log size on
+          // storage this small brought a checkpoint every minute or two, and the
+          // bursts reached the storage's write limit. In MB and seconds.
+          max_wal_size: '8192',
+          checkpoint_timeout: '900',
+          // Compresses those whole pages, so the log fills more slowly.
+          wal_compression: 'lz4',
+        },
       }),
     };
 

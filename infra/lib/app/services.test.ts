@@ -189,7 +189,9 @@ describe('the scaling rehearsal’s raise', () => {
       template.findResources('AWS::ApplicationAutoScaling::ScalableTarget'),
     ).map((target) => [target.Properties.MinCapacity, target.Properties.MaxCapacity]);
     const cpuTargets = Object.values(
-      template.findResources('AWS::ApplicationAutoScaling::ScalingPolicy'),
+      template.findResources('AWS::ApplicationAutoScaling::ScalingPolicy', {
+        Properties: { PolicyType: 'TargetTrackingScaling' },
+      }),
     ).map(
       (policy) => policy.Properties.TargetTrackingScalingPolicyConfiguration.TargetValue as number,
     );
@@ -215,6 +217,177 @@ describe('the scaling rehearsal’s raise', () => {
 
     assert.deepEqual(counts.filter((count) => count !== undefined).sort(), [1, 2]);
   });
+});
+
+/**
+ * Each scaling service in the raise of a step: its floor and ceiling, its
+ * target tracking policies, and its step scaling policies with the alarms
+ * that set them off.
+ */
+function scalingOf(stepName: string) {
+  const template = appTemplateOf(stepName);
+  const policies = Object.entries(
+    template.findResources('AWS::ApplicationAutoScaling::ScalingPolicy'),
+  );
+  const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm'));
+  const targets = template.findResources('AWS::ApplicationAutoScaling::ScalableTarget');
+  return Object.entries(targets).map(([targetId, target]) => {
+    const own = policies.filter(([, policy]) => policy.Properties.ScalingTargetId.Ref === targetId);
+    return {
+      floor: target.Properties.MinCapacity as number,
+      ceiling: target.Properties.MaxCapacity as number,
+      tracking: own
+        .filter(([, policy]) => policy.Properties.PolicyType === 'TargetTrackingScaling')
+        .map(([, policy]) => policy.Properties.TargetTrackingScalingPolicyConfiguration),
+      steps: own
+        .filter(([, policy]) => policy.Properties.PolicyType === 'StepScaling')
+        .map(([policyId, policy]) => ({
+          configuration: policy.Properties.StepScalingPolicyConfiguration,
+          alarms: alarms
+            .filter((alarm) =>
+              (alarm.Properties.AlarmActions ?? []).some(
+                (action: { Ref?: string }) => action.Ref === policyId,
+              ),
+            )
+            .map((alarm) => alarm.Properties),
+        })),
+    };
+  });
+}
+
+describe('the scaling rehearsal at step50’s load', () => {
+  it('starts the API and worker at 2 and auth at 4, free to grow to step50’s counts on their CPU', () => {
+    const services = scalingOf('scale50');
+
+    assert.deepEqual(
+      [...services]
+        .sort((a, b) => a.ceiling - b.ceiling)
+        .map(({ floor, ceiling }) => [floor, ceiling]),
+      [
+        [4, 16],
+        [2, 20],
+        [2, 40],
+      ],
+    );
+    assert.deepEqual(
+      services
+        .flatMap(({ tracking }) => tracking.map(({ TargetValue }) => TargetValue))
+        .sort((a, b) => a - b),
+      [60, 65, 70],
+    );
+  });
+});
+
+describe('the quick scale-out', () => {
+  for (const name of ['scale10', 'scale50', 'step-prod']) {
+    it(`sits beside the CPU target of every service that scales on ${name}, firing after one minute at it`, () => {
+      const services = scalingOf(name);
+
+      assert.equal(services.length, 3);
+      for (const { tracking, steps } of services) {
+        assert.equal(tracking.length, 1);
+        assert.equal(steps.length, 1);
+        const alarms = steps[0]?.alarms ?? [];
+        assert.equal(alarms.length, 1);
+        const {
+          Namespace,
+          MetricName,
+          Statistic,
+          Period,
+          EvaluationPeriods,
+          ComparisonOperator,
+          Threshold,
+        } = alarms[0];
+        assert.deepEqual(
+          {
+            Namespace,
+            MetricName,
+            Statistic,
+            Period,
+            EvaluationPeriods,
+            ComparisonOperator,
+            Threshold,
+          },
+          {
+            Namespace: 'AWS/ECS',
+            MetricName: 'CPUUtilization',
+            Statistic: 'Average',
+            Period: 60,
+            EvaluationPeriods: 1,
+            ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+            Threshold: tracking[0].TargetValue,
+          },
+        );
+      }
+    });
+  }
+
+  it('adds half the tasks, at least two, or doubles them 20 points past the target, a minute apart', () => {
+    const services = scalingOf('scale50');
+
+    assert.equal(services.length, 3);
+    for (const { steps } of services) {
+      assert.equal(steps.length, 1);
+      assert.deepEqual(steps[0]?.configuration, {
+        AdjustmentType: 'PercentChangeInCapacity',
+        Cooldown: 60,
+        MetricAggregationType: 'Average',
+        MinAdjustmentMagnitude: 2,
+        StepAdjustments: [
+          { MetricIntervalLowerBound: 0, MetricIntervalUpperBound: 20, ScalingAdjustment: 50 },
+          { MetricIntervalLowerBound: 20, ScalingAdjustment: 100 },
+        ],
+      });
+    }
+  });
+
+  it('only adds tasks, leaving their removal to the CPU target', () => {
+    const services = scalingOf('scale50');
+
+    assert.equal(services.length, 3);
+    for (const { tracking, steps } of services) {
+      const adjustments = steps.flatMap(({ configuration }) => configuration.StepAdjustments);
+
+      assert.equal(adjustments.length, 2);
+      assert.ok(adjustments.every(({ ScalingAdjustment }) => ScalingAdjustment > 0));
+      assert.ok(adjustments.every(({ MetricIntervalLowerBound }) => MetricIntervalLowerBound >= 0));
+      assert.notEqual(tracking[0].DisableScaleIn, true);
+    }
+  });
+});
+
+describe('the API’s health check', () => {
+  it('removes an API task only after five missed checks of ten seconds each, thirty seconds apart', () => {
+    const groups = Object.values(
+      appTemplateOf('scale50').findResources('AWS::ElasticLoadBalancingV2::TargetGroup', {
+        Properties: { HealthCheckPath: '/api/health' },
+      }),
+    );
+
+    assert.equal(groups.length, 1);
+    const { HealthCheckIntervalSeconds, HealthCheckTimeoutSeconds, UnhealthyThresholdCount } =
+      groups[0]?.Properties ?? {};
+    assert.deepEqual(
+      { HealthCheckIntervalSeconds, HealthCheckTimeoutSeconds, UnhealthyThresholdCount },
+      { HealthCheckIntervalSeconds: 30, HealthCheckTimeoutSeconds: 10, UnhealthyThresholdCount: 5 },
+    );
+  });
+});
+
+describe('the database’s checkpoints', () => {
+  for (const name of ['smoke', 'scale50', 'step-prod']) {
+    it(`keep 8 GB of compressed log and at most 15 minutes between them on ${name}`, () => {
+      const groups = Object.values(appTemplateOf(name).findResources('AWS::RDS::DBParameterGroup'));
+
+      assert.equal(groups.length, 1);
+      const { max_wal_size, checkpoint_timeout, wal_compression } =
+        groups[0]?.Properties.Parameters ?? {};
+      assert.deepEqual(
+        { max_wal_size, checkpoint_timeout, wal_compression },
+        { max_wal_size: '8192', checkpoint_timeout: '900', wal_compression: 'lz4' },
+      );
+    });
+  }
 });
 
 describe('the load balancer’s reserved capacity', () => {

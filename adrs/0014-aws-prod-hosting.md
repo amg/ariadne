@@ -134,7 +134,7 @@ Within the safety net's limits, capacity-priced items are capped by the
 stage's configured sizes. Usage-priced items (egress, cache requests,
 logs) only accrue under load, which the load stack's own limit bounds.
 Each raise records that worst case, and a raise is refused when the
-day's recorded worst cases would pass $100.
+day's recorded worst cases would pass $150.
 
 ## Considered
 * **EKS first**: slower to raise, and resources Kubernetes creates

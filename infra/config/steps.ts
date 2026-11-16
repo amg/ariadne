@@ -15,21 +15,47 @@ type ServiceSize = {
 };
 
 /**
+ * Adds tasks sooner than holding the service near its CPU target would, and
+ * in larger leaps, when CPU rises steeply. It acts at the same target, and
+ * it never removes tasks.
+ */
+type QuickScaleOut = {
+  /** Minutes average CPU must stay at or above the target before tasks are added. */
+  afterMinutes: number;
+  /** Percent of the service's tasks added each time. */
+  addPercent: number;
+  /** The fewest tasks added each time. */
+  leastAdded: number;
+  /** Points of CPU above the target from which `steepAddPercent` is added instead. */
+  steepAbovePoints: number;
+  /** Percent of the service's tasks added each time once CPU is that far past the target. */
+  steepAddPercent: number;
+  /** Seconds before tasks are added again, unless CPU has risen into the steeper step. */
+  cooldownSeconds: number;
+};
+
+/**
  * How a service scales between its `count`, the floor, and `maxCount`.
  * The service scales on average CPU, memory, or both, toward the targets
  * given. A service without scaling runs exactly `count` tasks.
  */
 type ServiceScaling = {
   maxCount: number;
-  /** Average CPU use, 0 to 100, that scaling holds the service near. */
-  targetCpuPercent?: number;
   /** Average memory use, 0 to 100, that scaling holds the service near. */
   targetMemoryPercent?: number;
   /** Seconds between removing tasks; 300 when omitted. */
   scaleInCooldown?: number;
   /** Seconds between adding tasks; 60 when omitted. */
   scaleOutCooldown?: number;
-};
+} & (
+  | {
+      /** Average CPU use, 0 to 100, that scaling holds the service near. */
+      targetCpuPercent: number;
+      /** Adds tasks sooner on a steep rise in CPU. */
+      quickScaleOut?: QuickScaleOut;
+    }
+  | { targetCpuPercent?: undefined; quickScaleOut?: undefined }
+);
 
 /** A service's size, with scaling when it may grow past `count`. */
 export type ServiceConfig = ServiceSize & { scaling?: ServiceScaling };
@@ -102,7 +128,8 @@ export type Step = {
      * Every sign-up and sign-in checks a deliberately slow password hash, about
      * four a second per vCPU (measured on smoke). Each step's auth handles its
      * ramp (users / rampSeconds) at about 60% busy; any less and sign-ins
-     * queue, and the run measures the queue.
+     * queue, and the run measures the queue. An auth that scales does so at
+     * its floor.
      */
     auth: ServiceConfig;
     mock: ServiceConfig;
@@ -145,7 +172,15 @@ export type Step = {
   signupOpen: boolean;
 };
 
-export type StepName = 'seed' | 'smoke' | 'step10' | 'scale10' | 'step50' | 'step100' | 'step-prod';
+export type StepName =
+  | 'seed'
+  | 'smoke'
+  | 'step10'
+  | 'scale10'
+  | 'step50'
+  | 'scale50'
+  | 'step100'
+  | 'step-prod';
 
 /**
  * A load generator is one Node process and uses one core, so many small
@@ -168,6 +203,20 @@ const GROWS_ON_ITS_OWN: Step['loadBalancer'] = { reservedCapacityUnits: null };
 
 /** Short, because a raise is billed by the minute. */
 const WARM_UP_HOLD_SECONDS = 120;
+
+/**
+ * Holding a service near its CPU target alone adds tasks only after three
+ * one-minute readings above it, a few at a time. Acting on the first reading,
+ * in larger leaps, adds them sooner on a steep rise.
+ */
+const QUICK_SCALE_OUT: QuickScaleOut = {
+  afterMinutes: 1,
+  addPercent: 50,
+  leastAdded: 2,
+  steepAbovePoints: 20,
+  steepAddPercent: 100,
+  cooldownSeconds: 60,
+};
 
 export const STEPS: Record<StepName, Step> = {
   seed: {
@@ -289,7 +338,7 @@ export const STEPS: Record<StepName, Step> = {
         cpu: 1024,
         memoryMiB: 2048,
         count: 2,
-        scaling: { maxCount: 6, targetCpuPercent: 65 },
+        scaling: { maxCount: 6, targetCpuPercent: 65, quickScaleOut: QUICK_SCALE_OUT },
       },
       worker: {
         cpu: 1024,
@@ -299,7 +348,8 @@ export const STEPS: Record<StepName, Step> = {
         scaling: {
           maxCount: 12,
           targetCpuPercent: 70,
-          scaleInCooldown: 180,
+          quickScaleOut: QUICK_SCALE_OUT,
+          scaleInCooldown: 60,
           scaleOutCooldown: 45,
         },
       },
@@ -307,7 +357,7 @@ export const STEPS: Record<StepName, Step> = {
         cpu: 2048,
         memoryMiB: 4096,
         count: 2,
-        scaling: { maxCount: 8, targetCpuPercent: 60 },
+        scaling: { maxCount: 8, targetCpuPercent: 60, quickScaleOut: QUICK_SCALE_OUT },
       },
       mock: { cpu: 512, memoryMiB: 1024, count: 1 },
       web: WEB,
@@ -373,6 +423,66 @@ export const STEPS: Record<StepName, Step> = {
     signupOpen: false,
   },
 
+  /**
+   * A rehearsal of production's scaling at step50's load, the size
+   * production is meant to carry. The API, worker and auth start at their
+   * floors and may grow to step50's fixed counts. The users arrive over 45
+   * minutes with nothing to warm the load balancer first, hold, and leave.
+   * The fixed parts are step50's.
+   */
+  scale50: {
+    name: 'scale50',
+    deploy: REPLACE_DEPLOY,
+    database: { instanceClass: 'r7g.4xlarge', storageGiB: 50, source: 'seedSnapshot' },
+    cache: { maxStorageGb: 5, maxEcpuPerSecond: 250_000 },
+    loadBalancer: GROWS_ON_ITS_OWN,
+    services: {
+      api: {
+        cpu: 1024,
+        memoryMiB: 2048,
+        count: 2,
+        scaling: { maxCount: 20, targetCpuPercent: 65, quickScaleOut: QUICK_SCALE_OUT },
+      },
+      worker: {
+        cpu: 1024,
+        memoryMiB: 2048,
+        count: 2,
+        jobConcurrency: STEP50_WORKER_JOBS_AT_ONCE,
+        scaling: {
+          maxCount: 40,
+          targetCpuPercent: 70,
+          quickScaleOut: QUICK_SCALE_OUT,
+          scaleInCooldown: 60,
+          scaleOutCooldown: 45,
+        },
+      },
+      auth: {
+        cpu: 2048,
+        memoryMiB: 4096,
+        count: 4,
+        scaling: { maxCount: 16, targetCpuPercent: 60, quickScaleOut: QUICK_SCALE_OUT },
+      },
+      mock: { cpu: 1024, memoryMiB: 2048, count: 6 },
+      web: WEB,
+    },
+    load: {
+      generators: 10,
+      generator: GENERATOR,
+      spot: true,
+      users: 50_000,
+      chattingShare: 0.2,
+      rampSeconds: 2_700,
+      holdSeconds: 1_200,
+      fallSeconds: 1_800,
+      warmUp: null,
+      thinkSeconds: 30,
+      egressGbPerHour: 8,
+      logsGbPerHour: 3,
+      requestMillionsPerHour: 3,
+    },
+    signupOpen: false,
+  },
+
   step100: {
     name: 'step100',
     deploy: REPLACE_DEPLOY,
@@ -422,7 +532,7 @@ export const STEPS: Record<StepName, Step> = {
         cpu: 512,
         memoryMiB: 1024,
         count: 2,
-        scaling: { maxCount: 8, targetCpuPercent: 65 },
+        scaling: { maxCount: 8, targetCpuPercent: 65, quickScaleOut: QUICK_SCALE_OUT },
       },
       // Queue work comes in bursts, so the worker adds tasks sooner and drops them sooner.
       worker: {
@@ -432,7 +542,8 @@ export const STEPS: Record<StepName, Step> = {
         scaling: {
           maxCount: 12,
           targetCpuPercent: 70,
-          scaleInCooldown: 180,
+          quickScaleOut: QUICK_SCALE_OUT,
+          scaleInCooldown: 60,
           scaleOutCooldown: 45,
         },
       },
@@ -440,7 +551,7 @@ export const STEPS: Record<StepName, Step> = {
         cpu: 1024,
         memoryMiB: 2048,
         count: 2,
-        scaling: { maxCount: 6, targetCpuPercent: 60 },
+        scaling: { maxCount: 6, targetCpuPercent: 60, quickScaleOut: QUICK_SCALE_OUT },
       },
       mock: { cpu: 256, memoryMiB: 512, count: 1 },
       web: WEB,

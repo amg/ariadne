@@ -143,6 +143,18 @@ describe('summarize', () => {
     });
   });
 
+  it('sums up the API requests in time that grows with their number, not its square', () => {
+    const line = appRequestWith({ route: '/api/events', durationMs: 2 });
+    const appRequests = Array.from({ length: 30_000 }, () => line);
+
+    const startedAt = performance.now();
+    const { app } = summarize(runDataWith({ appRequests }));
+    const tookMs = performance.now() - startedAt;
+
+    expect(app.requests?.byRoute['/api/events']?.count).toBe(30_000);
+    expect(tookMs).toBeLessThan(1_000);
+  });
+
   it('gives the worst of what the copies said of how loaded they were, and adds up the push bus failures', () => {
     const { app } = summarize(
       runDataWith({

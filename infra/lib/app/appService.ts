@@ -1,4 +1,5 @@
 import { Duration } from 'aws-cdk-lib';
+import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -99,35 +100,61 @@ export class AppService extends Construct {
       serviceConnectConfiguration: serviceConnectOf(props),
     });
 
-    const { scaling } = props.size;
-    if (scaling !== undefined) {
-      const taskCount = this.service.autoScaleTaskCount({
-        minCapacity: props.size.count,
-        maxCapacity: scaling.maxCount,
-      });
-      const cooldowns = {
-        scaleInCooldown: Duration.seconds(scaling.scaleInCooldown ?? 300),
-        scaleOutCooldown: Duration.seconds(scaling.scaleOutCooldown ?? 60),
-      };
-      if (scaling.targetCpuPercent !== undefined) {
-        taskCount.scaleOnCpuUtilization('CpuScaling', {
-          targetUtilizationPercent: scaling.targetCpuPercent,
-          ...cooldowns,
-        });
-      }
-      if (scaling.targetMemoryPercent !== undefined) {
-        taskCount.scaleOnMemoryUtilization('MemoryScaling', {
-          targetUtilizationPercent: scaling.targetMemoryPercent,
-          ...cooldowns,
-        });
-      }
-    }
+    scaleTaskCount({ service: this.service, size: props.size });
   }
 
   /** Lets `peer` open connections to this service's port. No-op if no port is declared. */
   acceptFrom(peer: ec2.IConnectable): void {
     if (this.port === 0) return;
     this.service.connections.allowFrom(peer, ec2.Port.tcp(this.port));
+  }
+}
+
+/**
+ * Lets the service's task count move between its floor and ceiling on the
+ * targets its scaling gives. A service without scaling keeps its count.
+ */
+function scaleTaskCount({ service, size }: { service: ecs.FargateService; size: ServiceConfig }) {
+  const { scaling } = size;
+  if (scaling === undefined) return;
+  const taskCount = service.autoScaleTaskCount({
+    minCapacity: size.count,
+    maxCapacity: scaling.maxCount,
+  });
+  const cooldowns = {
+    scaleInCooldown: Duration.seconds(scaling.scaleInCooldown ?? 300),
+    scaleOutCooldown: Duration.seconds(scaling.scaleOutCooldown ?? 60),
+  };
+  if (scaling.targetCpuPercent !== undefined) {
+    taskCount.scaleOnCpuUtilization('CpuScaling', {
+      targetUtilizationPercent: scaling.targetCpuPercent,
+      ...cooldowns,
+    });
+  }
+  if (scaling.quickScaleOut !== undefined) {
+    const { quickScaleOut } = scaling;
+    // Only adds tasks, so removing them stays with the target above. When
+    // both add, the one asking for more tasks wins.
+    taskCount.scaleOnMetric('CpuQuickScaleOut', {
+      metric: service.metricCpuUtilization({ period: Duration.minutes(1) }),
+      evaluationPeriods: quickScaleOut.afterMinutes,
+      scalingSteps: [
+        { lower: scaling.targetCpuPercent, change: quickScaleOut.addPercent },
+        {
+          lower: scaling.targetCpuPercent + quickScaleOut.steepAbovePoints,
+          change: quickScaleOut.steepAddPercent,
+        },
+      ],
+      adjustmentType: appscaling.AdjustmentType.PERCENT_CHANGE_IN_CAPACITY,
+      minAdjustmentMagnitude: quickScaleOut.leastAdded,
+      cooldown: Duration.seconds(quickScaleOut.cooldownSeconds),
+    });
+  }
+  if (scaling.targetMemoryPercent !== undefined) {
+    taskCount.scaleOnMemoryUtilization('MemoryScaling', {
+      targetUtilizationPercent: scaling.targetMemoryPercent,
+      ...cooldowns,
+    });
   }
 }
 

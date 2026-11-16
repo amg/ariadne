@@ -12,7 +12,7 @@ export const SIZED_FIXED_LINES = {
 } as const;
 
 /** The steps judged by lines that follow their size. */
-export const SIZED_STEPS: readonly string[] = ['step10', 'scale10', 'step50'];
+export const SIZED_STEPS: readonly string[] = ['step10', 'scale10', 'step50', 'scale50'];
 
 /** The percent of a step's users, and of its chatters, that must be held through the hold. */
 const HELD_PERCENT = 98;

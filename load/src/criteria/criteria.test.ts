@@ -121,10 +121,11 @@ describe('the sized steps’ limits', () => {
     expect(step10).toMatchObject(SIZED_FIXED_LINES);
   });
 
-  it('judge the scaling rehearsal by the lines of step10, which carries the same users', () => {
+  it('judge each scaling rehearsal by the lines of the fixed step that carries the same users', () => {
     expect(limitsFor('scale10', configOf(10_000, 0.2))).toEqual(
       limitsFor('step10', configOf(10_000, 0.2)),
     );
+    expect(limitsFor('scale50', configOf(50_000, 0.2))).toEqual(step50);
   });
 
   it('round a scaled line down, so that a whole number of users is asked', () => {

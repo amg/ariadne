@@ -205,6 +205,26 @@ describe('superviseStage', () => {
     ]);
   });
 
+  it('brings a replaced slice back no faster than the stage’s users arrived', async () => {
+    // Ten users arrive over 240 s, so the slice's five take 120 s to come back.
+    const test = setup({ rampSeconds: 240, holdSeconds: 1_000 });
+    const supervising = test.supervise();
+    await settle();
+
+    test.setClock(300);
+    test.find(1, 1).end({
+      how: 'stopped',
+      reason: 'interrupted',
+      detail: 'told to stop',
+      report: reportOf(1, 1, true),
+    });
+    await settle();
+
+    expect(test.find(1, 2).start).toMatchObject({ rampSeconds: 120, holdSeconds: 820 });
+    test.run.abort(new Error('test over'));
+    await expect(supervising).rejects.toThrow('test over');
+  });
+
   it('gives each generator the fall, and records its hold as ending where the fall begins', async () => {
     const test = setup({ rampSeconds: 5, holdSeconds: 295, fallSeconds: 100 });
     const supervising = test.supervise();

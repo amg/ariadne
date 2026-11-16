@@ -26,8 +26,8 @@ import { runCommand, runFolderOf, runIdOf } from './cli.ts';
  * home machine is not a stress target. The users are shared between several
  * generators, each on its own slice. A generator that stops before the
  * run's end, such as one killed by hand, is relaunched on the same slice:
- * its users come back over about a minute, and it holds only for the time
- * the run has left. Each generator's process id is printed as it starts.
+ * its users come back at the run's arrival rate, and it holds only for the
+ * time the run has left. Each generator's process id is printed as it starts.
  * The verdict names a lost slice and how long it was down.
  *
  * While it runs, the host is read from Glances (GLANCES_URL in the

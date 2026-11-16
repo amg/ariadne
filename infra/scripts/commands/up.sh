@@ -14,7 +14,7 @@
 # step keeps its images, run key and seed, and every later step is repeated.
 # To run changed code, take it down first.
 #
-# Steps: seed smoke step10 scale10 step50 step100
+# Steps: seed smoke step10 scale10 step50 scale50 step100
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/command.sh"
 
 main() {

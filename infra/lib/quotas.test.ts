@@ -107,7 +107,15 @@ describe('checking a step against the account’s quotas', () => {
   });
 
   it('fits every step that deploys by replacing, on the quotas the account has', () => {
-    for (const name of ['seed', 'smoke', 'step10', 'scale10', 'step50', 'step100'] as const) {
+    for (const name of [
+      'seed',
+      'smoke',
+      'step10',
+      'scale10',
+      'step50',
+      'scale50',
+      'step100',
+    ] as const) {
       assert.deepEqual(
         checkQuotas(stepNamed(name), { onDemand: 160, spot: 64 }),
         { fits: true },
