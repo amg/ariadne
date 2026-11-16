@@ -1,5 +1,5 @@
-/** How long a replacement takes to bring its users back, as real users return one by one after a blip. */
-const RECONNECT_SECONDS = 60;
+/** The shortest time a replacement takes to bring its users back. */
+const LEAST_RAMP_SECONDS = 60;
 
 /** With less than this left of the run, a replacement has nothing to show for its start. */
 const LEAST_WORTH_RELAUNCHING_SECONDS = 5;
@@ -7,8 +7,9 @@ const LEAST_WORTH_RELAUNCHING_SECONDS = 5;
 /**
  * The plan of a generator that replaces a lost one with `secondsLeft` of
  * the run to go, for a slice of `userCount` users in a run whose users
- * leave over its last `fallSeconds`. It brings its users back over about a
- * minute, holds, and lets them go over what is left of the fall, so that it
+ * leave over its last `fallSeconds`. It brings its users back no faster
+ * than the run's users arrived, as each signs in again, and over at least
+ * a minute. It holds, then lets them go over the rest of the fall, so that it
  * ends with the run. Near the end the whole of what remains is spent
  * bringing users back. A replacement whose fall begins after the run's has
  * brings back only the users who are still there when its fall begins: the
@@ -20,10 +21,14 @@ export function replacementPlan(input: {
   secondsLeft: number;
   fallSeconds: number;
   userCount: number;
+  usersPerSecond: number;
 }) {
-  const { secondsLeft, fallSeconds, userCount } = input;
+  const { secondsLeft, fallSeconds, userCount, usersPerSecond } = input;
   if (secondsLeft < LEAST_WORTH_RELAUNCHING_SECONDS) return null;
-  const rampSeconds = Math.min(RECONNECT_SECONDS, secondsLeft);
+  const rampSeconds = Math.min(
+    Math.max(LEAST_RAMP_SECONDS, userCount / usersPerSecond),
+    secondsLeft,
+  );
   const fallLeftSeconds = Math.min(fallSeconds, secondsLeft - rampSeconds);
   const lateInFall = fallLeftSeconds < fallSeconds;
   const usersLeft = lateInFall

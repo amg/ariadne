@@ -454,7 +454,8 @@ population once, On-Demand on larger tasks, unsupervised; it is not a load run a
   <path class="da" d="M330,270 C 400,298 640,298 678,262"/><text x="500" y="294" class="d">no</text>
 </svg>
 <figcaption>A slice whose generator ends early is replaced, not abandoned. The stage ends when the first generator's plan
-does, so a replacement only fills the time left. One replaced during the fall brings back only the users who have not
+does, so a replacement only fills the time left. Its users must all sign in again, so it brings them back no faster than
+the run's users arrived. One replaced during the fall brings back only the users who have not
 left by then, and lets them go on the fall's schedule. A run whose slice cannot be kept running is stopped as a whole,
 because a partial fleet would measure the wrong load.</figcaption>
 </figure>
@@ -611,12 +612,15 @@ on aws-prod and on cubi.</p>
   rebuild reads each one's running tasks through the watch after the run. The verdict shows its floor and ceiling, its
   peak and when it was back at its floor, and fails the run when one is still above its floor at the end of the watch.</li>
   <li><b>Gaps are explicit.</b> A slice that was down, or a source that went silent, is named with its window. It is never
-  filled or averaged over. The windows come from the manifest, and every reader leaves out the same ones: a slice's own
+  filled or averaged over. The windows come from the manifest. One a replacement ended runs on until the replacement had
+  every user signed in again, if it ever did, because a user whose sign-in keeps failing is not back. Every reader leaves out the same ones: a slice's own
   requests inside its down window, and the minutes it was down, are left out of the criteria and the cross-checks rather
   than failing them.</li>
   <li><b>Cross-checks.</b> The generators' answered requests are set against the load balancer's per-minute answer counts,
   and their errors against its error counts. The balancer counts a request in the minute it ends, so the generators'
-  requests are counted by the minute they ended in. The API's exchange lines are set against the generators' chats: replies
+  requests are counted by the minute they ended in. A push stream that broke off may be in the balancer's count or not: it
+  counts the streams of a task that was stopping, and misses those cut while it grows itself. So a minute agrees when the
+  balancer's count lies between the generators' count without those streams and with them. The API's exchange lines are set against the generators' chats: replies
   that streamed against exchanges that sent a first token, and paused chats against paused exchanges. A mismatch beyond
   tolerance makes the verdict <i>incomplete</i>, because one of the two records cannot be trusted. Through CloudFront, the
   server errors the edge gave itself, because it could not reach the load balancer or waited on it too long, are taken out

@@ -23,6 +23,7 @@ import {
 } from '../../records/index.ts';
 import type { RunData, Trouble } from '../types.ts';
 import { splitAtRunEnd } from './afterRun.ts';
+import { downUntilUsersBack } from './usersBack.ts';
 
 /** A run's manifest is missing: the run was never sealed, so there is nothing to rebuild from. */
 class RunNotSealed extends Error {}
@@ -34,7 +35,8 @@ type Read<Records> = { records: Records | null; trouble: readonly Trouble[] };
  * Reads a sealed run folder. Only files the manifest lists are used, and
  * a file that no longer matches its checksum is set aside, because raw
  * files do not change after sealing. A run folder of a schema version this
- * reader does not know is refused, not guessed at.
+ * reader does not know is refused, not guessed at. Each slice is down until
+ * its users were back, which can be later than the manifest says.
  */
 export function loadRun(folder: string): RunData {
   const manifestFile = join(folder, LAYOUT.manifest);
@@ -47,11 +49,14 @@ export function loadRun(folder: string): RunData {
     readLines(path, kind, files.usable);
 
   const events = lines(LAYOUT.events, eventRecords);
-  const slices = manifest.slices.map((slice) => ({
-    slice,
-    requests: lines(LAYOUT.requests(slice.generator), requestRecords),
-    states: lines(LAYOUT.generatorState(slice.generator), stateRecords),
-  }));
+  const slices = manifest.slices.map((slice) => {
+    const states = lines(LAYOUT.generatorState(slice.generator), stateRecords);
+    return {
+      slice: downUntilUsersBack({ slice, states: states.records, events: events.records }),
+      requests: lines(LAYOUT.requests(slice.generator), requestRecords),
+      states,
+    };
+  });
   const host = lines(LAYOUT.hostSamples, hostSampleRecords);
   const exchanges = lines(LAYOUT.exchanges, exchangeRecords);
   const jobs = lines(LAYOUT.jobs, jobRecords);
@@ -71,7 +76,7 @@ export function loadRun(folder: string): RunData {
   });
 
   return {
-    manifest,
+    manifest: { ...manifest, slices: slices.map(({ slice }) => slice) },
     events: events.records,
     slices: slices.map(({ slice, requests, states }) => ({
       slice,

@@ -564,23 +564,38 @@ describe('crossCheckLoadBalancer, the minutes the generators carried the load', 
 });
 
 describe('crossCheckLoadBalancer, push streams that broke off', () => {
-  it('leaves a stream that broke off out of the generators’ count, as the load balancer never counts it, and says how many', () => {
-    const isBrokenOff = Array.from({ length: 40 }, (_, user) =>
-      requestWith({
-        kind: 'push',
-        user,
-        startedAt: '2026-10-15T00:00:30.000Z',
-        totalMs: 45_000,
-        status: 200,
-        outcome: 'failed',
-      }),
-    );
+  const isBrokenOff = Array.from({ length: 40 }, (_, user) =>
+    requestWith({
+      kind: 'push',
+      user,
+      startedAt: '2026-10-15T00:00:30.000Z',
+      totalMs: 45_000,
+      status: 200,
+      outcome: 'failed',
+    }),
+  );
+  const perMinuteWhenBalancerSaw = (count: number) =>
+    balancerChecks(
+      awsRun([...sent(MINUTE_1, 100), ...isBrokenOff], [{ minute: MINUTE_1, count }]),
+    )[0];
 
-    const [perMinute] = balancerChecks(
-      awsRun([...sent(MINUTE_1, 100), ...isBrokenOff], [{ minute: MINUTE_1, count: 100 }]),
-    );
+  it('agrees when the load balancer missed the streams that broke off, and says how many there were', () => {
+    const perMinute = perMinuteWhenBalancerSaw(100);
 
     expect(perMinute).toMatchObject({ result: 'agree', generators: 100, other: 100 });
     expect(perMinute?.detail).toContain('40 push streams that broke off');
+  });
+
+  it('agrees when the load balancer counted them, as it does for streams a stopping task closed', () => {
+    expect(perMinuteWhenBalancerSaw(140)?.result).toBe('agree');
+    expect(perMinuteWhenBalancerSaw(120)?.result).toBe('agree');
+  });
+
+  it('calls it a mismatch when the load balancer counted more than the streams that broke off explain', () => {
+    expect(perMinuteWhenBalancerSaw(150)?.result).toBe('mismatch');
+  });
+
+  it('calls it a mismatch when the load balancer counted fewer answers than the generators got', () => {
+    expect(perMinuteWhenBalancerSaw(90)?.result).toBe('mismatch');
   });
 });

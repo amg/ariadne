@@ -64,9 +64,13 @@ type Counted = { answered: number; serverErrors: number; clientErrors: number };
  * compared, because thousands of push streams that close together at the
  * end of the hold can land either side of a minute's edge. Minutes in which
  * a slice was down are left out of both sides. The detail says how many
- * minutes each rule left out. Push streams that broke off are left out of
- * the generators' side, because the load balancer never counts them, and
- * the detail says how many.
+ * minutes each rule left out. A push stream that broke off may or may not be
+ * in the load balancer's count. The load balancer counts one it closed
+ * because the task behind it was stopping, and misses one that broke off at
+ * the load balancer itself. So a minute agrees when the load balancer's
+ * count lies between the generators' count without those streams and the
+ * count with them. The generators' totals leave them out, and the detail
+ * says how many there were.
  */
 export function crossCheckLoadBalancer(
   table: MinuteTable,
@@ -120,6 +124,7 @@ export function crossCheckLoadBalancer(
       counted: generators?.(index) ?? NOTHING,
       givenByEdge: givenByEdge(index),
     }),
+    brokenOffStreams: cut[index] ?? 0,
     balancer: balancer(index),
   }));
   const total = (side: 'generators' | 'balancer', count: keyof Counted): number =>
@@ -215,19 +220,25 @@ const sum = (counts: readonly number[]) => counts.reduce((total, count) => total
 /** Every minute must agree with the load balancer; the mismatch names the worst. */
 function compareMinutes(
   what: string,
-  minutes: readonly { minute: string; generators: Counted; balancer: Counted }[],
+  minutes: readonly {
+    minute: string;
+    generators: Counted;
+    brokenOffStreams: number;
+    balancer: Counted;
+  }[],
   leftOut: string,
 ): CrossCheck {
   const apart = minutes
-    .map(({ minute, generators, balancer }) => ({
+    .map(({ minute, generators, brokenOffStreams, balancer }) => ({
       minute,
       generators: generators.answered,
       balancer: balancer.answered,
-    }))
-    .map((counts) => ({
-      ...counts,
-      difference: Math.abs(counts.generators - counts.balancer),
-      allowed: allowedDifference(Math.max(counts.generators, counts.balancer)),
+      difference: Math.max(
+        generators.answered - balancer.answered,
+        balancer.answered - (generators.answered + brokenOffStreams),
+        0,
+      ),
+      allowed: allowedDifference(Math.max(generators.answered, balancer.answered)),
     }))
     .filter(({ difference, allowed }) => difference > allowed);
   const worst = apart.reduce<(typeof apart)[number] | null>(
@@ -304,11 +315,11 @@ function outsideLoadText(count: number) {
     : `left out as a generator starting or its users stopping: ${count} minute${count === 1 ? '' : 's'}`;
 }
 
-/** The push streams that broke off in the minutes compared, left out of the generators' count; empty when none did. */
+/** The push streams that broke off in the minutes compared, which the load balancer may or may not have counted; empty when none did. */
 function brokeOffText(count: number) {
   return count === 0
     ? ''
-    : `left out as never completed at the load balancer: ${count} push stream${count === 1 ? '' : 's'} that broke off`;
+    : `in the load balancer's count or not: ${count} push stream${count === 1 ? '' : 's'} that broke off`;
 }
 
 /** The server errors the edge gave itself in the minutes compared, left out of the generators' count; empty when it gave none. */

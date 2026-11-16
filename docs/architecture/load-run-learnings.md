@@ -37,6 +37,17 @@ rise, and was back at 2 three minutes after the run ended. Two API tasks
 carried the whole hold at 62% CPU at most, under their 65% target, and
 auth never left 2.
 
+Scale50 holds through CloudFront but does not pass yet:
+`20261116T002004Z-scale50-load`. 50,000 users rose over 45 minutes,
+held for 20 and left over 30. Every service scaled: the API to 13 tasks,
+the worker to 19 and auth to 8. Once the run is judged with a slice
+down until its users had signed in again, every criterion passes. At the
+fewest, 49,995 push streams and 10,000 chatters were open, chat first
+byte p95 was 922 ms, and 0.02% of sign-ins failed. It still fails on
+two checks that are not about users: the API was 2 min 42 s late back to
+its floor, and the load balancer counted 3,675 requests against the
+generators' 6,723 in the minute it grew.
+
 ## What strained, and the fix
 
 **Too few jobs ran at once.** The first step50 run queued jobs while
@@ -111,8 +122,40 @@ at 66 to 92% CPU while the average stayed at 27 to 30%
 (`20261102T001256Z`). Fixed by reaching auth through ECS Service Connect,
 which spreads requests over every auth task. On scale10 the busiest of
 the two tasks stayed within 8 points of the average, apart from the
-first minute of sign-ins (`20261114T100754Z`). Auth never scaled there,
-so whether a new auth task takes its share is not yet seen.
+first minute of sign-ins (`20261114T100754Z`).
+
+**A replacement generator signed its whole slice in at once.** Spot
+took a generator during scale50's rise. Its replacement signed 5,000
+users in over one minute, about five times the run's own arrival rate
+and more than its 4 auth tasks could check. For five minutes 95 to 99.8% of sign-ins failed with a 500
+after 15 s, and the users' retries kept auth busy until all 5,000 were
+in (`20261116T002004Z`). Fixed by bringing a replaced slice back no
+faster than the run's users arrived.
+
+**The verdict counted a replaced slice as back too early.** It took the
+slice as back once its replacement's ramp was over, while most of its
+users were still failing to sign in, and it read the hold's fewest push
+streams, 46,623, 19 ms later (`20261116T002004Z`). Fixed by keeping a
+slice down until its replacement has every user signed in again. A
+slice that never gets them all back is judged as before.
+
+**The per-minute request check missed streams the load balancer
+closed.** Each time the API scaled in, the load balancer counted the
+push streams of the stopped task as answered, 11,848 in one minute
+(`20261116T002004Z`). The check had assumed it never counts a stream
+that broke off, and it does miss those cut while the load balancer
+grows. A minute now agrees when the load balancer's count lies between
+the generators' count without those streams and the count with them.
+
+**Checkpoints stall the database at scale50.** Job waits reached 7 to
+13.5 s at three moments of the hold and the fall. In the minute after
+each, log write waits rose to between 26 and 58 sessions, against 2 to
+7 otherwise. The worst stall made 1,977 chats give up waiting for the
+gate. The database wrote 50 GB of log, 14 of its 19 checkpoints came
+from the log filling, and 2.58 million log records were whole pages
+(`20261116T002004Z`). Log compression is on from the next run. That the
+stalls are checkpoints, and that compression shortens them, are both
+guesses until that run.
 
 **The quota check counted a deploy surge** that a first raise never uses.
 Fixed by giving each step its own deploy policy.
@@ -177,12 +220,23 @@ up only one or two jobs per look.
   worker CPU crossed its 70% target at 10:29 and peaked at 85%, and the
   third task was asked for at 10:34:48. Meanwhile job wait p95 rose from
   about 120 to 308 ms, and fell back once the task ran
-  (`20261114T100754Z`). Users were still far inside the limits, but
-  50,000 users rising over 45 minutes arrive about three times faster.
-- **API and auth scaling have not been seen.** Neither reached its
-  target on scale10, so no task was added or removed. Whether removing
-  an API task cuts push streams, and whether a new auth task takes
-  sign-ins, is still unmeasured (`20261114T100754Z`).
+  (`20261114T100754Z`). On scale50 it took about 3 minutes, and chat
+  first byte p95 reached 3.4 s while the new tasks started
+  (`20261116T002004Z`).
+- **The API scales past its need and back in during the hold.** On
+  scale50 it went to 13 tasks while its CPU was near 50%, under its 65%
+  target, then removed three during the hold. Each removed task cut its
+  push streams, up to 11,848 at once, and all reopened within 10 s.
+  Streams stay on the task they opened on, so the first two tasks
+  carried about 12,000 each and later ones 1,800 to 6,700. It scales in
+  one task every 6 minutes, too slowly to reach its floor within the
+  30-minute watch (`20261116T002004Z`).
+- **A new auth task did not take a hot task's load.** In the sign-in
+  burst one auth task stayed at 98% CPU while the average fell to 26%,
+  and four more tasks did not bring it down (`20261116T002004Z`).
+  Whether the hot task was still checking passwords for requests the API
+  had already given up on is a guess. The run does not record CPU or
+  requests per auth task.
 - **Spend writers wait on each other at step50.** Row lock waits
   averaged 3.9 sessions over the hold, against none on step10, and rose
   from 3.0 in its first half to 4.8 in its second (`20261102T001256Z`).
