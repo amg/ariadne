@@ -52,6 +52,8 @@ export class Database extends Construct {
           // bursts reached the storage's write limit. In MB and seconds.
           max_wal_size: '8192',
           checkpoint_timeout: '900',
+          // Compresses those whole pages, so the log fills more slowly.
+          wal_compression: 'lz4',
         },
       }),
     };

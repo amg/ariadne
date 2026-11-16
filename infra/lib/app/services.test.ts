@@ -376,14 +376,15 @@ describe('the API’s health check', () => {
 
 describe('the database’s checkpoints', () => {
   for (const name of ['smoke', 'scale50', 'step-prod']) {
-    it(`keep 8 GB of log and at most 15 minutes between them on ${name}`, () => {
+    it(`keep 8 GB of compressed log and at most 15 minutes between them on ${name}`, () => {
       const groups = Object.values(appTemplateOf(name).findResources('AWS::RDS::DBParameterGroup'));
 
       assert.equal(groups.length, 1);
-      const { max_wal_size, checkpoint_timeout } = groups[0]?.Properties.Parameters ?? {};
+      const { max_wal_size, checkpoint_timeout, wal_compression } =
+        groups[0]?.Properties.Parameters ?? {};
       assert.deepEqual(
-        { max_wal_size, checkpoint_timeout },
-        { max_wal_size: '8192', checkpoint_timeout: '900' },
+        { max_wal_size, checkpoint_timeout, wal_compression },
+        { max_wal_size: '8192', checkpoint_timeout: '900', wal_compression: 'lz4' },
       );
     });
   }
