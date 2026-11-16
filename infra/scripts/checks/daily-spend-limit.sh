@@ -1,6 +1,8 @@
 # The daily worst-case ledger. AWS billing lags by hours, so every raise
 # and load run records the most it could cost before the safety net
 # deletes it, and one that would take the day past the limit is refused.
+# A raise is refused too when one load run after it would pass the limit,
+# so the refusal comes before the raise is built, not after.
 #
 # A load run that does not run its whole plan, because it was interrupted
 # or failed, is released: it stays in the ledger, marked, but no longer
@@ -14,8 +16,11 @@ claim_budget() { # <step> <raise|load>
   local step="$1" kind="$2"
   step "Budget: worst case of this $kind"
 
-  local cost ledger key spent released total at
+  local cost load_cost=0 ledger key spent released total with_load at
   cost="$(cd "$INFRA_DIR" && npx --no-install tsx bin/worstCase.ts "$step" "$kind")"
+  if [[ "$kind" == raise ]] && ((STEP_GENERATORS > 0)); then
+    load_cost="$(cd "$INFRA_DIR" && npx --no-install tsx bin/worstCase.ts "$step" load)"
+  fi
   key="ledger/$(date -u +%F).json"
   ledger="$(mktemp)"
   aws s3 cp "s3://$(vault_bucket)/$key" "$ledger" --quiet 2>/dev/null || echo '[]' >"$ledger"
@@ -23,12 +28,19 @@ claim_budget() { # <step> <raise|load>
   spent="$(jq '[.[] | select(.released == null) | .worstCaseUsd] | add // 0' "$ledger")"
   released="$(jq '[.[] | select(.released != null) | .worstCaseUsd] | add // 0' "$ledger")"
   total="$(jq -n "($spent + $cost) * 100 | round / 100")"
+  with_load="$(jq -n "($total + $load_cost) * 100 | round / 100")"
   info "today so far \$$spent + this $kind \$$cost = \$$total (limit \$$DAILY_WORST_CASE_LIMIT_USD)"
+  if jq -e -n "$load_cost > 0" >/dev/null; then
+    info "+ one load run after it \$$load_cost = \$$with_load"
+  fi
   if jq -e -n "$released > 0" >/dev/null; then
     info "not counted: \$$released claimed by load runs that ended early, which may still have cost up to that"
   fi
   if jq -e -n "$total > $DAILY_WORST_CASE_LIMIT_USD" >/dev/null; then
     fail "Refused: today's recorded worst cases would pass the daily limit"
+  fi
+  if jq -e -n "$with_load > $DAILY_WORST_CASE_LIMIT_USD" >/dev/null; then
+    fail "Refused: a load run after this raise would pass the daily limit"
   fi
 
   at="$(date -u +%FT%TZ)"

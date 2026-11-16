@@ -88,7 +88,8 @@ scripts/aws-prod reset-budget  # clear today's worst-case ledger by hand
 `scripts/aws-prod <command> --help` shows a command's usage. Every command
 also runs on its own as `scripts/commands/<command>.sh`.
 
-A raise is refused when the day's recorded worst cases would pass $100. A
+A raise is refused when the day's recorded worst cases, with the raise and
+one load run after it, would pass $150. A
 load run that does not run its whole plan, because it was interrupted or
 failed, stops counting toward that limit; the ledger still lists it, since it
 may have cost something. `reset-budget` clears the day by hand. And
